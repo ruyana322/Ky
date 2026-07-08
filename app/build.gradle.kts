@@ -9,7 +9,20 @@ android {
     compileSdk = 35
     ndkVersion = "27.0.12077973"
 
-    defaultConfig {
+    defaultConfig {        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DANDROID_TOOLCHAIN=clang"
+                )
+            }
+        }
+
         applicationId = "com.d4nzxml.kythera"
         minSdk = 24
         targetSdk = 35
