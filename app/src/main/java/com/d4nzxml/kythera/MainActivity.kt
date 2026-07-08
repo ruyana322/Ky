@@ -56,12 +56,12 @@ val bottomNavItems = listOf(
 
 val drawerItems = listOf(
     Triple(Icons.Rounded.GridView,      "Dashboard",   0),
-    Triple(Icons.Rounded.Image,         "Photo Enhance", 6),
     Triple(Icons.Rounded.SwapHoriz,     "Converter",   1),
     Triple(Icons.Rounded.Compress,      "Compress",    2),
     Triple(Icons.Rounded.Edit,          "Patch Video", 3),
     Triple(Icons.Rounded.History,       "History",     4),
-    Triple(Icons.Rounded.Settings,      "Pengaturan",  5),
+    Triple(Icons.Rounded.Image,         "Photo Enhance", 5),
+    Triple(Icons.Rounded.Settings,      "Pengaturan",  6),
 )
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ fun KytheraShell() {
             },
             bottomBar = {
                 KytheraBottomNav(
-                    currentIndex = if (currentIndex > 4) 0 else currentIndex,
+                    currentIndex = if (currentIndex > 4) -1 else currentIndex,
                     onTap = { currentIndex = it }
                 )
             }
@@ -113,7 +113,8 @@ fun KytheraShell() {
                         2    -> CompressScreen()
                         3    -> PatchScreen()
                         4    -> HistoryScreen()
-                        5    -> SettingsScreen()
+                        5    -> EnhanceScreen()
+                        6    -> SettingsScreen()
                         else -> DashboardScreen(onNavigate = { currentIndex = it })
                     }
                 }
@@ -125,7 +126,7 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Pengaturan")
+    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Pengaturan")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -135,7 +136,6 @@ fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Logo
         Box(
             Modifier.size(30.dp).clip(RoundedCornerShape(8.dp))
                 .background(
@@ -153,7 +153,6 @@ fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
             color = KColor.Text3, fontSize = 12.sp
         )
         Spacer(Modifier.width(12.dp))
-        // Status dot
         Box(
             Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape)
                 .background(KColor.Accent3)
@@ -211,7 +210,6 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
         drawerContainerColor = KColor.Surface,
         modifier = Modifier.width(280.dp)
     ) {
-        // Header
         Column(
             Modifier
                 .fillMaxWidth()
@@ -233,10 +231,9 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
             ) { Icon(Icons.Rounded.Bolt, null, tint = Color.Black, modifier = Modifier.size(24.dp)) }
             Spacer(Modifier.height(12.dp))
             Text("Kythera Tools", color = KColor.Text, fontWeight = FontWeight.W800, fontSize = 18.sp)
-            Text("by D4nzxml · JGC", color = KColor.Text3, fontSize = 11.sp)
+            Text("Developer by D4nzxml", color = KColor.Text3, fontSize = 11.sp)
         }
 
-        // Nav items
         Spacer(Modifier.height(8.dp))
         drawerItems.forEach { (icon, label, index) ->
             val isActive = currentIndex == index
@@ -266,7 +263,6 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
         }
 
         Spacer(Modifier.weight(1f))
-        // Footer
         Box(
             Modifier.fillMaxWidth()
                 .border(1.dp, KColor.Border, androidx.compose.ui.graphics.RectangleShape)
