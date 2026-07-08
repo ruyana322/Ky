@@ -22,28 +22,50 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      # 2. JURUS OTOMATIS: BIKIN GRADLEW KALAU KOSONG
+      # 2. BIKIN GRADLEW KALAU KOSONG (Kompensasi Kimi)
       - name: Siapin Mesin Gradlew
         run: |
           if [ ! -f "gradlew" ]; then
-            echo "File gradlew nggak ketemu dari ZIP, mari kita bikin otomatis!"
+            echo "File gradlew nggak ketemu, mari kita bikin!"
             gradle wrapper
           fi
           chmod +x ./gradlew
 
-      # 3. SUNTIK SAKLAR ANDROIDX (INI OBATNYA!)
+      # 3. SUNTIK SAKLAR ANDROIDX
       - name: Aktifin Saklar AndroidX
         run: |
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
-          # Sekalian matiin warning SDK 35 biar log-nya bersih
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
 
-      # 4. GEBER RAKIT APK RELEASE!
+      # 4. BUKA GUDANG SONATYPE (OBAT KANGEN FFMPEG!)
+      - name: Suntik Gudang Sonatype
+        run: |
+          python3 -c '
+          import os
+          # Cari file settings.gradle atau settings.gradle.kts bawaan Claude
+          for file in ["settings.gradle", "settings.gradle.kts"]:
+              if os.path.exists(file):
+                  with open(file, "r") as f: c = f.read()
+                  
+                  # Paksa robot nurut sama settingan ini
+                  c = c.replace("FAIL_ON_PROJECT_REPOS", "PREFER_SETTINGS")
+                  
+                  # Suntik alamat Sonatype
+                  if "sonatype" not in c:
+                      if file.endswith(".kts"):
+                          c = c.replace("mavenCentral()", "mavenCentral()\n        maven { url = uri(\"https://s01.oss.sonatype.org/content/repositories/releases/\") }\n        maven { url = uri(\"https://jitpack.io\") }")
+                      else:
+                          c = c.replace("mavenCentral()", "mavenCentral()\n        maven { url \"https://s01.oss.sonatype.org/content/repositories/releases/\" }\n        maven { url \"https://jitpack.io\" }")
+                  
+                  with open(file, "w") as f: f.write(c)
+          '
+
+      # 5. GEBER RAKIT APK RELEASE!
       - name: Rakit APK Release (Native)
         run: ./gradlew assembleRelease --no-daemon
 
-      # 5. UPLOAD HASILNYA
+      # 6. UPLOAD HASILNYA
       - name: Upload Hasil APK
         uses: actions/upload-artifact@v4
         with:
