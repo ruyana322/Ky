@@ -22,11 +22,11 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      # 2. BIKIN GRADLEW KALAU KOSONG (Kompensasi Kimi)
+      # 2. BIKIN GRADLEW KALAU KOSONG
       - name: Siapin Mesin Gradlew
         run: |
           if [ ! -f "gradlew" ]; then
-            echo "File gradlew nggak ketemu, mari kita bikin!"
+            echo "File gradlew nggak ketemu, mari kita bikin otomatis!"
             gradle wrapper
           fi
           chmod +x ./gradlew
@@ -38,28 +38,10 @@ jobs:
           echo "android.enableJetifier=true" >> gradle.properties
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
 
-      # 4. BUKA GUDANG SONATYPE (OBAT KANGEN FFMPEG!)
-      - name: Suntik Gudang Sonatype
+      # 4. FIX TEMA JADUL BAWAAN CLAUDE (INI OBATNYA!)
+      - name: Hapus Tema Jadul
         run: |
-          python3 -c '
-          import os
-          # Cari file settings.gradle atau settings.gradle.kts bawaan Claude
-          for file in ["settings.gradle", "settings.gradle.kts"]:
-              if os.path.exists(file):
-                  with open(file, "r") as f: c = f.read()
-                  
-                  # Paksa robot nurut sama settingan ini
-                  c = c.replace("FAIL_ON_PROJECT_REPOS", "PREFER_SETTINGS")
-                  
-                  # Suntik alamat Sonatype
-                  if "sonatype" not in c:
-                      if file.endswith(".kts"):
-                          c = c.replace("mavenCentral()", "mavenCentral()\n        maven { url = uri(\"https://s01.oss.sonatype.org/content/repositories/releases/\") }\n        maven { url = uri(\"https://jitpack.io\") }")
-                      else:
-                          c = c.replace("mavenCentral()", "mavenCentral()\n        maven { url \"https://s01.oss.sonatype.org/content/repositories/releases/\" }\n        maven { url \"https://jitpack.io\" }")
-                  
-                  with open(file, "w") as f: f.write(c)
-          '
+          find app/src/main -type f -name "*.xml" -exec sed -i 's/Theme\.Material\.NoTitleBar/Theme.DeviceDefault.NoActionBar/g' {} +
 
       # 5. GEBER RAKIT APK RELEASE!
       - name: Rakit APK Release (Native)
