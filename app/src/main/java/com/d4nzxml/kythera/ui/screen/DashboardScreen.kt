@@ -141,14 +141,15 @@ private fun HeroCard(onNavigate: (Int) -> Unit) {
                     Icon(Icons.Rounded.CameraAlt, null, tint = KColor.Text2, modifier = Modifier.size(24.dp).clickable {
                         context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.instagram.com/dadanpeople")))
                     })
-                    Icon(Icons.Rounded.Telegram, null, tint = KColor.Text2, modifier = Modifier.size(24.dp).clickable {
-                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://t.me/kytheraa_123")))
-                    })
-                }
-            }
-        }
-    }
-}
+                                        Icon(
+                        Icons.Rounded.Send, // <== DIGANTI JADI SEND (Pesawat Kertas)
+                        null, 
+                        tint = KColor.Text2, 
+                        modifier = Modifier.size(24.dp).clickable {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://t.me/kytheraa_123")))
+                        }
+                    )
+
 
 @Composable
 private fun StatCard(modifier: Modifier, value: String, label: String, delta: String, icon: ImageVector, iconColor: Color) {
