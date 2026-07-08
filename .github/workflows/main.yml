@@ -29,11 +29,13 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      - name: Aktifin Saklar AndroidX
+      # SUNTIKAN DOPING RAM ADA DI SINI
+      - name: Aktifin Saklar & Doping RAM
         run: |
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" >> gradle.properties
 
       - name: Basmi Tema Jadul Claude
         run: |
@@ -49,7 +51,6 @@ jobs:
                           with open(filepath, "w") as f: f.write(c)
           '
 
-      # INI DIA JURUS SELUNDUPANNYA KANG!
       - name: Download Mentahan FFmpeg Raja Terakhir
         run: |
           mkdir -p app/libs
