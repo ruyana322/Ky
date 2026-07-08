@@ -31,14 +31,21 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # 3. GEBER RAKIT APK RELEASE!
+      # 3. SUNTIK SAKLAR ANDROIDX (INI OBATNYA!)
+      - name: Aktifin Saklar AndroidX
+        run: |
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+          # Sekalian matiin warning SDK 35 biar log-nya bersih
+          echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
+
+      # 4. GEBER RAKIT APK RELEASE!
       - name: Rakit APK Release (Native)
         run: ./gradlew assembleRelease --no-daemon
 
-      # 4. UPLOAD HASILNYA
+      # 5. UPLOAD HASILNYA
       - name: Upload Hasil APK
         uses: actions/upload-artifact@v4
         with:
           name: Kythera-Tools-Native-APK
-          # Path standar Android Studio buat naruh hasil APK
           path: app/build/outputs/apk/release/*.apk
