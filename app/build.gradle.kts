@@ -87,7 +87,7 @@ dependencies {
 
     // === SUNTIK MESIN FFMPEG "RAJA TERAKHIR" (FULL-GPL) ===
     // Bawa semua codec H.264 (libx264), H.265, dll.
-    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2.LTS")
+    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2.")
     // ======================================================
 
     implementation(libs.coil.compose)
