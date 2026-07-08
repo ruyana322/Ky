@@ -11,55 +11,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Tarik Kode dari Repo
+      - name: Checkout Repo
         uses: actions/checkout@v4
 
-      # 1. SIAPIN MESIN JAVA 17
-      - name: Siapin Java 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
           cache: 'gradle'
 
-      # 2. BIKIN GRADLEW KALAU KOSONG
-      - name: Siapin Mesin Gradlew
+      # Fix themes.xml SEBELUM gradle jalan — ini yang selama ini kebalik
+      - name: Fix themes.xml
+        run: |
+          cat > app/src/main/res/values/themes.xml << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.KytheraTools" parent="Theme.AppCompat.NoActionBar">
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/black</item>
+              </style>
+          </resources>
+          XML
+
+      - name: Setup Gradle Wrapper
         run: |
           if [ ! -f "gradlew" ]; then
-            echo "File gradlew nggak ketemu, mari kita bikin otomatis!"
-            gradle wrapper
+            gradle wrapper --gradle-version=8.7
           fi
           chmod +x ./gradlew
 
-      # 3. SUNTIK SAKLAR ANDROIDX
-      - name: Aktifin Saklar AndroidX
+      - name: Inject gradle.properties
         run: |
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m" >> gradle.properties
 
-      # 4. PYTHON PEMBASMI TEMA JADUL (DIJAMIN TEMBUS!)
-      - name: Basmi Tema Jadul Claude
-        run: |
-          python3 -c '
-          import os
-          for root, dirs, files in os.walk("app/src/main"):
-              for file in files:
-                  if file.endswith(".xml"):
-                      filepath = os.path.join(root, file)
-                      with open(filepath, "r") as f: content = f.read()
-                      if "Theme.Material.NoTitleBar" in content:
-                          print(f"Ketemu tema jadul di: {filepath}")
-                          content = content.replace("Theme.Material.NoTitleBar", "Theme.DeviceDefault.NoActionBar")
-                          with open(filepath, "w") as f: f.write(content)
-          '
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
-      # 5. GEBER RAKIT APK RELEASE!
-      - name: Rakit APK Release (Native)
-        run: ./gradlew assembleRelease --no-daemon
-
-      # 6. UPLOAD HASILNYA
-      - name: Upload Hasil APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Kythera-Tools-Native-APK
