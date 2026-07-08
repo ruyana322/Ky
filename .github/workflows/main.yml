@@ -11,48 +11,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
+      - name: Tarik Kode dari Repo
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Siapin Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
           cache: 'gradle'
 
-      # Fix themes.xml SEBELUM gradle jalan — ini yang selama ini kebalik
-      - name: Fix themes.xml
-        run: |
-          cat > app/src/main/res/values/themes.xml << 'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="Theme.KytheraTools" parent="Theme.AppCompat.NoActionBar">
-                  <item name="android:windowBackground">@android:color/black</item>
-                  <item name="android:statusBarColor">@android:color/transparent</item>
-                  <item name="android:navigationBarColor">@android:color/black</item>
-              </style>
-          </resources>
-          XML
-
-      - name: Setup Gradle Wrapper
+      - name: Siapin Mesin Gradlew
         run: |
           if [ ! -f "gradlew" ]; then
-            gradle wrapper --gradle-version=8.7
+            echo "Bikin gradlew otomatis..."
+            gradle wrapper
           fi
           chmod +x ./gradlew
 
-      - name: Inject gradle.properties
+      - name: Aktifin Saklar AndroidX
         run: |
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
-          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m" >> gradle.properties
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Basmi Tema Jadul Claude
+        run: |
+          python3 -c '
+          import os
+          for root, dirs, files in os.walk("app/src/main"):
+              for file in files:
+                  if file.endswith(".xml"):
+                      filepath = os.path.join(root, file)
+                      with open(filepath, "r") as f: c = f.read()
+                      if "Theme.Material.NoTitleBar" in c:
+                          c = c.replace("Theme.Material.NoTitleBar", "Theme.DeviceDefault.NoActionBar")
+                          with open(filepath, "w") as f: f.write(c)
+          '
 
-      - name: Upload APK
+      # INI DIA JURUS SELUNDUPANNYA KANG!
+      - name: Download Mentahan FFmpeg Raja Terakhir
+        run: |
+          mkdir -p app/libs
+          wget "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
+
+      - name: Rakit APK Release (Native)
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload Hasil APK
         uses: actions/upload-artifact@v4
         with:
           name: Kythera-Tools-Native-APK
