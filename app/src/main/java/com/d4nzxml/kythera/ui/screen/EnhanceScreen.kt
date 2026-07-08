@@ -136,7 +136,8 @@ fun EnhanceScreen() {
         // Animasi Loading pas GPU lagi kerja keras
         if (isProcessing) {
             Box(
-                modifier = Modifier.fillMaxSize().background(KColor.Background.copy(alpha = 0.85f)),
+                modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.85f)),
+
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
