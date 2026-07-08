@@ -234,8 +234,9 @@ fun KDropdownMenu(
             textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = KColor.Text2)
         )
         ExposedDropdownMenu(
-            expanded = expanded, onDismissRequest = { expanded = false },
-            containerColor = KColor.Surface2
+            expanded = expanded, 
+            onDismissRequest = { expanded = false }
+            // Parameter containerColor udah dihapus dari sini
         ) {
             items.forEach { item ->
                 DropdownMenuItem(
