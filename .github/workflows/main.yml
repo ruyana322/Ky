@@ -62,11 +62,17 @@ jobs:
           mv app/src/main/cpp/ncnn-20240102-android-vulkan app/src/main/cpp/ncnn
           rm ncnn.zip
 
-      - name: Siapin Model AI Real-ESRGAN
+            - name: Siapin Model AI Real-ESRGAN
         run: |
           mkdir -p app/src/main/assets/models
-          wget "https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip" -O models.zip
+          # INI LINK YANG BENER (Tanpa embel-embel -ncnn-vulkan di nama reponya)
+          wget "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip" -O models.zip
           unzip -j models.zip "models/realesrgan-x4plus.param" -d app/src/main/assets/models/
+          unzip -j models.zip "models/realesrgan-x4plus.bin" -d app/src/main/assets/models/
+          mv app/src/main/assets/models/realesrgan-x4plus.param app/src/main/assets/models/realesrgan.param
+          mv app/src/main/assets/models/realesrgan-x4plus.bin app/src/main/assets/models/realesrgan.bin
+          rm models.zip
+ "models/realesrgan-x4plus.param" -d app/src/main/assets/models/
           unzip -j models.zip "models/realesrgan-x4plus.bin" -d app/src/main/assets/models/
           mv app/src/main/assets/models/realesrgan-x4plus.param app/src/main/assets/models/realesrgan.param
           mv app/src/main/assets/models/realesrgan-x4plus.bin app/src/main/assets/models/realesrgan.bin
