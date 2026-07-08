@@ -85,10 +85,13 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.appcompat)
 
-    // === SUNTIK MESIN FFMPEG "RAJA TERAKHIR" (FULL-GPL) ===
-    // Bawa semua codec H.264 (libx264), H.265, dll.
-    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2")
-    // ======================================================
+        // Hapus kodingan download dari Maven sebelumnya
+    // dan GANTI PAKAI INI KANG:
+    implementation(files("libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar"))
+    
+    // Ini mesin pelengkap wajibnya (yang ini masih belum dihapus dari internet)
+    implementation("com.arthenica:smart-exception-java:0.2.1")
+
 
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
