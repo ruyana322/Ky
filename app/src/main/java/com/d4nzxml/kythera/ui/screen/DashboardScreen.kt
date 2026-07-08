@@ -6,11 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -23,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,11 +34,9 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(20.dp)
     ) {
-        // ── Hero Card ──────────────────────────────────────────────────────
         HeroCard(onNavigate = onNavigate)
         Spacer(Modifier.height(20.dp))
 
-        // ── Stats Grid ─────────────────────────────────────────────────────
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatCard(
                 modifier = Modifier.weight(1f),
@@ -69,13 +64,11 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
         }
         Spacer(Modifier.height(24.dp))
 
-        // ── Quick Tools ────────────────────────────────────────────────────
         KSectionHeader("Tools Cepat", Icons.Rounded.Bolt, KColor.Accent)
         Spacer(Modifier.height(14.dp))
         ToolGrid(onNavigate = onNavigate)
         Spacer(Modifier.height(24.dp))
 
-        // ── Recent Activity ────────────────────────────────────────────────
         GlassCard {
             Row(
                 Modifier.fillMaxWidth(),
@@ -100,9 +93,10 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
     }
 }
 
-// ─── Hero Card ────────────────────────────────────────────────────────────────
 @Composable
 private fun HeroCard(onNavigate: (Int) -> Unit) {
+    val context = LocalContext.current
+    
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -115,7 +109,7 @@ private fun HeroCard(onNavigate: (Int) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 KBadge("PRO", KColor.Accent)
                 Spacer(Modifier.width(10.dp))
-                Text("Selamat datang kembali", color = KColor.Text3, fontSize = 12.sp)
+                Text("Developer by D4nzxml", color = KColor.Text3, fontSize = 12.sp)
             }
             Spacer(Modifier.height(12.dp))
             Text("Kythera Tools", color = KColor.Text, fontSize = 30.sp, fontWeight = FontWeight.W800)
@@ -125,46 +119,44 @@ private fun HeroCard(onNavigate: (Int) -> Unit) {
                 color = KColor.Text2, fontSize = 13.sp, lineHeight = 20.sp
             )
             Spacer(Modifier.height(18.dp))
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 KPrimaryButton(
-                    label = "Mulai Proses",
-                    icon = Icons.Rounded.Bolt,
-                    onClick = { onNavigate(1) },
-                    modifier = Modifier.weight(1f)
+                    label = "Upload TikTok",
+                    icon = Icons.Rounded.Upload,
+                    onClick = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.tiktok.com/upload"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.weight(1.5f)
                 )
                 Spacer(Modifier.width(10.dp))
-                OutlinedButton(
-                    onClick = {},
+                Row(
                     modifier = Modifier.weight(1f).height(52.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = KColor.Text2),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, KColor.Border)
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Dokumentasi", fontSize = 13.sp)
+                    Icon(Icons.Rounded.OndemandVideo, null, tint = KColor.Text2, modifier = Modifier.size(24.dp).clickable {
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.tiktok.com/@dadanpeople")))
+                    })
+                    Icon(Icons.Rounded.CameraAlt, null, tint = KColor.Text2, modifier = Modifier.size(24.dp).clickable {
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.instagram.com/dadanpeople")))
+                    })
+                    Icon(Icons.Rounded.Telegram, null, tint = KColor.Text2, modifier = Modifier.size(24.dp).clickable {
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://t.me/kytheraa_123")))
+                    })
                 }
             }
         }
     }
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
 @Composable
-private fun StatCard(
-    modifier: Modifier,
-    value: String, label: String, delta: String,
-    icon: ImageVector, iconColor: Color
-) {
+private fun StatCard(modifier: Modifier, value: String, label: String, delta: String, icon: ImageVector, iconColor: Color) {
     GlassCard(modifier = modifier) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            Box(
-                Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
-                    .background(iconColor.copy(alpha = 0.1f)),
-                contentAlignment = Alignment.Center
-            ) { Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp)) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(iconColor.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { 
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp)) 
+            }
             Text(delta, color = KColor.Accent3, fontSize = 10.sp, fontWeight = FontWeight.W600)
         }
         Spacer(Modifier.height(10.dp))
@@ -173,23 +165,15 @@ private fun StatCard(
     }
 }
 
-// ─── Tool Grid ────────────────────────────────────────────────────────────────
-private data class ToolInfo(
-    val title: String, val desc: String,
-    val icon: ImageVector, val color: Color, val navIndex: Int
-)
+private data class ToolInfo(val title: String, val desc: String, val icon: ImageVector, val color: Color, val navIndex: Int)
 
 @Composable
 private fun ToolGrid(onNavigate: (Int) -> Unit) {
     val tools = listOf(
-        ToolInfo("Photo Enhance / HD", "Upscale foto hingga 4x dengan AI.",
-            Icons.Rounded.Image, KColor.Accent, 0),
-        ToolInfo("Converter Video", "Konversi antar format: MP4, AVI, MKV, MOV...",
-            Icons.Rounded.SwapHoriz, KColor.Accent2, 1),
-        ToolInfo("Compress Video", "Kurangi ukuran video hingga 90%.",
-            Icons.Rounded.Compress, KColor.Accent3, 2),
-        ToolInfo("Patch Video", "Patch metadata, inject watermark...",
-            Icons.Rounded.Edit, KColor.Orange, 3),
+        ToolInfo("Photo Enhance / HD", "Upscale foto hingga 4x dengan AI.", Icons.Rounded.Image, KColor.Accent, 5),
+        ToolInfo("Converter Video", "Konversi antar format: MP4, AVI, MKV, MOV...", Icons.Rounded.SwapHoriz, KColor.Accent2, 1),
+        ToolInfo("Compress Video", "Kurangi ukuran video hingga 90%.", Icons.Rounded.Compress, KColor.Accent3, 2),
+        ToolInfo("Patch Video", "Patch metadata, inject watermark...", Icons.Rounded.Edit, KColor.Orange, 3),
     )
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -212,30 +196,19 @@ private fun ToolCard(tool: ToolInfo, onTap: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(
-                if (isPressed) tool.color.copy(0.05f) else KColor.Surface2.copy(0.85f)
-            )
-            .border(
-                1.dp,
-                if (isPressed) tool.color.copy(0.3f) else Color.White.copy(0.06f),
-                RoundedCornerShape(16.dp)
-            )
+            .background(if (isPressed) tool.color.copy(0.05f) else KColor.Surface2.copy(0.85f))
+            .border(1.dp, if (isPressed) tool.color.copy(0.3f) else Color.White.copy(0.06f), RoundedCornerShape(16.dp))
             .clickable(interactionSource = interactionSource, indication = null, onClick = onTap)
             .padding(18.dp)
     ) {
         Column {
-            Box(
-                Modifier.size(44.dp).clip(RoundedCornerShape(12.dp))
-                    .background(
-                        Brush.linearGradient(listOf(tool.color.copy(0.25f), tool.color.copy(0.05f)))
-                    ),
-                contentAlignment = Alignment.Center
-            ) { Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(22.dp)) }
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(tool.color.copy(0.25f), tool.color.copy(0.05f)))), contentAlignment = Alignment.Center) { 
+                Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(22.dp)) 
+            }
             Spacer(Modifier.height(14.dp))
             Text(tool.title, color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 13.sp)
             Spacer(Modifier.height(6.dp))
-            Text(tool.desc, color = KColor.Text3, fontSize = 11.sp, lineHeight = 16.sp,
-                maxLines = 3)
+            Text(tool.desc, color = KColor.Text3, fontSize = 11.sp, lineHeight = 16.sp, maxLines = 3)
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Buka Tool", color = tool.color, fontSize = 11.sp, fontWeight = FontWeight.W600)
@@ -246,25 +219,15 @@ private fun ToolCard(tool: ToolInfo, onTap: () -> Unit) {
     }
 }
 
-// ─── Activity Item ────────────────────────────────────────────────────────────
 @Composable
-private fun ActivityItem(
-    icon: ImageVector, iconColor: Color,
-    title: String, subtitle: String, time: String
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
-                .background(iconColor.copy(0.1f)),
-            contentAlignment = Alignment.Center
-        ) { Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp)) }
+private fun ActivityItem(icon: ImageVector, iconColor: Color, title: String, subtitle: String, time: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(iconColor.copy(0.1f)), contentAlignment = Alignment.Center) { 
+            Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp)) 
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.W500,
-                maxLines = 1)
+            Text(title, color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.W500, maxLines = 1)
             Text(subtitle, color = KColor.Text3, fontSize = 11.sp)
         }
         Column(horizontalAlignment = Alignment.End) {
