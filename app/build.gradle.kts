@@ -9,10 +9,17 @@ android {
     compileSdk = 35
     ndkVersion = "27.0.12077973"
 
-    defaultConfig {        ndk {
+    defaultConfig {
+        applicationId = "com.d4nzxml.kythera"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0.0"
+
+        // === SUNTIKAN MESIN C++ DARI APP LAMA LU ===
+        ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
-
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
@@ -22,13 +29,17 @@ android {
                 )
             }
         }
-
-        applicationId = "com.d4nzxml.kythera"
-        minSdk = 24
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // ===========================================
     }
+
+    // === JALUR MENUJU FILE C++ DARI APP LAMA LU ===
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    // ===========================================
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -73,7 +84,7 @@ dependencies {
     implementation(libs.androidx.material.icons)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.ffmpeg.kit.min.gpl)
+    // PLUGIN FFMPEG-KIT YANG ERROR UDAH GUA HANGUSKAN DARI SINI
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
 }
