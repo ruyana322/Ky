@@ -29,7 +29,6 @@ jobs:
           fi
           chmod +x ./gradlew
 
-      # SUNTIKAN DOPING RAM ADA DI SINI
       - name: Aktifin Saklar & Doping RAM
         run: |
           echo "android.useAndroidX=true" >> gradle.properties
@@ -55,6 +54,23 @@ jobs:
         run: |
           mkdir -p app/libs
           wget "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
+
+      - name: Download Mesin NCNN (Tencent Vulkan)
+        run: |
+          wget "https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-android-vulkan.zip" -O ncnn.zip
+          unzip ncnn.zip -d app/src/main/cpp/
+          mv app/src/main/cpp/ncnn-20240102-android-vulkan app/src/main/cpp/ncnn
+          rm ncnn.zip
+
+      - name: Siapin Model AI Real-ESRGAN
+        run: |
+          mkdir -p app/src/main/assets/models
+          wget "https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip" -O models.zip
+          unzip -j models.zip "models/realesrgan-x4plus.param" -d app/src/main/assets/models/
+          unzip -j models.zip "models/realesrgan-x4plus.bin" -d app/src/main/assets/models/
+          mv app/src/main/assets/models/realesrgan-x4plus.param app/src/main/assets/models/realesrgan.param
+          mv app/src/main/assets/models/realesrgan-x4plus.bin app/src/main/assets/models/realesrgan.bin
+          rm models.zip
 
       - name: Rakit APK Release (Native)
         run: ./gradlew assembleRelease --no-daemon
