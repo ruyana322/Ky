@@ -85,8 +85,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.appcompat)
 
-    // FFmpeg-Kit min-gpl — aktif kembali
-    implementation(libs.ffmpeg.kit.min.gpl)
+    // === SUNTIK MESIN FFMPEG "RAJA TERAKHIR" (FULL-GPL) ===
+    // Bawa semua codec H.264 (libx264), H.265, dll.
+    implementation("com.arthenica:ffmpeg-kit-android-full-gpl:6.0-2")
+    // ======================================================
 
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
