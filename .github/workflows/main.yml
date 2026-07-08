@@ -38,10 +38,21 @@ jobs:
           echo "android.enableJetifier=true" >> gradle.properties
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
 
-      # 4. FIX TEMA JADUL BAWAAN CLAUDE (INI OBATNYA!)
-      - name: Hapus Tema Jadul
+      # 4. PYTHON PEMBASMI TEMA JADUL (DIJAMIN TEMBUS!)
+      - name: Basmi Tema Jadul Claude
         run: |
-          find app/src/main -type f -name "*.xml" -exec sed -i 's/Theme\.Material\.NoTitleBar/Theme.DeviceDefault.NoActionBar/g' {} +
+          python3 -c '
+          import os
+          for root, dirs, files in os.walk("app/src/main"):
+              for file in files:
+                  if file.endswith(".xml"):
+                      filepath = os.path.join(root, file)
+                      with open(filepath, "r") as f: content = f.read()
+                      if "Theme.Material.NoTitleBar" in content:
+                          print(f"Ketemu tema jadul di: {filepath}")
+                          content = content.replace("Theme.Material.NoTitleBar", "Theme.DeviceDefault.NoActionBar")
+                          with open(filepath, "w") as f: f.write(content)
+          '
 
       # 5. GEBER RAKIT APK RELEASE!
       - name: Rakit APK Release (Native)
