@@ -16,7 +16,6 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        // === SUNTIKAN MESIN C++ DARI APP LAMA LU ===
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -29,17 +28,14 @@ android {
                 )
             }
         }
-        // ===========================================
     }
 
-    // === JALUR MENUJU FILE C++ DARI APP LAMA LU ===
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
-    // ===========================================
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -68,6 +64,9 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // Hindari konflik SO dari ffmpeg-kit
+            excludes += "lib/x86/**"
+            pickFirsts += "lib/arm64-v8a/libc++_shared.so"
         }
     }
 }
@@ -84,7 +83,11 @@ dependencies {
     implementation(libs.androidx.material.icons)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    // PLUGIN FFMPEG-KIT YANG ERROR UDAH GUA HANGUSKAN DARI SINI
+    implementation(libs.androidx.appcompat)
+
+    // FFmpeg-Kit min-gpl — aktif kembali
+    implementation(libs.ffmpeg.kit.min.gpl)
+
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
 }
