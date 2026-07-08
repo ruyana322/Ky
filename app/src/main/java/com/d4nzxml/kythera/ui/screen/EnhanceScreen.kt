@@ -69,7 +69,13 @@ fun EnhanceScreen() {
 
             // 2. Eksekusi Upscale (Dilempar ke thread background biar layar ga nge-freeze)
             val result = withContext(Dispatchers.Default) {
-                RealSrEngine.processBitmap(inputBitmap!!)
+                // PENYARING FORMAT: Paksa jadi ARGB_8888 biar C++ JNI ga nabrak dan Force Close!
+                var safeBitmap = inputBitmap!!
+                if (safeBitmap.config != Bitmap.Config.ARGB_8888) {
+                    safeBitmap = safeBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                }
+                
+                RealSrEngine.processBitmap(safeBitmap)
             }
 
             if (result != null) {
@@ -137,7 +143,6 @@ fun EnhanceScreen() {
         if (isProcessing) {
             Box(
                 modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.85f)),
-
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
