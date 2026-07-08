@@ -144,7 +144,8 @@ class FfmpegService(private val context: Context) {
 
         val session    = FFmpegKit.execute(cmd)
         val returnCode = session.returnCode
-        FFmpegKitConfig.disableStatistics()
+        
+        // Baris disableStatistics() udah dihapus sesuai saran Kimi
 
         return if (ReturnCode.isSuccess(returnCode)) {
             FfmpegResult(success = true, outputPath = outputPath)
