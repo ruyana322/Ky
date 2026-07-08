@@ -35,14 +35,15 @@ fun CompressScreen() {
     val ffmpeg   = remember { FfmpegService(context) }
     val snackbar = remember { SnackbarHostState() }
 
-    var inputPath   by remember { mutableStateOf<String?>(null) }
-    var fileName    by remember { mutableStateOf<String?>(null) }
-    var fileSize    by remember { mutableStateOf<String?>(null) }
+    var inputPath       by remember { mutableStateOf<String?>(null) }
+    var fileName        by remember { mutableStateOf<String?>(null) }
+    var fileSize        by remember { mutableStateOf<String?>(null) }
     var compressPercent by remember { mutableStateOf(60) }
     var audioCompress   by remember { mutableStateOf(true) }
     var removeMetadata  by remember { mutableStateOf(false) }
     var twoPass         by remember { mutableStateOf(true) }
     var isProcessing    by remember { mutableStateOf(false) }
+    var progressVal     by remember { mutableStateOf(-1.0) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -61,12 +62,18 @@ fun CompressScreen() {
         }
         scope.launch {
             isProcessing = true
+            progressVal = 0.0
+            
+            // OBAT BUG: Two Pass butuh nulis audio. Kalau audio dimatiin, Two Pass dipaksa mati biar ga crash
+            val safeTwoPass = if (!audioCompress) false else twoPass
+
             val result = ffmpeg.compressVideo(
                 inputPath       = inputPath!!,
                 compressPercent = compressPercent,
                 compressAudio   = audioCompress,
                 removeMetadata  = removeMetadata,
-                twoPass         = twoPass,
+                twoPass         = safeTwoPass,
+                onProgress      = { p -> progressVal = p }
             )
             isProcessing = false
             if (result.success) {
@@ -93,7 +100,6 @@ fun CompressScreen() {
                 color = KColor.Text2, fontSize = 13.sp)
             Spacer(Modifier.height(20.dp))
 
-            // Drop Zone
             GlassCard {
                 KDropZone(
                     onTap = { picker.launch("video/*") },
@@ -107,33 +113,25 @@ fun CompressScreen() {
             }
             Spacer(Modifier.height(14.dp))
 
-            // Target Kompresi
             GlassCard {
                 Text("Target Kompresi", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 15.sp)
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CompressOption(30, "Light", "Kualitas hampir sama",
-                        KColor.Accent3, compressPercent == 30) { compressPercent = 30 }
-                    CompressOption(60, "Balanced", "Recommended",
-                        KColor.Accent3, compressPercent == 60) { compressPercent = 60 }
-                    CompressOption(85, "Aggressive", "Ukuran minimal",
-                        KColor.Orange, compressPercent == 85) { compressPercent = 85 }
+                    CompressOption(30, "Light", "Kualitas hampir sama", KColor.Accent3, compressPercent == 30) { compressPercent = 30 }
+                    CompressOption(60, "Balanced", "Recommended", KColor.Accent3, compressPercent == 60) { compressPercent = 60 }
+                    CompressOption(85, "Aggressive", "Ukuran minimal", KColor.Orange, compressPercent == 85) { compressPercent = 85 }
                 }
                 Spacer(Modifier.height(20.dp))
                 HorizontalDivider(color = KColor.Border)
                 Spacer(Modifier.height(16.dp))
-                KToggleRow("Audio Compression", "Kompres juga track audio",
-                    audioCompress) { audioCompress = it }
+                KToggleRow("Audio Compression", "Kompres juga track audio", audioCompress) { audioCompress = it }
                 Spacer(Modifier.height(14.dp))
-                KToggleRow("Remove Metadata", "Hapus data EXIF dan metadata",
-                    removeMetadata) { removeMetadata = it }
+                KToggleRow("Remove Metadata", "Hapus data EXIF dan metadata", removeMetadata) { removeMetadata = it }
                 Spacer(Modifier.height(14.dp))
-                KToggleRow("Two-Pass Encoding", "Kualitas lebih baik, proses lebih lama",
-                    twoPass) { twoPass = it }
+                KToggleRow("Two-Pass Encoding", "Kualitas lebih baik, proses lebih lama", twoPass) { twoPass = it }
             }
             Spacer(Modifier.height(14.dp))
 
-            // Estimasi bar
             GlassCard {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Estimasi Output", color = KColor.Text, fontWeight = FontWeight.W500, fontSize = 13.sp)
@@ -149,8 +147,7 @@ fun CompressScreen() {
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("0 MB", color = KColor.Text3, fontSize = 10.sp)
-                    Text("$compressPercent% size reduction",
-                        color = KColor.Accent3, fontSize = 10.sp, fontWeight = FontWeight.W500)
+                    Text("$compressPercent% size reduction", color = KColor.Accent3, fontSize = 10.sp, fontWeight = FontWeight.W500)
                     Text("Original", color = KColor.Text3, fontSize = 10.sp)
                 }
             }
@@ -167,27 +164,32 @@ fun CompressScreen() {
             Spacer(Modifier.height(24.dp))
         }
 
-        KLoadingOverlay(
-            visible = isProcessing,
-            message = "Mengompresi Video...",
-            subMessage = "Two-pass encoding sedang berjalan...\nTunggu sampai proses selesai!"
-        )
+        if (isProcessing) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = KColor.Accent3, modifier = Modifier.size(64.dp))
+                    Spacer(Modifier.height(16.dp))
+                    val progressText = if (progressVal >= 0) "${progressVal.toInt()}%" else "Memproses..."
+                    Text(progressText, color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text("Sabarin aja Kang...", color = KColor.Text2, fontSize = 14.sp)
+                }
+            }
+        }
         SnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter))
     }
 }
 
 @Composable
-private fun RowScope.CompressOption(
-    percent: Int, label: String, sub: String,
-    color: androidx.compose.ui.graphics.Color, isActive: Boolean, onTap: () -> Unit
-) {
+private fun RowScope.CompressOption(percent: Int, label: String, sub: String, color: androidx.compose.ui.graphics.Color, isActive: Boolean, onTap: () -> Unit) {
     Box(
         modifier = Modifier
             .weight(1f)
             .clip(RoundedCornerShape(12.dp))
             .background(if (isActive) color.copy(0.1f) else androidx.compose.ui.graphics.Color.Transparent)
-            .border(if (isActive) 1.5.dp else 1.dp,
-                if (isActive) color else KColor.Border, RoundedCornerShape(12.dp))
+            .border(if (isActive) 1.5.dp else 1.dp, if (isActive) color else KColor.Border, RoundedCornerShape(12.dp))
             .clickable(onClick = onTap)
             .padding(vertical = 14.dp, horizontal = 8.dp),
         contentAlignment = Alignment.Center
