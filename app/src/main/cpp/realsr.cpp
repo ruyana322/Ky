@@ -4,7 +4,6 @@
 #include <string>
 
 #include "ncnn/net.h"
-// Hapus #include "ncnn/gpu.h" karena kita ga pakai GPU dulu
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "Kythera_AI", __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "Kythera_AI", __VA_ARGS__)
@@ -20,9 +19,10 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
         net = new ncnn::Net();
     }
     
-    // ===============================================
-    // MATIKAN GPU SEMENTARA BUAT NGETES BIANG KEROKNYA
-    // ===============================================
+    // =========================================================
+    // PUSAT KENDALI GPU (VULKAN) ADA DI SINI
+    // Ubah jadi "true" kalau nanti lu udah mau ngetes pakai GPU
+    // =========================================================
     net->opt.use_vulkan_compute = false; 
 
     int ret_param = net->load_param(param_path);
@@ -51,12 +51,8 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject
         return nullptr;
     }
 
+    // Bikin alat ekstrak (Otomatis ngikutin settingan GPU dari 'net')
     ncnn::Extractor ex = net->create_extractor();
-    
-    // ========================================================
-    // TATA BAHASA BARU: Pengganti set_vulkan_compute
-    // ========================================================
-    ex.opt.use_vulkan_compute = false; // MATIKAN GPU SEMENTARA
     
     ncnn::Mat out;
     
