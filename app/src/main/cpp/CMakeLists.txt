@@ -4,7 +4,7 @@ project("kythera_video_ai")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 1. ── MESIN LAMA (Biarkan ini buat fitur FFmpeg lu) ──
+# 1. ── MESIN LAMA (FFmpeg) ──
 add_library(
     native-lib
     SHARED
@@ -15,6 +15,11 @@ add_library(
 add_library(ncnn STATIC IMPORTED)
 set_target_properties(ncnn PROPERTIES IMPORTED_LOCATION
     ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libncnn.a)
+
+# =================================================================
+# INI OBATNYA: Ngasih tau C++ letak folder otaknya (ncnn/net.h)
+# =================================================================
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # 3. ── MESIN BARU KHUSUS POTO (kythera_ai) ──
 add_library(
