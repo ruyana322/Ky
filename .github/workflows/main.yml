@@ -36,7 +36,7 @@ jobs:
           echo "android.suppressUnsupportedCompileSdk=35" >> gradle.properties
           echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" >> gradle.properties
 
-      - name: Basmi Tema Jadul Claude
+      - name: Basmi Tema Jadul
         run: |
           python3 -c '
           import os
@@ -63,11 +63,11 @@ jobs:
           mv ncnn-20260526-android-vulkan app/src/main/cpp/ncnn
           rm ncnn.zip
 
-      - name: Siapin Model AI Real-ESRGAN (Jalur Tumuyan)
+      - name: Siapin Model AI Real-ESRGAN (Jalur Gudang Sendiri)
         run: |
           mkdir -p app/src/main/assets/models
-          wget "https://huggingface.co/tumuyan2/realsr-models/resolve/main/models-Real-ESRGANv3-anime/x4.param" -O app/src/main/assets/models/realesrgan.param
-          wget "https://huggingface.co/tumuyan2/realsr-models/resolve/main/models-Real-ESRGANv3-anime/x4.bin" -O app/src/main/assets/models/realesrgan.bin
+          wget "https://huggingface.co/Dadanpeople/kythera-ai-models/resolve/main/realesrgan.param" -O app/src/main/assets/models/realesrgan.param
+          wget "https://huggingface.co/Dadanpeople/kythera-ai-models/resolve/main/realesrgan.bin" -O app/src/main/assets/models/realesrgan.bin
 
       - name: Rakit APK Release (Native)
         run: ./gradlew assembleRelease --no-daemon
