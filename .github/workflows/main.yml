@@ -65,11 +65,11 @@ jobs:
           cp ncnn-20260526-android-vulkan/arm64-v8a/lib/libncnn.a app/src/main/jniLibs/arm64-v8a/
           rm -rf ncnn-20260526-android-vulkan ncnn.zip
 
-      - name: Siapin Model AI Real-ESRGAN (Jalur Langsung)
+      - name: Siapin Model AI Real-ESRGAN (Jalur Hugging Face)
         run: |
           mkdir -p app/src/main/assets/models
-          wget "https://raw.githubusercontent.com/xinntao/Real-ESRGAN-ncnn-vulkan/master/models/realesrgan-x4plus.param" -O app/src/main/assets/models/realesrgan.param
-          wget "https://raw.githubusercontent.com/xinntao/Real-ESRGAN-ncnn-vulkan/master/models/realesrgan-x4plus.bin" -O app/src/main/assets/models/realesrgan.bin
+          wget "https://huggingface.co/Dadanpeople/kythera-ai-models/resolve/main/realesrgan.param" -O app/src/main/assets/models/realesrgan.param
+          wget "https://huggingface.co/Dadanpeople/kythera-ai-models/resolve/main/realesrgan.bin" -O app/src/main/assets/models/realesrgan.bin
 
       - name: Rakit APK Release (Native)
         run: ./gradlew assembleRelease --no-daemon
