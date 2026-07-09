@@ -40,13 +40,23 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject thiz, jobject bitmap) {
-    if (net == nullptr) return nullptr;
+    if (net == nullptr) {
+        LOGE("Mesin AI belum nyala!");
+        return nullptr;
+    }
 
     ncnn::Mat in = ncnn::Mat::from_android_bitmap(env, bitmap, ncnn::Mat::PIXEL_RGB);
-    if (in.empty()) return nullptr;
+    if (in.empty()) {
+        LOGE("Gagal ngebaca Poto!");
+        return nullptr;
+    }
 
     ncnn::Extractor ex = net->create_extractor();
-    ex.set_vulkan_compute(false); // MATIKAN GPU SEMENTARA
+    
+    // ========================================================
+    // TATA BAHASA BARU: Pengganti set_vulkan_compute
+    // ========================================================
+    ex.opt.use_vulkan_compute = false; // MATIKAN GPU SEMENTARA
     
     ncnn::Mat out;
     
