@@ -3,6 +3,7 @@ package com.d4nzxml.kythera.service
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Environment
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -133,8 +134,11 @@ object RealSrEngine {
                 outputFile.delete()
                 return@withContext result
             } else {
-                // FITUR BARU: CETAK LOG ERROR KE FILE TXT!
-                val errorLogFile = File(tmpDir, "kythera_error_log.txt")
+                // TARUH LOG DI FOLDER PICTURES/KYTHERA BIAR KELIATAN TANPA ROOT!
+                val logDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Kythera")
+                if (!logDir.exists()) logDir.mkdirs()
+                
+                val errorLogFile = File(logDir, "kythera_error_log.txt")
                 val errorMessage = "=== GAGAL EKSEKUSI BINARY ===\nEXIT CODE: $exitCode\n\nLOG TERMINAL:\n$log\n"
                 errorLogFile.writeText(errorMessage)
                 
@@ -143,8 +147,11 @@ object RealSrEngine {
             }
 
         } catch (e: Exception) {
-            // FITUR BARU: CETAK CRASH SYSTEM KE FILE TXT!
-            val errorLogFile = File(context.cacheDir, "kythera_error_log.txt")
+            // TARUH LOG CRASH DI FOLDER PICTURES/KYTHERA JUGA
+            val logDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Kythera")
+            if (!logDir.exists()) logDir.mkdirs()
+            
+            val errorLogFile = File(logDir, "kythera_error_log.txt")
             val errorMessage = "=== APLIKASI CRASH ===\nPESAN ERROR:\n${e.message}\n\nSTACKTRACE:\n${e.stackTraceToString()}"
             errorLogFile.writeText(errorMessage)
             
