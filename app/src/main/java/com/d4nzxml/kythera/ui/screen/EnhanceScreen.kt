@@ -26,27 +26,26 @@ import com.d4nzxml.kythera.service.GalleryService
 import com.d4nzxml.kythera.service.RealSrEngine
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun EnhanceScreen() {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
+    val context     = LocalContext.current
+    val scope       = rememberCoroutineScope()
+    val snackbar    = remember { SnackbarHostState() }
 
-    var inputUri by remember { mutableStateOf<Uri?>(null) }
-    var inputBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var inputBitmap  by remember { mutableStateOf<Bitmap?>(null) }
     var outputBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var fileName     by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var statusText   by remember { mutableStateOf("Lagi motong & HD-in Poto nih Kang!") }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
-            inputUri = it
-            outputBitmap = null // Reset hasil lama kalau milih poto baru
-            val inputStream = context.contentResolver.openInputStream(it)
-            inputBitmap = BitmapFactory.decodeStream(inputStream)
+            outputBitmap = null
+            fileName = it.lastPathSegment ?: "image"
+            val stream = context.contentResolver.openInputStream(it)
+            inputBitmap = BitmapFactory.decodeStream(stream)
         }
     }
 
@@ -57,39 +56,35 @@ fun EnhanceScreen() {
         }
         scope.launch {
             isProcessing = true
-            
-            // 1. Manasin mesin (Load model dari assets)
-            val isReady = RealSrEngine.setup(context)
-            if (!isReady) {
-                snackbar.showSnackbar("Gagal manasin mesin AI! Cek log GitHub.")
+            statusText   = "Manasin mesin AI..."
+
+            // 1. Setup binary + model dari assets
+            val ready = RealSrEngine.setup(context)
+            if (!ready) {
+                snackbar.showSnackbar("Gagal setup mesin AI!")
                 isProcessing = false
                 return@launch
             }
 
-            // 2. Eksekusi Upscale dengan TILING (Tanpa Rem Resolusi!)
-            val result = withContext(Dispatchers.Default) {
-                var safeBitmap = inputBitmap!!
-                // Pastikan format warna sesuai standar
-                if (safeBitmap.config != Bitmap.Config.ARGB_8888) {
-                    safeBitmap = safeBitmap.copy(Bitmap.Config.ARGB_8888, true)
-                }
-                
-                // Langsung hantam ke sistem Tiling pakai ukuran asli!
-                RealSrEngine.processBitmapTiled(safeBitmap)
-            }
+            statusText = "Lagi HD-in poto... (butuh beberapa detik)"
+
+            // 2. Jalankan upscale
+            val result = RealSrEngine.upscale(context, inputBitmap!!)
 
             if (result != null) {
                 outputBitmap = result
-                val saved = GalleryService.saveBitmap(context, result, "Kythera_HD_${System.currentTimeMillis()}.png")
-                if (saved) {
-                    snackbar.showSnackbar("SUKSES! Poto HD tersimpan di Galeri/Kythera 🎉")
-                } else {
-                    snackbar.showSnackbar("Selesai, tapi gagal nyimpen ke galeri.")
-                }
+                val saved = GalleryService.saveBitmap(
+                    context, result,
+                    "Kythera_HD_${System.currentTimeMillis()}.png"
+                )
+                snackbar.showSnackbar(
+                    if (saved) "SUKSES! Poto HD tersimpan di Galeri/Kythera 🎉"
+                    else "Selesai, tapi gagal nyimpen ke galeri."
+                )
             } else {
-                snackbar.showSnackbar("ERROR! Gagal nge-HD-in poto.")
+                snackbar.showSnackbar("ERROR! Gagal nge-HD-in poto. Cek log.")
             }
-            
+
             isProcessing = false
         }
     }
@@ -101,8 +96,14 @@ fun EnhanceScreen() {
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp)
         ) {
-            Text("AI Enhance Poto", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-            Text("Bikin poto burik jadi HD pakai Real-ESRGAN (Vulkan GPU).", color = KColor.Text2, fontSize = 13.sp)
+            Text(
+                "AI Enhance Poto",
+                color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800
+            )
+            Text(
+                "Bikin poto burik jadi HD pakai Real-ESRGANv3 Anime (Vulkan GPU).",
+                color = KColor.Text2, fontSize = 13.sp
+            )
             Spacer(Modifier.height(20.dp))
 
             GlassCard {
@@ -111,19 +112,31 @@ fun EnhanceScreen() {
                     title = "Upload Poto Burik",
                     subtitle = "JPG, PNG, WEBP",
                     icon = Icons.Rounded.Image,
-                    accentColor = KColor.Accent
+                    accentColor = KColor.Accent,
+                    selectedFileName = fileName
                 )
-                
+
                 if (inputBitmap != null && outputBitmap == null) {
                     Spacer(Modifier.height(16.dp))
                     Text("Poto Asli:", color = KColor.Text2, fontSize = 12.sp)
                     Spacer(Modifier.height(8.dp))
-                    Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().height(200.dp))
+                    Image(
+                        bitmap = inputBitmap!!.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxWidth().height(200.dp)
+                    )
                 } else if (outputBitmap != null) {
                     Spacer(Modifier.height(16.dp))
-                    Text("Hasil HD (Bisa di-zoom!):", color = KColor.Accent, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Hasil HD x4 (Real-ESRGANv3 Anime):",
+                        color = KColor.Accent, fontWeight = FontWeight.Bold
+                    )
                     Spacer(Modifier.height(8.dp))
-                    Image(bitmap = outputBitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxWidth().height(250.dp))
+                    Image(
+                        bitmap = outputBitmap!!.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxWidth().height(250.dp)
+                    )
                 }
             }
 
@@ -138,16 +151,25 @@ fun EnhanceScreen() {
             Spacer(Modifier.height(24.dp))
         }
 
+        // Loading overlay
         if (isProcessing) {
             Box(
-                modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.85f)),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.85f)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = KColor.Accent, modifier = Modifier.size(64.dp))
+                    CircularProgressIndicator(
+                        color = KColor.Accent,
+                        modifier = Modifier.size(64.dp)
+                    )
                     Spacer(Modifier.height(16.dp))
-                    Text("Membelah Poto...", color = KColor.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Lagi motong & jahit Poto nih Kang!", color = KColor.Text2, fontSize = 14.sp)
+                    Text(
+                        "Memproses...",
+                        color = KColor.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold
+                    )
+                    Text(statusText, color = KColor.Text2, fontSize = 14.sp)
                 }
             }
         }
