@@ -5,6 +5,10 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+concurrency:
+  group: build-kythera-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build & Release Native APK
@@ -53,17 +57,31 @@ jobs:
       - name: Download Mentahan FFmpeg Raja Terakhir
         run: |
           mkdir -p app/libs
-          wget "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
+          wget -q --show-progress \
+            "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" \
+            -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
 
-      - name: Kasih Izin Eksekusi ke Binary RealSR
+      - name: Verifikasi AAR FFmpeg
         run: |
-          chmod +x app/src/main/assets/realsr/realsr-ncnn
+          if [ ! -f "app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" ]; then
+            echo "ERROR: FFmpeg AAR gagal didownload!"
+            exit 1
+          fi
+          echo "FFmpeg AAR size: $(du -sh app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar)"
 
       - name: Rakit APK Release
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APK
+        run: |
+          cd app/build/outputs/apk/release/
+          for f in *.apk; do
+            mv "$f" "KytheraTools-release-$(date +%Y%m%d-%H%M).apk"
+          done
 
       - name: Upload Hasil APK
         uses: actions/upload-artifact@v4
         with:
           name: Kythera-Tools-Native-APK
           path: app/build/outputs/apk/release/*.apk
+          retention-days: 7
