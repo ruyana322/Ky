@@ -55,13 +55,12 @@ jobs:
           mkdir -p app/libs
           wget "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
 
-      - name: Download Mesin NCNN (Tencent Vulkan) & Pasang Include
+      - name: Download Mesin NCNN (Tencent Vulkan)
         run: |
-          wget "https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android-vulkan.zip" -O ncnn.zip
-          unzip -q ncnn.zip
-          mkdir -p app/src/main/cpp/include
-          cp -r ncnn-20260526-android-vulkan/arm64-v8a/include/ncnn app/src/main/cpp/include/
-          rm -rf ncnn-20260526-android-vulkan ncnn.zip
+          wget "https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-android-vulkan.zip" -O ncnn.zip
+          unzip ncnn.zip -d app/src/main/cpp/
+          mv app/src/main/cpp/ncnn-20240102-android-vulkan app/src/main/cpp/ncnn
+          rm ncnn.zip
 
       - name: Siapin Model AI Real-ESRGAN
         run: |
