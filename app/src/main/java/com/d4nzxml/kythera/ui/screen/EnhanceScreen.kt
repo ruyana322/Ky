@@ -66,23 +66,15 @@ fun EnhanceScreen() {
                 return@launch
             }
 
-            // 2. Eksekusi Upscale dengan TILING
+            // 2. Eksekusi Upscale dengan TILING (Tanpa Rem Resolusi!)
             val result = withContext(Dispatchers.Default) {
                 var safeBitmap = inputBitmap!!
+                // Pastikan format warna sesuai standar
                 if (safeBitmap.config != Bitmap.Config.ARGB_8888) {
                     safeBitmap = safeBitmap.copy(Bitmap.Config.ARGB_8888, true)
                 }
                 
-                // Tahan resolusi dasar di 1080p biar kanvas x4 nya aman
-                val maxRes = 1080f
-                if (safeBitmap.width > maxRes || safeBitmap.height > maxRes) {
-                    val ratio = minOf(maxRes / safeBitmap.width, maxRes / safeBitmap.height)
-                    val newW = (safeBitmap.width * ratio).toInt()
-                    val newH = (safeBitmap.height * ratio).toInt()
-                    safeBitmap = Bitmap.createScaledBitmap(safeBitmap, newW, newH, true)
-                }
-                
-                // JALANKAN PROSES TILING!
+                // Langsung hantam ke sistem Tiling pakai ukuran asli!
                 RealSrEngine.processBitmapTiled(safeBitmap)
             }
 
