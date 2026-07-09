@@ -55,21 +55,11 @@ jobs:
           mkdir -p app/libs
           wget "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
 
-      - name: Download Mesin NCNN (Tencent Vulkan) & Pasang Full
+      - name: Kasih Izin Eksekusi ke Binary RealSR
         run: |
-          wget "https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android-vulkan.zip" -O ncnn.zip
-          unzip -q ncnn.zip
-          rm -rf app/src/main/cpp/ncnn
-          mv ncnn-20260526-android-vulkan app/src/main/cpp/ncnn
-          rm ncnn.zip
+          chmod +x app/src/main/assets/realsr/realsr-ncnn
 
-      - name: Siapin Model AI Real-ESRGAN (Jalur Gudang Sendiri)
-        run: |
-          mkdir -p app/src/main/assets/models
-          wget "https://huggingface.co/Dadanpeople/kythera-ai-models/resolve/main/realesrgan.param" -O app/src/main/assets/models/realesrgan.param
-          wget "https://huggingface.co/Dadanpeople/kythera-ai-models/resolve/main/realesrgan.bin" -O app/src/main/assets/models/realesrgan.bin
-
-      - name: Rakit APK Release (Native)
+      - name: Rakit APK Release
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Upload Hasil APK
