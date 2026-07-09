@@ -55,22 +55,21 @@ jobs:
           mkdir -p app/libs
           wget "https://artifactory.appodeal.com/appodeal-public/com/arthenica/ffmpeg-kit-full-gpl/6.0-2.LTS/ffmpeg-kit-full-gpl-6.0-2.LTS.aar" -O app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar
 
-      - name: Download Mesin NCNN (Tencent Vulkan)
+      - name: Download Mesin NCNN (Tencent Vulkan) & Pasang Include
         run: |
-          wget "https://github.com/Tencent/ncnn/releases/download/20240102/ncnn-20240102-android-vulkan.zip" -O ncnn.zip
-          unzip ncnn.zip -d app/src/main/cpp/
-          mv app/src/main/cpp/ncnn-20240102-android-vulkan app/src/main/cpp/ncnn
-          rm ncnn.zip
+          wget "https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android-vulkan.zip" -O ncnn.zip
+          unzip -q ncnn.zip
+          mkdir -p app/src/main/cpp/include
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp -r ncnn-20260526-android-vulkan/arm64-v8a/include/ncnn app/src/main/cpp/include/
+          cp ncnn-20260526-android-vulkan/arm64-v8a/lib/libncnn.a app/src/main/jniLibs/arm64-v8a/
+          rm -rf ncnn-20260526-android-vulkan ncnn.zip
 
-      - name: Siapin Model AI Real-ESRGAN
+      - name: Siapin Model AI Real-ESRGAN (Jalur Langsung)
         run: |
           mkdir -p app/src/main/assets/models
-          wget "https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip" -O models.zip
-          unzip -j models.zip "models/realesrgan-x4plus.param" -d app/src/main/assets/models/
-          unzip -j models.zip "models/realesrgan-x4plus.bin" -d app/src/main/assets/models/
-          mv app/src/main/assets/models/realesrgan-x4plus.param app/src/main/assets/models/realesrgan.param
-          mv app/src/main/assets/models/realesrgan-x4plus.bin app/src/main/assets/models/realesrgan.bin
-          rm models.zip
+          wget "https://raw.githubusercontent.com/xinntao/Real-ESRGAN-ncnn-vulkan/master/models/realesrgan-x4plus.param" -O app/src/main/assets/models/realesrgan.param
+          wget "https://raw.githubusercontent.com/xinntao/Real-ESRGAN-ncnn-vulkan/master/models/realesrgan-x4plus.bin" -O app/src/main/assets/models/realesrgan.bin
 
       - name: Rakit APK Release (Native)
         run: ./gradlew assembleRelease --no-daemon
