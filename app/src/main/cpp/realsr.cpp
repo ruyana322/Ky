@@ -27,11 +27,13 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
     }
     
     // =================================================================
-    // OBAT MALI GPU:
-    // Biarin Vulkan nyala, tapi JANGAN PAKSA FP16 secara manual!
-    // NCNN bakal mikir sendiri mode apa yang paling aman buat GPU lu.
+    // TURBO FP16 DIHIDUPKAN KEMBALI!
+    // GPU Poco lu bakal mikir jauh lebih enteng dan super kilat!
     // =================================================================
     net->opt.use_vulkan_compute = true; 
+    net->opt.use_fp16_packed = true;
+    net->opt.use_fp16_storage = true;
+    net->opt.use_fp16_arithmetic = true;
 
     int ret_param = net->load_param(param_path);
     int ret_bin = net->load_model(bin_path);
@@ -50,11 +52,9 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject thiz, jobject bitmap) {
     if (net == nullptr) return nullptr;
 
-    // BACA GAMBAR + BUANG ALPHA-NYA (Android RGBA -> AI RGB)
+    // BACA GAMBAR + BUANG ALPHA-NYA
     ncnn::Mat in = ncnn::Mat::from_android_bitmap(env, bitmap, ncnn::Mat::PIXEL_RGBA2RGB);
     if (in.empty()) return nullptr;
-
-    // RUMUS NORMALISASI UDAH DIBUANG TOTAL KE TONG SAMPAH!
 
     ncnn::Extractor ex = net->create_extractor();
     ncnn::Mat out;
@@ -77,7 +77,7 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject
     jmethodID createBitmapMethodID = env->GetStaticMethodID(bitmapClass, "createBitmap", "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
     jobject newBitmap = env->CallStaticObjectMethod(bitmapClass, createBitmapMethodID, out.w, out.h, argb8888Obj);
 
-    // BALIKIN KE ANDROID + KASIH ALPHA SOLID 255 (AI RGB -> Android RGBA)
+    // BALIKIN KE ANDROID + KASIH ALPHA SOLID 255
     out.to_android_bitmap(env, newBitmap, ncnn::Mat::PIXEL_RGB2RGBA);
 
     return newBitmap;
