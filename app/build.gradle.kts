@@ -7,7 +7,6 @@ plugins {
 android {
     namespace = "com.d4nzxml.kythera"
     compileSdk = 35
-    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.d4nzxml.kythera"
@@ -15,26 +14,6 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
-
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
-        externalNativeBuild {
-            cmake {
-                cppFlags += "-std=c++17"
-                arguments += listOf(
-                    "-DANDROID_STL=c++_shared",
-                    "-DANDROID_TOOLCHAIN=clang"
-                )
-            }
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
     }
 
     compileOptions {
@@ -64,9 +43,7 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // Hindari konflik SO dari ffmpeg-kit
             excludes += "lib/x86/**"
-            pickFirsts += "lib/arm64-v8a/libc++_shared.so"
         }
     }
 }
@@ -85,13 +62,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.appcompat)
 
-        // Hapus kodingan download dari Maven sebelumnya
-    // dan GANTI PAKAI INI KANG:
     implementation(files("libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar"))
-    
-    // Ini mesin pelengkap wajibnya (yang ini masih belum dihapus dari internet)
     implementation("com.arthenica:smart-exception-java:0.2.1")
-
 
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
