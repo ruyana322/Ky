@@ -109,8 +109,11 @@ object RealSrEngine {
 
             val process = ProcessBuilder(*cmd)
                 .apply {
-                    // Tambahkan lib dir ke LD_LIBRARY_PATH biar .so ketemu
-                    environment()["LD_LIBRARY_PATH"] = libDir
+                    // FIX FATAL: Gabungin lib lokal lu sama lib bawaan sistem HP!
+                    val env = environment()
+                    val systemLibs = env["LD_LIBRARY_PATH"] ?: ""
+                    env["LD_LIBRARY_PATH"] = "$libDir:$systemLibs"
+                    
                     redirectErrorStream(true)
                 }
                 .start()
@@ -125,17 +128,27 @@ object RealSrEngine {
             // 4. Baca hasil output
             if (exitCode == 0 && outputFile.exists()) {
                 val result = BitmapFactory.decodeFile(outputFile.absolutePath)
-                // Bersihin file temp
+                // Bersihin file temp kalau sukses
                 inputFile.delete()
                 outputFile.delete()
                 return@withContext result
             } else {
-                Log.e(TAG, "Binary gagal! Exit: $exitCode\nLog: $log")
+                // FITUR BARU: CETAK LOG ERROR KE FILE TXT!
+                val errorLogFile = File(tmpDir, "kythera_error_log.txt")
+                val errorMessage = "=== GAGAL EKSEKUSI BINARY ===\nEXIT CODE: $exitCode\n\nLOG TERMINAL:\n$log\n"
+                errorLogFile.writeText(errorMessage)
+                
+                Log.e(TAG, "Binary gagal! Cek log di: ${errorLogFile.absolutePath}")
                 return@withContext null
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error upscale: ${e.message}")
+            // FITUR BARU: CETAK CRASH SYSTEM KE FILE TXT!
+            val errorLogFile = File(context.cacheDir, "kythera_error_log.txt")
+            val errorMessage = "=== APLIKASI CRASH ===\nPESAN ERROR:\n${e.message}\n\nSTACKTRACE:\n${e.stackTraceToString()}"
+            errorLogFile.writeText(errorMessage)
+            
+            Log.e(TAG, "Error upscale fatal: ${e.message}", e)
             return@withContext null
         }
     }
