@@ -19,11 +19,15 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
         net = new ncnn::Net();
     }
     
-    // =========================================================
-    // PUSAT KENDALI GPU (VULKAN) ADA DI SINI
-    // Ubah jadi "true" kalau nanti lu udah mau ngetes pakai GPU
-    // =========================================================
-    net->opt.use_vulkan_compute = false; 
+    // ===============================================
+    // NYALAKAN GPU VULKAN BIAR KENCENG!
+    // ===============================================
+    net->opt.use_vulkan_compute = true; 
+    
+    // (Opsional) Bikin AI lebih hemat RAM & ngebut pakai mode FP16
+    net->opt.use_fp16_packed = true;
+    net->opt.use_fp16_storage = true;
+    net->opt.use_fp16_arithmetic = true;
 
     int ret_param = net->load_param(param_path);
     int ret_bin = net->load_model(bin_path);
@@ -51,14 +55,16 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject
         return nullptr;
     }
 
-    // Bikin alat ekstrak (Otomatis ngikutin settingan GPU dari 'net')
+    // ====================================================================
+    // OBAT GOSONG 1: Ubah warna 0-255 jadi 0.0 - 1.0 (Biar AI ga kaget)
+    // ====================================================================
+    const float norm_vals[3] = {1 / 255.f, 1 / 255.f, 1 / 255.f};
+    in.substract_mean_normalize(0, norm_vals);
+
     ncnn::Extractor ex = net->create_extractor();
-    
     ncnn::Mat out;
     
-    // ===============================================
-    // TES NAMA NODE: Kalau "data" gagal, coba "in0"
-    // ===============================================
+    // Coba tebak nama Node-nya
     ex.input("data", in);
     int ret = ex.extract("output", out);
 
@@ -72,6 +78,12 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject
         LOGE("AI gagal total! Model rusak atau Node tidak dikenali.");
         return nullptr;
     }
+
+    // ====================================================================
+    // OBAT GOSONG 2: Balikin warna 0.0 - 1.0 jadi 0-255 (Biar layar paham)
+    // ====================================================================
+    const float denorm_vals[3] = {255.f, 255.f, 255.f};
+    out.substract_mean_normalize(0, denorm_vals);
 
     jclass bitmapConfigClass = env->FindClass("android/graphics/Bitmap$Config");
     jfieldID argb8888FieldID = env->GetStaticFieldID(bitmapConfigClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
