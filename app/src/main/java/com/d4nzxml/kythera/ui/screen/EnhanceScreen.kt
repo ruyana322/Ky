@@ -59,39 +59,58 @@ fun EnhanceScreen() {
         scope.launch {
             isProcessing = true
             
-            // 1. Manasin mesin (Load model dari assets)
-            val isReady = RealSrEngine.setup(context)
-            if (!isReady) {
-                snackbar.showSnackbar("Gagal manasin mesin AI! Cek log GitHub.")
-                isProcessing = false
-                return@launch
-            }
+            try {
+                // 1. Manasin mesin (Load model dari assets)
+                val isReady = RealSrEngine.setup(context)
+                if (!isReady) {
+                    snackbar.showSnackbar("Gagal manasin mesin AI! Cek file model di folder assets.")
+                    isProcessing = false
+                    return@launch
+                }
 
-            // 2. Eksekusi Upscale (Dilempar ke thread background biar layar ga nge-freeze)
-            val result = withContext(Dispatchers.Default) {
-                // PENYARING FORMAT: Paksa jadi ARGB_8888 biar C++ JNI ga nabrak dan Force Close!
-                var safeBitmap = inputBitmap!!
-                if (safeBitmap.config != Bitmap.Config.ARGB_8888) {
-                    safeBitmap = safeBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                // 2. Eksekusi Upscale (Dilempar ke thread background biar layar ga nge-freeze)
+                val result = withContext(Dispatchers.Default) {
+                    var safeBitmap = inputBitmap!!
+                    
+                    // PENYARING FORMAT: Paksa jadi ARGB_8888 biar C++ JNI ga nabrak
+                    if (safeBitmap.config != Bitmap.Config.ARGB_8888) {
+                        safeBitmap = safeBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                    }
+
+                    // TAHAN RESOLUSI DI 720p: Biar RAM nggak meledak pas dikali 4
+                    val maxRes = 720f
+                    if (safeBitmap.width > maxRes || safeBitmap.height > maxRes) {
+                        val ratio = minOf(maxRes / safeBitmap.width, maxRes / safeBitmap.height)
+                        val newW = (safeBitmap.width * ratio).toInt()
+                        val newH = (safeBitmap.height * ratio).toInt()
+                        safeBitmap = Bitmap.createScaledBitmap(safeBitmap, newW, newH, true)
+                    }
+                    
+                    // Lempar ke mesin C++
+                    RealSrEngine.processBitmap(safeBitmap)
+                }
+
+                if (result != null) {
+                    outputBitmap = result
+                    // 3. Simpan hasil langsung ke galeri
+                    val saved = GalleryService.saveBitmap(context, result, "Kythera_HD_${System.currentTimeMillis()}.png")
+                    if (saved) {
+                        snackbar.showSnackbar("SUKSES! Poto HD tersimpan di Galeri/Kythera 🎉")
+                    } else {
+                        snackbar.showSnackbar("Selesai, tapi gagal nyimpen ke galeri.")
+                    }
+                } else {
+                    snackbar.showSnackbar("ERROR C++: AI mengembalikan nilai kosong.")
                 }
                 
-                RealSrEngine.processBitmap(safeBitmap)
+            } catch (e: Throwable) {
+                // ========================================================
+                // JARING ERROR: Tangkap error biar aplikasi ga force close
+                // ========================================================
+                snackbar.showSnackbar("CRASH KETANGKEP: ${e.message ?: e.toString()}")
+            } finally {
+                isProcessing = false
             }
-
-            if (result != null) {
-                outputBitmap = result
-                // 3. Simpan hasil langsung ke galeri
-                val saved = GalleryService.saveBitmap(context, result, "Kythera_HD_${System.currentTimeMillis()}.png")
-                if (saved) {
-                    snackbar.showSnackbar("SUKSES! Poto HD tersimpan di Galeri/Kythera 🎉")
-                } else {
-                    snackbar.showSnackbar("Selesai, tapi gagal nyimpen ke galeri.")
-                }
-            } else {
-                snackbar.showSnackbar("ERROR! Gagal nge-HD-in poto.")
-            }
-            
-            isProcessing = false
         }
     }
 
@@ -149,7 +168,7 @@ fun EnhanceScreen() {
                     CircularProgressIndicator(color = KColor.Accent, modifier = Modifier.size(64.dp))
                     Spacer(Modifier.height(16.dp))
                     Text("Membelah Poto...", color = KColor.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("GPU lagi kerja keras, sabar Kang!", color = KColor.Text2, fontSize = 14.sp)
+                    Text("Mesin lagi kerja keras, sabar Kang!", color = KColor.Text2, fontSize = 14.sp)
                 }
             }
         }
