@@ -11,15 +11,15 @@ add_library(
     native-lib.cpp
 )
 
-# 2. ── IMPORT MESIN AI NCNN TENCENT ──
-add_library(ncnn STATIC IMPORTED)
-set_target_properties(ncnn PROPERTIES IMPORTED_LOCATION
-    ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libncnn.a)
+# 2. ── IMPORT MESIN AI NCNN TENCENT (JALUR RESMI) ──
+# Kasih tau lokasi buku panduan CMake dari folder NCNN yang baru diekstrak
+set(ncnn_DIR ${CMAKE_SOURCE_DIR}/ncnn/${ANDROID_ABI}/lib/cmake/ncnn)
+find_package(ncnn REQUIRED)
 
 # =================================================================
-# INI OBATNYA: Ngasih tau C++ letak folder otaknya (ncnn/net.h)
+# OBAT PAMUNGKAS: Paksa masukin alamat otaknya biar C++ nggak buta
 # =================================================================
-include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/ncnn/${ANDROID_ABI}/include)
 
 # 3. ── MESIN BARU KHUSUS POTO (kythera_ai) ──
 add_library(
@@ -28,12 +28,11 @@ add_library(
     realsr.cpp
 )
 
-# Siapin alat bantu dari sistem Android
+# Siapin alat bantu bawaan dari sistem Android
 find_library(log-lib log)
 find_library(android-lib android)
 find_library(jnigraphics-lib jnigraphics)
 find_library(mediandk-lib mediandk)
-find_library(vulkan-lib vulkan) # Wajib ada buat GPU NCNN
 
 # 4. ── SAMBUNGIN MESIN LAMA ──
 target_link_libraries(
@@ -43,6 +42,7 @@ target_link_libraries(
 )
 
 # 5. ── SAMBUNGIN MESIN BARU & NCNN ──
+# Cukup panggil "ncnn" di sini, dia otomatis bawa temen-temennya (Vulkan, OpenMP, glslang)
 target_link_libraries(
     kythera_ai
     ncnn
@@ -50,5 +50,4 @@ target_link_libraries(
     ${android-lib}
     ${jnigraphics-lib}
     ${mediandk-lib}
-    ${vulkan-lib}
 )
