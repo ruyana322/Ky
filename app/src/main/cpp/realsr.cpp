@@ -2,8 +2,8 @@
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <string>
-#include <algorithm> 
 
+// Panggil mesin NCNN Tencent
 #include "ncnn/net.h"
 #include "ncnn/gpu.h"
 
@@ -43,6 +43,7 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
     env->ReleaseStringUTFChars(binPath, bin_path);
 
     if (ret_param != 0 || ret_bin != 0) {
+        LOGE("Gagal baca file model AI!");
         return JNI_FALSE;
     }
     return JNI_TRUE;
@@ -50,61 +51,32 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject thiz, jobject bitmap) {
-    if (net == nullptr) return nullptr;
+    if (net == nullptr) {
+        LOGE("Mesin AI belum nyala!");
+        return nullptr;
+    }
 
     ncnn::Mat in = ncnn::Mat::from_android_bitmap(env, bitmap, ncnn::Mat::PIXEL_RGB);
-
-    int scale = 4; 
-    int tile_size = 200; 
     
-    ncnn::Mat out(in.w * scale, in.h * scale, 3);
-    out.fill(0.f);
+    // GEMBOK 1: Cek apakah input gambar kosong
+    if (in.empty()) {
+        LOGE("Gagal ngebaca Poto dari Kotlin!");
+        return nullptr;
+    }
 
     ncnn::Extractor ex = net->create_extractor();
     ex.set_vulkan_compute(true);
+    ex.input("data", in);
+    
+    ncnn::Mat out;
+    int ret = ex.extract("output", out);
 
-    for (int y = 0; y < in.h; y += tile_size) {
-        for (int x = 0; x < in.w; x += tile_size) {
-            
-            int req_w = std::min(tile_size, in.w - x);
-            int req_h = std::min(tile_size, in.h - y);
-
-            ncnn::Mat in_tile(req_w, req_h, 3);
-            for (int c = 0; c < 3; c++) {
-                const float* in_ptr = in.channel(c);
-                float* tile_ptr = in_tile.channel(c);
-                for (int ty = 0; ty < req_h; ty++) {
-                    for (int tx = 0; tx < req_w; tx++) {
-                        tile_ptr[ty * req_w + tx] = in_ptr[(y + ty) * in.w + (x + tx)];
-                    }
-                }
-            }
-
-            ex.input("data", in_tile);
-            ncnn::Mat out_tile;
-            ex.extract("output", out_tile);
-
-            // OBAT ANTI-CRASH JAHITAN (Boundary Check)
-            int valid_w = req_w * scale;
-            int valid_h = req_h * scale;
-
-            for (int c = 0; c < 3; c++) {
-                float* out_ptr = out.channel(c);
-                const float* tile_ptr = out_tile.channel(c);
-                
-                for (int ty = 0; ty < valid_h; ty++) {
-                    for (int tx = 0; tx < valid_w; tx++) {
-                        int out_x = x * scale + tx;
-                        int out_y = y * scale + ty;
-                        
-                        // Kunci gembok biar nggak nulis memori di luar batas!
-                        if (out_x < out.w && out_y < out.h && tx < out_tile.w && ty < out_tile.h) {
-                            out_ptr[out_y * out.w + out_x] = tile_ptr[ty * out_tile.w + tx];
-                        }
-                    }
-                }
-            }
-        }
+    // GEMBOK 2 (PALING PENTING!): 
+    // Kalau GPU gagal mikir, 'out' bakal kosong. 
+    // Kita stop prosesnya di sini biar aplikasi NGGAK KELUAR SENDIRI!
+    if (ret != 0 || out.empty()) {
+        LOGE("Vulkan GPU gagal memproses gambar! Mungkin model tidak cocok atau VRAM tidak cukup.");
+        return nullptr;
     }
 
     jclass bitmapConfigClass = env->FindClass("android/graphics/Bitmap$Config");
