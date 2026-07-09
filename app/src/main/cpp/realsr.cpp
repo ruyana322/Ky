@@ -2,6 +2,7 @@
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <string>
+#include <algorithm>
 
 #include "ncnn/net.h"
 #include "ncnn/gpu.h"
@@ -20,29 +21,26 @@ Java_com_d4nzxml_kythera_service_RealSrEngine_initModel(JNIEnv* env, jobject thi
     }
 
     const char* param_path = env->GetStringUTFChars(paramPath, 0);
-    const char* bin_path = env->GetStringUTFChars(binPath, 0);
+    const char* bin_path   = env->GetStringUTFChars(binPath, 0);
 
-    if (net == nullptr) {
-        net = new ncnn::Net();
-    }
+    if (net == nullptr) net = new ncnn::Net();
 
-    // FIX 1: FP16 arithmetic DIMATIIN - bikin output corrupt di model anime
-    // FP16 storage/packed boleh hidup buat efisiensi memory
-    net->opt.use_vulkan_compute = true;
-    net->opt.use_fp16_packed = true;
-    net->opt.use_fp16_storage = true;
-    net->opt.use_fp16_arithmetic = false; // <-- INI BIANG KEROK OUTPUT GELAP
+    net->opt.use_vulkan_compute  = true;
+    net->opt.use_fp16_packed     = true;
+    net->opt.use_fp16_storage    = true;
+    net->opt.use_fp16_arithmetic = false; // WAJIB FALSE untuk anime model
 
     int ret_param = net->load_param(param_path);
-    int ret_bin = net->load_model(bin_path);
+    int ret_bin   = net->load_model(bin_path);
 
     env->ReleaseStringUTFChars(paramPath, param_path);
     env->ReleaseStringUTFChars(binPath, bin_path);
 
     if (ret_param != 0 || ret_bin != 0) {
-        LOGE("Gagal baca file model AI!");
+        LOGE("Gagal load model!");
         return JNI_FALSE;
     }
+    LOGD("Model loaded OK");
     return JNI_TRUE;
 }
 
@@ -50,50 +48,50 @@ extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_RealSrEngine_processBitmap(JNIEnv* env, jobject thiz, jobject bitmap) {
     if (net == nullptr) return nullptr;
 
-    // Baca gambar jadi RGB
+    // Step 1: Baca bitmap → RGB float Mat (nilai 0..255)
     ncnn::Mat in = ncnn::Mat::from_android_bitmap(env, bitmap, ncnn::Mat::PIXEL_RGBA2RGB);
     if (in.empty()) return nullptr;
 
-    // FIX 2: Normalize input dari [0,255] ke [0,1]
-    // RealESRGAN expects float input in range [0, 1]
-    const float norm_vals[3] = { 1.0f / 255.0f, 1.0f / 255.0f, 1.0f / 255.0f };
-    in.substract_mean_normalize(0, norm_vals);
+    // Step 2: Normalize [0,255] → [0,1]
+    // Sama persis cara official realesrgan-ncnn-vulkan
+    static const float norm[3] = { 1/255.f, 1/255.f, 1/255.f };
+    in.substract_mean_normalize(nullptr, norm);
 
+    // Step 3: Inferensi
     ncnn::Extractor ex = net->create_extractor();
-    ncnn::Mat out;
-
     ex.input("data", in);
+
+    ncnn::Mat out;
     int ret = ex.extract("output", out);
 
     if (ret != 0 || out.empty()) {
-        ex.input("in0", in);
-        ret = ex.extract("out0", out);
+        LOGE("Inferensi gagal ret=%d", ret);
+        return nullptr;
     }
 
-    if (ret != 0 || out.empty()) return nullptr;
+    LOGD("Output: %dx%d ch=%d", out.w, out.h, out.c);
 
-    // FIX 3: Denormalize output dari [0,1] balik ke [0,255]
-    // Clamp dulu biar ga overflow
-    const float denorm_vals[3] = { 255.0f, 255.0f, 255.0f };
-    out.substract_mean_normalize(0, denorm_vals);
-
-    // Clamp nilai ke range 0-255 biar aman
-    for (int i = 0; i < out.c; i++) {
-        float* ptr = out.channel(i);
-        for (int j = 0; j < out.w * out.h; j++) {
-            ptr[j] = std::max(0.0f, std::min(255.0f, ptr[j]));
+    // Step 4: Denormalize [0,1] → [0,255] + clamp manual
+    int total = out.w * out.h;
+    for (int c = 0; c < out.c; c++) {
+        float* ptr = out.channel(c);
+        for (int i = 0; i < total; i++) {
+            ptr[i] = std::min(std::max(ptr[i] * 255.f, 0.f), 255.f);
         }
     }
 
-    jclass bitmapConfigClass = env->FindClass("android/graphics/Bitmap$Config");
-    jfieldID argb8888FieldID = env->GetStaticFieldID(bitmapConfigClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
-    jobject argb8888Obj = env->GetStaticObjectField(bitmapConfigClass, argb8888FieldID);
+    // Step 5: Buat output bitmap
+    jclass   bmpCfgClass = env->FindClass("android/graphics/Bitmap$Config");
+    jfieldID argbID      = env->GetStaticFieldID(bmpCfgClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
+    jobject  argbObj     = env->GetStaticObjectField(bmpCfgClass, argbID);
 
-    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
-    jmethodID createBitmapMethodID = env->GetStaticMethodID(bitmapClass, "createBitmap", "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
-    jobject newBitmap = env->CallStaticObjectMethod(bitmapClass, createBitmapMethodID, out.w, out.h, argb8888Obj);
+    jclass    bmpClass  = env->FindClass("android/graphics/Bitmap");
+    jmethodID createID  = env->GetStaticMethodID(bmpClass, "createBitmap",
+                          "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    jobject newBmp = env->CallStaticObjectMethod(bmpClass, createID, out.w, out.h, argbObj);
 
-    out.to_android_bitmap(env, newBitmap, ncnn::Mat::PIXEL_RGB2RGBA);
+    // Step 6: Tulis RGB → RGBA ke bitmap Android
+    out.to_android_bitmap(env, newBmp, ncnn::Mat::PIXEL_RGB2RGBA);
 
-    return newBitmap;
+    return newBmp;
 }
