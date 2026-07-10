@@ -125,7 +125,6 @@ object RealSrEngine {
                     append("-i ${inputFile.absolutePath} ")
                     append("-o ${outputFile.absolutePath} ")
                     append("-m ${modelsDir.absolutePath} ")
-                    append("-n x4 ")
                     append("-s 4 ")
                     append("-g 0")
                 }
