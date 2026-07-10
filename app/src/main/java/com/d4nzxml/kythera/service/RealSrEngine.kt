@@ -12,9 +12,7 @@ import java.io.FileOutputStream
 object RealSrEngine {
 
     private const val TAG = "Kythera_AI"
-
-    // Cek versi — kalau assets berubah, copy ulang
-    private const val VERSION = "v3"
+    private const val VERSION = "v4"
 
     private val BINARIES = listOf(
         "realsr/realsr-ncnn",
@@ -27,54 +25,55 @@ object RealSrEngine {
         "realsr/models/x4.param"
     )
 
-    // Pakai codeCacheDir — satu2nya folder Android yang allow write + execute
     private fun getBaseDir(context: Context) = context.codeCacheDir
 
-    private fun isSetupDone(context: Context): Boolean {
-        val versionFile = File(getBaseDir(context), "realsr/.version")
-        return versionFile.exists() && versionFile.readText().trim() == VERSION
+    private fun binaryExists(context: Context): Boolean {
+        val binary = File(getBaseDir(context), "realsr/realsr-ncnn")
+        return binary.exists() && binary.length() > 0
     }
 
     suspend fun setup(context: Context): Boolean = withContext(Dispatchers.IO) {
-        if (isSetupDone(context)) {
-            Log.d(TAG, "Setup sudah ada, skip copy.")
+        val baseDir = getBaseDir(context)
+        Log.d(TAG, "codeCacheDir = ${baseDir.absolutePath}")
+
+        // Selalu copy ulang kalau binary tidak ada
+        if (binaryExists(context)) {
+            Log.d(TAG, "Binary sudah ada, skip copy.")
             return@withContext true
         }
 
-        try {
-            val baseDir = getBaseDir(context)
-            Log.d(TAG, "Base dir: ${baseDir.absolutePath}")
+        Log.d(TAG, "Binary belum ada, mulai copy dari assets...")
 
-            // Copy semua binary
+        try {
             for (assetPath in BINARIES) {
                 val outFile = File(baseDir, assetPath)
                 outFile.parentFile?.mkdirs()
                 context.assets.open(assetPath).use { input ->
                     FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
-                Log.d(TAG, "Copied: $assetPath → ${outFile.absolutePath}")
+                Log.d(TAG, "OK: ${outFile.absolutePath} (${outFile.length()} bytes)")
             }
 
-            // Copy model files
             for (assetPath in MODELS) {
                 val outFile = File(baseDir, assetPath)
                 outFile.parentFile?.mkdirs()
                 context.assets.open(assetPath).use { input ->
                     FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
-                Log.d(TAG, "Copied: $assetPath → ${outFile.absolutePath}")
+                Log.d(TAG, "OK: ${outFile.absolutePath} (${outFile.length()} bytes)")
             }
 
-            // chmod binary via shell
+            // chmod via shell
             val binaryPath = File(baseDir, "realsr/realsr-ncnn").absolutePath
-            val chmodProc = Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath))
-            val chmodExit = chmodProc.waitFor()
-            Log.d(TAG, "chmod exit: $chmodExit")
+            Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath)).waitFor()
 
-            // Tulis version file sebagai marker
-            File(baseDir, "realsr/.version").writeText(VERSION)
+            // Verifikasi binary ada setelah copy
+            if (!binaryExists(context)) {
+                Log.e(TAG, "Copy selesai tapi binary masih tidak ada!")
+                return@withContext false
+            }
 
-            Log.d(TAG, "Setup selesai!")
+            Log.d(TAG, "Setup sukses!")
             true
 
         } catch (e: Exception) {
@@ -91,10 +90,8 @@ object RealSrEngine {
                 val inputFile  = File(tmpDir, "realsr_input.png")
                 val outputFile = File(tmpDir, "realsr_output.png")
 
-                // Hapus output lama kalau ada
                 if (outputFile.exists()) outputFile.delete()
 
-                // Simpan input ke PNG
                 val safeBitmap = if (input.config != Bitmap.Config.ARGB_8888)
                     input.copy(Bitmap.Config.ARGB_8888, false) else input
                 FileOutputStream(inputFile).use { out ->
@@ -105,13 +102,18 @@ object RealSrEngine {
                 val modelDir   = File(baseDir, "realsr/models").absolutePath
                 val libDir     = File(baseDir, "realsr").absolutePath
 
-                // Pastiin binary ada
-                if (!File(binaryPath).exists()) {
+                // Validasi semua file ada
+                val missing = mutableListOf<String>()
+                if (!File(binaryPath).exists()) missing.add("realsr-ncnn")
+                if (!File(modelDir, "x4.bin").exists()) missing.add("x4.bin")
+                if (!File(modelDir, "x4.param").exists()) missing.add("x4.param")
+                if (missing.isNotEmpty()) {
                     return@withContext Pair(null,
-                        "Binary tidak ada di: $binaryPath\nCoba clear app data dan coba lagi!")
+                        "File hilang: ${missing.joinToString()}\n" +
+                        "Base dir: ${baseDir.absolutePath}\n" +
+                        "Coba clear app data & install ulang!")
                 }
 
-                // chmod lagi setiap kali
                 Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath)).waitFor()
 
                 val cmd = arrayOf(
@@ -146,25 +148,22 @@ object RealSrEngine {
                     outputFile.delete()
                     Pair(result, null)
                 } else {
-                    val errMsg = buildString {
+                    Pair(null, buildString {
                         appendLine("EXIT CODE: $exitCode")
-                        appendLine("BINARY: $binaryPath")
+                        appendLine("BINARY: $binaryPath (${File(binaryPath).length()} bytes)")
                         appendLine("MODEL DIR: $modelDir")
                         appendLine("LIB DIR: $libDir")
-                        appendLine("---OUTPUT LOG---")
-                        appendLine(log.ifEmpty { "(kosong — binary mungkin crash sebelum output)" })
-                    }
-                    Pair(null, errMsg)
+                        appendLine("---LOG---")
+                        appendLine(log.ifEmpty { "(kosong)" })
+                    })
                 }
 
             } catch (e: Exception) {
-                val errMsg = buildString {
+                Pair(null, buildString {
                     appendLine("EXCEPTION: ${e.javaClass.simpleName}")
                     appendLine("MESSAGE: ${e.message}")
-                    appendLine("---STACKTRACE---")
-                    appendLine(e.stackTraceToString().take(800))
-                }
-                Pair(null, errMsg)
+                    appendLine(e.stackTraceToString().take(600))
+                })
             }
         }
 }
