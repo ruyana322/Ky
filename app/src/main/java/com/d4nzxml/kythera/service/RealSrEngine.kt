@@ -24,9 +24,8 @@ object RealSrEngine {
         "realsr/models/x4.param"
     )
 
-    private fun getBaseDir(context: Context): File {
-        return context.getDir("realsr", Context.MODE_PRIVATE)
-    }
+    private fun getBaseDir(context: Context): File =
+        context.getDir("realsr", Context.MODE_PRIVATE)
 
     private fun binaryExists(context: Context): Boolean {
         val f = File(getBaseDir(context), "realsr-ncnn")
@@ -35,62 +34,38 @@ object RealSrEngine {
 
     suspend fun setup(context: Context): Boolean = withContext(Dispatchers.IO) {
         val baseDir = getBaseDir(context)
-        Log.d(TAG, "baseDir = ${baseDir.absolutePath}")
-
-        if (binaryExists(context)) {
-            Log.d(TAG, "Binary sudah ada!")
-            return@withContext true
-        }
+        if (binaryExists(context)) return@withContext true
 
         try {
-            // Copy binary + libs flat ke baseDir
             for (assetPath in BINARIES) {
-                val fileName = assetPath.substringAfterLast("/")
-                val outFile  = File(baseDir, fileName)
-                context.assets.open(assetPath).use { input ->
-                    FileOutputStream(outFile).use { output -> input.copyTo(output) }
+                val outFile = File(baseDir, assetPath.substringAfterLast("/"))
+                context.assets.open(assetPath).use { i ->
+                    FileOutputStream(outFile).use { o -> i.copyTo(o) }
                 }
-                Log.d(TAG, "Copied: $fileName (${outFile.length()} bytes)")
             }
-
-            // Copy model files
-            val modelsDir = File(baseDir, "models")
-            modelsDir.mkdirs()
+            val modelsDir = File(baseDir, "models").also { it.mkdirs() }
             for (assetPath in MODELS) {
-                val fileName = assetPath.substringAfterLast("/")
-                val outFile  = File(modelsDir, fileName)
-                context.assets.open(assetPath).use { input ->
-                    FileOutputStream(outFile).use { output -> input.copyTo(output) }
+                val outFile = File(modelsDir, assetPath.substringAfterLast("/"))
+                context.assets.open(assetPath).use { i ->
+                    FileOutputStream(outFile).use { o -> i.copyTo(o) }
                 }
-                Log.d(TAG, "Copied model: $fileName")
             }
 
-            // Copy libOpenCL.so dari system (cara tumuyan)
-            val openCLPaths = listOf(
+            listOf(
                 "/system/vendor/lib64/libOpenCL.so",
                 "/system/lib64/libOpenCL.so",
                 "/system/vendor/lib/libOpenCL.so",
                 "/system/lib/libOpenCL.so"
-            )
-            for (path in openCLPaths) {
-                val src = File(path)
-                if (src.exists()) {
-                    src.copyTo(File(baseDir, "libOpenCL.so"), overwrite = true)
-                    Log.d(TAG, "Copied libOpenCL from $path")
-                    break
-                }
+            ).firstOrNull { File(it).exists() }?.let {
+                File(it).copyTo(File(baseDir, "libOpenCL.so"), overwrite = true)
             }
 
-            // CARA TUMUYAN: cd ke folder dulu, baru chmod +x *
-            val chmodCmd = "cd ${baseDir.absolutePath}; chmod +x *; echo done; ls"
-            val chmodProc = Runtime.getRuntime().exec(arrayOf("sh", "-c", chmodCmd))
-            val chmodLog = chmodProc.inputStream.bufferedReader().readText()
-            chmodProc.waitFor()
-            Log.d(TAG, "chmod result: $chmodLog")
+            Runtime.getRuntime()
+                .exec(arrayOf("sh", "-c", "cd ${baseDir.absolutePath}; chmod +x *"))
+                .waitFor()
 
             Log.d(TAG, "Setup sukses!")
             true
-
         } catch (e: Exception) {
             Log.e(TAG, "Setup gagal: ${e.message}")
             false
@@ -101,12 +76,12 @@ object RealSrEngine {
         withContext(Dispatchers.IO) {
             try {
                 val baseDir    = getBaseDir(context)
-                val tmpDir     = context.cacheDir
-                val inputFile  = File(tmpDir, "input.png")
-                val outputFile = File(tmpDir, "output.png")
+                val inputFile  = File(context.cacheDir, "input.png")
+                val outputFile = File(context.cacheDir, "output.png")
 
                 if (outputFile.exists()) outputFile.delete()
 
+                // Full resolution — tidak ada resize sama sekali (cara tumuyan)
                 val safeBitmap = if (input.config != Bitmap.Config.ARGB_8888)
                     input.copy(Bitmap.Config.ARGB_8888, false) else input
                 FileOutputStream(inputFile).use { out ->
@@ -115,28 +90,31 @@ object RealSrEngine {
 
                 val modelsDir = File(baseDir, "models")
 
-                // CARA TUMUYAN PERSIS:
-                // cd ke folder, export LD_LIBRARY_PATH, chmod +x, lalu ./realsr-ncnn
-                val shellCmd = buildString {
-                    append("cd ${baseDir.absolutePath}; ")
-                    append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
-                    append("chmod +x *; ")
-                    append("./realsr-ncnn ")
-                    append("-i ${inputFile.absolutePath} ")
-                    append("-o ${outputFile.absolutePath} ")
-                    append("-m ${modelsDir.absolutePath} ")
-                    append("-s 4 ")
-                    append("-g 0")
-                }
+                // Cara tumuyan persis: -c 46 (tilesize) + full path model
+                val threads = Runtime.getRuntime().availableProcessors()
 
-                Log.d(TAG, "Shell: $shellCmd")
+val shellCmd = buildString {
+    append("cd ${baseDir.absolutePath}; ")
+    append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
+    append("chmod +x *; ")
+    append("./realsr-ncnn ")
+    append("-c 46 ")
+append("-j $threads:$threads:$threads ")
+      // load:proc:save threads
+    append("-i ${inputFile.absolutePath} ")
+    append("-o ${outputFile.absolutePath} ")
+    append("-m ${modelsDir.absolutePath} ")
+    append("-s 4 ")
+    append("-g 0")
+}
+                Log.d(TAG, "CMD: $shellCmd")
 
-                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", shellCmd))
+                val process  = Runtime.getRuntime().exec(arrayOf("sh", "-c", shellCmd))
                 val stdout   = process.inputStream.bufferedReader().readText()
                 val stderr   = process.errorStream.bufferedReader().readText()
                 val exitCode = process.waitFor()
 
-                Log.d(TAG, "Exit: $exitCode | stdout: $stdout | stderr: $stderr")
+                Log.d(TAG, "Exit=$exitCode stdout=$stdout stderr=$stderr")
 
                 if (exitCode == 0 && outputFile.exists() && outputFile.length() > 0) {
                     val result = BitmapFactory.decodeFile(outputFile.absolutePath)
@@ -144,23 +122,34 @@ object RealSrEngine {
                     outputFile.delete()
                     Pair(result, null)
                 } else {
-                    Pair(null, buildString {
-                        appendLine("EXIT CODE: $exitCode")
-                        appendLine("DIR: ${baseDir.absolutePath}")
-                        appendLine("FILES: ${baseDir.listFiles()?.map { "${it.name}(${it.length()})" }}")
-                        appendLine("---STDOUT---")
-                        appendLine(stdout.ifEmpty { "(kosong)" })
-                        appendLine("---STDERR---")
-                        appendLine(stderr.ifEmpty { "(kosong)" })
-                    })
+                    // Fallback CPU kalau GPU gagal
+                    Log.d(TAG, "GPU gagal, coba CPU...")
+                    outputFile.delete()
+                    val cpuCmd = shellCmd.replace("-g 0", "-g -1")
+                    val p2     = Runtime.getRuntime().exec(arrayOf("sh", "-c", cpuCmd))
+                    val out2   = p2.inputStream.bufferedReader().readText()
+                    val err2   = p2.errorStream.bufferedReader().readText()
+                    val exit2  = p2.waitFor()
+
+                    if (exit2 == 0 && outputFile.exists() && outputFile.length() > 0) {
+                        val result = BitmapFactory.decodeFile(outputFile.absolutePath)
+                        inputFile.delete()
+                        outputFile.delete()
+                        Pair(result, null)
+                    } else {
+                        Pair(null, buildString {
+                            appendLine("EXIT GPU=$exitCode CPU=$exit2")
+                            appendLine("FILES: ${baseDir.listFiles()?.map { "${it.name}(${it.length()})" }}")
+                            appendLine("STDOUT GPU: ${stdout.ifEmpty { "(kosong)" }}")
+                            appendLine("STDERR GPU: ${stderr.ifEmpty { "(kosong)" }}")
+                            appendLine("STDOUT CPU: ${out2.ifEmpty { "(kosong)" }}")
+                            appendLine("STDERR CPU: ${err2.ifEmpty { "(kosong)" }}")
+                        })
+                    }
                 }
 
             } catch (e: Exception) {
-                Pair(null, buildString {
-                    appendLine("EXCEPTION: ${e.javaClass.simpleName}")
-                    appendLine("MESSAGE: ${e.message}")
-                    appendLine(e.stackTraceToString().take(600))
-                })
+                Pair(null, "EXCEPTION: ${e.javaClass.simpleName}\n${e.message}\n${e.stackTraceToString().take(500)}")
             }
         }
 }
