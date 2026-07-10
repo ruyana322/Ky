@@ -66,7 +66,7 @@ object RealSrEngine {
     suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
         withContext(Dispatchers.IO) {
             try {
-                val baseDir    = context.filesDir
+                val baseDir = context.codeCacheDir
                 val tmpDir     = context.cacheDir
                 val inputFile  = File(tmpDir, "realsr_input.png")
                 val outputFile = File(tmpDir, "realsr_output.png")
