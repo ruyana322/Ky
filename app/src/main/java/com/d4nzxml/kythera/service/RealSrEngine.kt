@@ -98,13 +98,12 @@ val shellCmd = buildString {
     append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
     append("chmod +x *; ")
     append("./realsr-ncnn ")
-    append("-c 46 ")
-      // load:proc:save threads
     append("-i ${inputFile.absolutePath} ")
     append("-o ${outputFile.absolutePath} ")
     append("-m ${modelsDir.absolutePath} ")
     append("-s 4 ")
-    append("-g 0")
+    append("-j 1:2:2 ")   // thread load:proc:save
+    append("-g 0")         // GPU
 }
                 Log.d(TAG, "CMD: $shellCmd")
 
