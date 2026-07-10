@@ -24,7 +24,6 @@ object RealSrEngine {
         "realsr/models/x4.param"
     )
 
-    // Pakai getDir("realsr", MODE_PRIVATE) — sama seperti cara tumuyan
     private fun getBaseDir(context: Context): File {
         return context.getDir("realsr", Context.MODE_PRIVATE)
     }
@@ -34,17 +33,24 @@ object RealSrEngine {
         return f.exists() && f.length() > 100
     }
 
+    private fun runShell(vararg cmd: String): Int {
+        return try {
+            val p = Runtime.getRuntime().exec(cmd)
+            p.waitFor()
+        } catch (e: Exception) { -1 }
+    }
+
     suspend fun setup(context: Context): Boolean = withContext(Dispatchers.IO) {
         val baseDir = getBaseDir(context)
         Log.d(TAG, "baseDir = ${baseDir.absolutePath}")
 
         if (binaryExists(context)) {
-            Log.d(TAG, "Binary sudah ada!")
+            Log.d(TAG, "Binary sudah ada, skip copy.")
             return@withContext true
         }
 
         try {
-            // Copy binary + libs LANGSUNG ke baseDir (flat, tidak pakai subfolder)
+            // Copy binary + libs flat ke baseDir
             for (assetPath in BINARIES) {
                 val fileName = assetPath.substringAfterLast("/")
                 val outFile  = File(baseDir, fileName)
@@ -54,7 +60,7 @@ object RealSrEngine {
                 Log.d(TAG, "Copied: $fileName (${outFile.length()} bytes)")
             }
 
-            // Copy model files ke subfolder models/
+            // Copy model files
             val modelsDir = File(baseDir, "models")
             modelsDir.mkdirs()
             for (assetPath in MODELS) {
@@ -63,10 +69,10 @@ object RealSrEngine {
                 context.assets.open(assetPath).use { input ->
                     FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
-                Log.d(TAG, "Copied model: $fileName (${outFile.length()} bytes)")
+                Log.d(TAG, "Copied model: $fileName")
             }
 
-            // Copy libOpenCL.so dari system (cara tumuyan!) 
+            // Copy libOpenCL.so dari system
             val openCLPaths = listOf(
                 "/system/vendor/lib64/libOpenCL.so",
                 "/system/lib64/libOpenCL.so",
@@ -77,19 +83,21 @@ object RealSrEngine {
                 val src = File(path)
                 if (src.exists()) {
                     src.copyTo(File(baseDir, "libOpenCL.so"), overwrite = true)
-                    Log.d(TAG, "Copied libOpenCL.so from $path")
+                    Log.d(TAG, "Copied libOpenCL from $path")
                     break
                 }
             }
 
-            // chmod +x semua binary di folder (cara tumuyan!)
-            val chmodCmd = "chmod +x ${baseDir.absolutePath}/*ncnn"
-            Runtime.getRuntime().exec(arrayOf("sh", "-c", chmodCmd)).waitFor()
-            Log.d(TAG, "chmod done")
+            // chmod binary langsung via Runtime.exec (BUKAN sh -c)
+            val binaryFile = File(baseDir, "realsr-ncnn")
+            val chmodExit = runShell("chmod", "777", binaryFile.absolutePath)
+            Log.d(TAG, "chmod 777 exit: $chmodExit")
 
-            Log.d(TAG, "Setup sukses! Dir: ${baseDir.absolutePath}")
+            // Verifikasi
+            Log.d(TAG, "canExecute: ${binaryFile.canExecute()}")
+            Log.d(TAG, "Files: ${baseDir.listFiles()?.map { it.name }}")
+
             true
-
         } catch (e: Exception) {
             Log.e(TAG, "Setup gagal: ${e.message}")
             false
@@ -112,33 +120,38 @@ object RealSrEngine {
                     safeBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
 
-                val modelsDir = File(baseDir, "models").absolutePath
+                val binaryFile = File(baseDir, "realsr-ncnn")
+                val modelsDir  = File(baseDir, "models")
 
-                // Cara tumuyan: cd ke folder dulu, baru ./realsr-ncnn
-                // export LD_LIBRARY_PATH ke folder binary
-                val shellCmd = buildString {
-                    append("cd ${baseDir.absolutePath}; ")
-                    append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
-                    append("chmod +x realsr-ncnn 2>/dev/null; ")
-                    append("./realsr-ncnn ")
-                    append("-i ${inputFile.absolutePath} ")
-                    append("-o ${outputFile.absolutePath} ")
-                    append("-m $modelsDir ")
-                    append("-n x4 ")
-                    append("-s 4 ")
-                    append("-g 0")
+                // chmod lagi sebelum eksekusi
+                runShell("chmod", "777", binaryFile.absolutePath)
+
+                Log.d(TAG, "binary exists: ${binaryFile.exists()}, size: ${binaryFile.length()}")
+                Log.d(TAG, "canExecute: ${binaryFile.canExecute()}")
+
+                // Eksekusi langsung tanpa sh -c
+                val cmd = arrayOf(
+                    binaryFile.absolutePath,
+                    "-i", inputFile.absolutePath,
+                    "-o", outputFile.absolutePath,
+                    "-m", modelsDir.absolutePath,
+                    "-n", "x4",
+                    "-s", "4",
+                    "-g", "0"
+                )
+
+                val pb = ProcessBuilder(*cmd).apply {
+                    directory(baseDir)
+                    val env = environment()
+                    env["LD_LIBRARY_PATH"] = "${baseDir.absolutePath}:${env["LD_LIBRARY_PATH"] ?: ""}"
+                    redirectErrorStream(true)
                 }
 
-                Log.d(TAG, "Shell: $shellCmd")
-
-                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", shellCmd))
+                val process  = pb.start()
                 val log      = process.inputStream.bufferedReader().readText()
-                val errLog   = process.errorStream.bufferedReader().readText()
                 val exitCode = process.waitFor()
 
-                Log.d(TAG, "Exit: $exitCode")
-                Log.d(TAG, "stdout: $log")
-                Log.d(TAG, "stderr: $errLog")
+                Log.d(TAG, "Exit: $exitCode | Log: $log")
 
                 if (exitCode == 0 && outputFile.exists() && outputFile.length() > 0) {
                     val result = BitmapFactory.decodeFile(outputFile.absolutePath)
@@ -148,12 +161,11 @@ object RealSrEngine {
                 } else {
                     Pair(null, buildString {
                         appendLine("EXIT CODE: $exitCode")
-                        appendLine("DIR: ${baseDir.absolutePath}")
+                        appendLine("BINARY: ${binaryFile.absolutePath}")
+                        appendLine("canExecute: ${binaryFile.canExecute()}")
                         appendLine("FILES: ${baseDir.listFiles()?.map { it.name }}")
-                        appendLine("---STDOUT---")
+                        appendLine("---LOG---")
                         appendLine(log.ifEmpty { "(kosong)" })
-                        appendLine("---STDERR---")
-                        appendLine(errLog.ifEmpty { "(kosong)" })
                     })
                 }
 
