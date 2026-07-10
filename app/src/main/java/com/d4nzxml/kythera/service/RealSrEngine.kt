@@ -98,13 +98,18 @@ val shellCmd = buildString {
     append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
     append("chmod +x *; ")
     append("./realsr-ncnn ")
-    append("-i ${inputFile.absolutePath} ")
-    append("-o ${outputFile.absolutePath} ")
-    append("-m ${modelsDir.absolutePath} ")
+    append("-i '${inputFile.absolutePath}' ")
+    append("-o '${outputFile.absolutePath}' ")
+    append("-m '${modelsDir.absolutePath}' ")
     append("-s 4 ")
-    append("-j 1:2:2 ")   // thread load:proc:save
-    append("-g 0")         // GPU
+    
+    // 🔥 SUNTIKAN TURBO TARUH DI SINI
+    append("-t 0 ")       // Auto Tile Size
+    append("-j 4:4:4 ")   // Paksa 4 Thread CPU
+    
+    append("-g 0")
 }
+
                 Log.d(TAG, "CMD: $shellCmd")
 
                 val process  = Runtime.getRuntime().exec(arrayOf("sh", "-c", shellCmd))
