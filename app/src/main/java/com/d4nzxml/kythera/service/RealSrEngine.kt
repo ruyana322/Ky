@@ -91,7 +91,7 @@ object RealSrEngine {
                 val modelsDir = File(baseDir, "models")
 
                 // Cara tumuyan persis: -c 46 (tilesize) + full path model
-                val threads = Runtime.getRuntime().availableProcessors()
+               
 
 val shellCmd = buildString {
     append("cd ${baseDir.absolutePath}; ")
@@ -99,7 +99,6 @@ val shellCmd = buildString {
     append("chmod +x *; ")
     append("./realsr-ncnn ")
     append("-c 46 ")
-append("-j $threads:$threads:$threads ")
       // load:proc:save threads
     append("-i ${inputFile.absolutePath} ")
     append("-o ${outputFile.absolutePath} ")
