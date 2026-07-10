@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -55,7 +56,6 @@ fun EnhanceScreen() {
     var errorLog     by remember { mutableStateOf<String?>(null) }
     var isSuccess    by remember { mutableStateOf(false) }
     
-    // State untuk Waktu
     var elapsedTime  by remember { mutableStateOf(0L) }
 
     LaunchedEffect(isProcessing) {
@@ -127,81 +127,77 @@ fun EnhanceScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // 🔥 SCROLL DIHAPUS BIAR SLIDER BISA MELAR FULL SCREEN 🔥
-            .padding(16.dp) 
+            .padding(16.dp)
     ) {
-        Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
-        Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(16.dp))
-
-        GlassCard {
-            KDropZone(
-                onTap = { picker.launch("image/*") },
-                title = "Upload Foto",
-                subtitle = "JPG, PNG, WEBP — Kualitas Lossless",
-                icon = Icons.Rounded.Image,
-                accentColor = KColor.Accent,
-                selectedFileName = fileName
-            )
-            if (statusText.isNotEmpty() && !isProcessing) {
-                Spacer(Modifier.height(10.dp))
-                Text(statusText, color = if (isSuccess) KColor.Accent else KColor.Text2, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-            }
-            if (inputBitmap != null && outputBitmap == null) {
-                Spacer(Modifier.height(12.dp))
-                Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null,
-                    modifier = Modifier.fillMaxWidth().height(220.dp), contentScale = ContentScale.Fit)
-            }
-        }
-
-        // 🔥 KOTAK SLIDER BEFORE/AFTER YANG BISA MELAR 🔥
-        if (inputBitmap != null && outputBitmap != null) {
+        // 🔥 LOGIKA DUAL-STATE UI: Sembunyiin atasnya kalau gambar udah jadi! 🔥
+        if (outputBitmap == null) {
+            // --- TAMPILAN 1: MODE UPLOAD ---
+            Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
+            Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
-            GlassCard(modifier = Modifier.weight(1f)) { // Kunci 1: Memaksa Card ngambil sisa ruang
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text("Before / After", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
-                    }
+
+            GlassCard {
+                KDropZone(
+                    onTap = { picker.launch("image/*") },
+                    title = "Upload Foto",
+                    subtitle = "JPG, PNG, WEBP — Kualitas Lossless",
+                    icon = Icons.Rounded.Image,
+                    accentColor = KColor.Accent,
+                    selectedFileName = fileName
+                )
+                if (statusText.isNotEmpty() && !isProcessing) {
                     Spacer(Modifier.height(10.dp))
-                    BeforeAfterSlider(
-                        before = inputBitmap!!,
-                        after  = outputBitmap!!,
-                        modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(10.dp)) // Kunci 2: Memaksa Slider melar mentok
-                    )
+                    Text(statusText, color = KColor.Text2, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                }
+                if (inputBitmap != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null,
+                        modifier = Modifier.fillMaxWidth().height(220.dp), contentScale = ContentScale.Fit)
                 }
             }
+            
+            Spacer(modifier = Modifier.weight(1f)) // Dorong sisa elemen ke bawah
+            
         } else {
-            // Kalau slider belum ada, dorong tombol tetap di bawah
-            Spacer(modifier = Modifier.weight(1f))
+            // --- TAMPILAN 2: MODE FULLSCREEN PREVIEW ---
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Bandingkan Hasil (HD)", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+            
+            // Slider langsung ngambil 100% sisa layar yang udah kosong!
+            BeforeAfterSlider(
+                before = inputBitmap!!,
+                after  = outputBitmap!!,
+                modifier = Modifier
+                    .weight(1f) // Kunci layar penuh
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, KColor.Border, RoundedCornerShape(16.dp))
+            )
+            
+            Spacer(Modifier.height(12.dp))
+            Text(statusText, color = KColor.Accent, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
 
+        // --- ERROR LOG ---
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
-                modifier = Modifier.fillMaxWidth()
-                    .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
-                    .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
-                    .padding(14.dp)
+                modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp)).background(Color(0x22FF0000), RoundedCornerShape(10.dp)).padding(14.dp)
             ) {
                 Text("⚠️ SYSTEM LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Spacer(Modifier.height(8.dp))
-                Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
+                Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
             }
         }
 
-        // 🔥 PROGRESS BAR & TOMBOL BAWAH 🔥
+        // --- PROGRESS BAR & TOMBOL ---
         if (isProcessing) {
             Spacer(Modifier.height(16.dp))
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(KColor.Surface2)
-                    .border(1.dp, KColor.Border, RoundedCornerShape(14.dp))
-                    .padding(16.dp)
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(KColor.Surface2).border(1.dp, KColor.Border, RoundedCornerShape(14.dp)).padding(16.dp)
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -210,13 +206,9 @@ fun EnhanceScreen() {
                         Text(statusText, color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(Modifier.height(14.dp))
-                    
                     LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(2.dp)),
-                        color = Color(0xFF3FB950), 
-                        trackColor = KColor.Border
+                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(2.dp)), color = Color(0xFF3FB950), trackColor = KColor.Border
                     )
-                    
                     Spacer(Modifier.height(10.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Writing output...", color = KColor.Text3, fontSize = 11.sp)
@@ -226,15 +218,28 @@ fun EnhanceScreen() {
             }
         } else {
             Spacer(Modifier.height(16.dp))
-            KPrimaryButton(
-                label = if (outputBitmap != null) "Proses Ulang Gambar" else "Tingkatkan Resolusi",
-                icon = Icons.Rounded.AutoAwesome,
-                enabled = !isProcessing && inputBitmap != null,
-                onClick = ::processImage
-            )
+            if (outputBitmap != null) {
+                // Tombol ganti jadi "Edit Gambar Lain" buat mereset layar kembali ke awal
+                KPrimaryButton(
+                    label = "Selesai & Gambar Lain",
+                    icon = Icons.Rounded.Refresh,
+                    onClick = { 
+                        outputBitmap = null
+                        inputBitmap = null 
+                        statusText = ""
+                    }
+                )
+            } else {
+                KPrimaryButton(
+                    label = "Tingkatkan Resolusi",
+                    icon = Icons.Rounded.AutoAwesome,
+                    enabled = !isProcessing && inputBitmap != null,
+                    onClick = ::processImage
+                )
+            }
         }
         
-        Spacer(Modifier.height(24.dp)) // Jarak aman dari navigasi bawah
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -244,7 +249,7 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
     val beforeImg = remember(before) { before.asImageBitmap() }
     val afterImg  = remember(after)  { after.asImageBitmap() }
 
-    BoxWithConstraints(modifier = modifier) {
+    BoxWithConstraints(modifier = modifier.background(KColor.Surface)) { // Background gelap buat nambal kekosongan
         Canvas(
             modifier = Modifier.fillMaxSize().pointerInput(Unit) {
                 detectHorizontalDragGestures { change, _ ->
@@ -257,7 +262,7 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
 
             val afterScaleX = w / afterImg.width.toFloat()
             val afterScaleY = h / afterImg.height.toFloat()
-            val afterScale  = minOf(afterScaleX, afterScaleY)
+            val afterScale  = minOf(afterScaleX, afterScaleY) // Gambar dijamin gak kepotong
             val afterW = afterImg.width * afterScale
             val afterH = afterImg.height * afterScale
             val afterOx = (w - afterW) / 2f
@@ -281,22 +286,19 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
                 }
             }
 
-            drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 4f)
-
-            drawCircle(Color.White, radius = 26f, center = Offset(w * sliderPos, h / 2))
-            drawCircle(KColor.Accent, radius = 18f, center = Offset(w * sliderPos, h / 2))
+            drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 5f)
+            drawCircle(Color.White, radius = 28f, center = Offset(w * sliderPos, h / 2))
+            drawCircle(KColor.Accent, radius = 20f, center = Offset(w * sliderPos, h / 2))
         }
 
-        Box(Modifier.align(Alignment.TopStart).padding(8.dp)
-            .background(Color.Black.copy(0.65f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Text("BEFORE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.align(Alignment.TopStart).padding(12.dp)
+            .background(Color.Black.copy(0.7f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text("BEFORE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
 
-        Box(Modifier.align(Alignment.TopEnd).padding(8.dp)
-            .background(KColor.Accent.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Text("AFTER", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.align(Alignment.TopEnd).padding(12.dp)
+            .background(KColor.Accent.copy(alpha = 0.9f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text("AFTER", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
