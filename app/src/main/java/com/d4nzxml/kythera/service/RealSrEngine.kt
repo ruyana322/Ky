@@ -81,7 +81,6 @@ object RealSrEngine {
 
                 if (outputFile.exists()) outputFile.delete()
 
-                // Full resolution — tidak ada resize sama sekali (cara tumuyan)
                 val safeBitmap = if (input.config != Bitmap.Config.ARGB_8888)
                     input.copy(Bitmap.Config.ARGB_8888, false) else input
                 FileOutputStream(inputFile).use { out ->
@@ -90,35 +89,36 @@ object RealSrEngine {
 
                 val modelsDir = File(baseDir, "models")
 
-                // Cara tumuyan persis: -c 46 (tilesize) + full path model
-               
+                // 🔥 COMMAND ASLI TUMUYAN: Polos tanpa -t, -j, atau -g (Biar auto-detect)
+                val commandRun = "./realsr-ncnn -i '${inputFile.absolutePath}' -o '${outputFile.absolutePath}' -m '${modelsDir.absolutePath}' -s 4"
+                
+                Log.d(TAG, "CMD: $commandRun")
 
-                val shellCmd = buildString {
-                    append("cd ${baseDir.absolutePath}; ")
-                    append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
-                    append("chmod +x *; ")
-                    append("./realsr-ncnn ")
-                    append("-i '${inputFile.absolutePath}' ")
-                    append("-o '${outputFile.absolutePath}' ")
-                    append("-m '${modelsDir.absolutePath}' ")
-                    append("-s 4 ")
-                    
-                    // 🔥 INI KUNCI UTAMANYA BIAR GPU JALAN!
-                    append("-t 400 ")     // Pecah gambar jadi kotak 400x400 biar Vulkan GPU gak muntah
-                    append("-j 4:4:4 ")   
-                    
-                    append("-g 0")
+                // 🔥 METODE EKSEKUSI TUMUYAN: Pakai ProcessBuilder dan Stdin
+                val pb = ProcessBuilder("sh")
+                pb.directory(baseDir)
+                pb.redirectErrorStream(true) // Tumuyan menggabungkan ErrorStream ke InputStream
+
+                val process = pb.start()
+                val stdin = process.outputStream
+
+                try {
+                    // Inject setup command
+                    stdin.write(("cd ${baseDir.absolutePath}; chmod +x *ncnn 2>/dev/null; export LD_LIBRARY_PATH=${baseDir.absolutePath};\n").toByteArray())
+                    // Inject perintah utama
+                    stdin.write(("$commandRun\n").toByteArray())
+                    // Selesai
+                    stdin.write("exit\n".toByteArray())
+                    stdin.flush()
+                } finally {
+                    stdin.close()
                 }
 
-
-                Log.d(TAG, "CMD: $shellCmd")
-
-                val process  = Runtime.getRuntime().exec(arrayOf("sh", "-c", shellCmd))
-                val stdout   = process.inputStream.bufferedReader().readText()
-                val stderr   = process.errorStream.bufferedReader().readText()
+                // Ambil log outputnya
+                val stdout = process.inputStream.bufferedReader().readText()
                 val exitCode = process.waitFor()
 
-                Log.d(TAG, "Exit=$exitCode stdout=$stdout stderr=$stderr")
+                Log.d(TAG, "Exit=$exitCode stdout=$stdout")
 
                 if (exitCode == 0 && outputFile.exists() && outputFile.length() > 0) {
                     val result = BitmapFactory.decodeFile(outputFile.absolutePath)
@@ -126,14 +126,30 @@ object RealSrEngine {
                     outputFile.delete()
                     Pair(result, null)
                 } else {
-                    // Fallback CPU kalau GPU gagal
+                    // Fallback CPU kalau GPU gagal (tetap pakai ProcessBuilder)
                     Log.d(TAG, "GPU gagal, coba CPU...")
                     outputFile.delete()
-                    val cpuCmd = shellCmd.replace("-g 0", "-g -1")
-                    val p2     = Runtime.getRuntime().exec(arrayOf("sh", "-c", cpuCmd))
-                    val out2   = p2.inputStream.bufferedReader().readText()
-                    val err2   = p2.errorStream.bufferedReader().readText()
-                    val exit2  = p2.waitFor()
+                    
+                    val cpuCommand = "$commandRun -g -1" // Force CPU
+                    
+                    val pbCpu = ProcessBuilder("sh")
+                    pbCpu.directory(baseDir)
+                    pbCpu.redirectErrorStream(true)
+                    
+                    val processCpu = pbCpu.start()
+                    val stdinCpu = processCpu.outputStream
+                    
+                    try {
+                        stdinCpu.write(("cd ${baseDir.absolutePath}; chmod +x *ncnn 2>/dev/null; export LD_LIBRARY_PATH=${baseDir.absolutePath};\n").toByteArray())
+                        stdinCpu.write(("$cpuCommand\n").toByteArray())
+                        stdinCpu.write("exit\n".toByteArray())
+                        stdinCpu.flush()
+                    } finally {
+                        stdinCpu.close()
+                    }
+                    
+                    val out2 = processCpu.inputStream.bufferedReader().readText()
+                    val exit2 = processCpu.waitFor()
 
                     if (exit2 == 0 && outputFile.exists() && outputFile.length() > 0) {
                         val result = BitmapFactory.decodeFile(outputFile.absolutePath)
@@ -144,10 +160,8 @@ object RealSrEngine {
                         Pair(null, buildString {
                             appendLine("EXIT GPU=$exitCode CPU=$exit2")
                             appendLine("FILES: ${baseDir.listFiles()?.map { "${it.name}(${it.length()})" }}")
-                            appendLine("STDOUT GPU: ${stdout.ifEmpty { "(kosong)" }}")
-                            appendLine("STDERR GPU: ${stderr.ifEmpty { "(kosong)" }}")
-                            appendLine("STDOUT CPU: ${out2.ifEmpty { "(kosong)" }}")
-                            appendLine("STDERR CPU: ${err2.ifEmpty { "(kosong)" }}")
+                            appendLine("STDOUT/ERR GPU: ${stdout.ifEmpty { "(kosong)" }}")
+                            appendLine("STDOUT/ERR CPU: ${out2.ifEmpty { "(kosong)" }}")
                         })
                     }
                 }
