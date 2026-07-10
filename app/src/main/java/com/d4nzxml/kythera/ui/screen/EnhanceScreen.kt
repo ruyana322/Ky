@@ -11,9 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Image
@@ -23,7 +21,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -128,11 +125,14 @@ fun EnhanceScreen() {
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            // 🔥 SCROLL DIHAPUS BIAR SLIDER BISA MELAR FULL SCREEN 🔥
+            .padding(16.dp) 
     ) {
         Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
         Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
 
         GlassCard {
             KDropZone(
@@ -154,21 +154,27 @@ fun EnhanceScreen() {
             }
         }
 
+        // 🔥 KOTAK SLIDER BEFORE/AFTER YANG BISA MELAR 🔥
         if (inputBitmap != null && outputBitmap != null) {
             Spacer(Modifier.height(16.dp))
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("Before / After", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
+            GlassCard(modifier = Modifier.weight(1f)) { // Kunci 1: Memaksa Card ngambil sisa ruang
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("Before / After", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    BeforeAfterSlider(
+                        before = inputBitmap!!,
+                        after  = outputBitmap!!,
+                        modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(10.dp)) // Kunci 2: Memaksa Slider melar mentok
+                    )
                 }
-                Spacer(Modifier.height(10.dp))
-                BeforeAfterSlider(
-                    before = inputBitmap!!,
-                    after  = outputBitmap!!,
-                    modifier = Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(10.dp))
-                )
             }
+        } else {
+            // Kalau slider belum ada, dorong tombol tetap di bawah
+            Spacer(modifier = Modifier.weight(1f))
         }
 
         if (errorLog != null) {
@@ -186,14 +192,14 @@ fun EnhanceScreen() {
             }
         }
 
-        // 🔥 INI DIA PROGRESS BAR ELEGAN ALA FFMPEG WEB LU 🔥
+        // 🔥 PROGRESS BAR & TOMBOL BAWAH 🔥
         if (isProcessing) {
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(KColor.Surface2) // Warna background gelap
+                    .background(KColor.Surface2)
                     .border(1.dp, KColor.Border, RoundedCornerShape(14.dp))
                     .padding(16.dp)
             ) {
@@ -205,10 +211,9 @@ fun EnhanceScreen() {
                     }
                     Spacer(Modifier.height(14.dp))
                     
-                    // Linear Progress Bar (Hijau/Accent)
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(2.dp)),
-                        color = Color(0xFF3FB950), // Warna ijo ala FFmpeg web lu
+                        color = Color(0xFF3FB950), 
                         trackColor = KColor.Border
                     )
                     
@@ -220,7 +225,7 @@ fun EnhanceScreen() {
                 }
             }
         } else {
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
             KPrimaryButton(
                 label = if (outputBitmap != null) "Proses Ulang Gambar" else "Tingkatkan Resolusi",
                 icon = Icons.Rounded.AutoAwesome,
@@ -229,7 +234,7 @@ fun EnhanceScreen() {
             )
         }
         
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp)) // Jarak aman dari navigasi bawah
     }
 }
 
