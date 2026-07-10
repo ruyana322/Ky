@@ -5,11 +5,14 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -19,8 +22,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.IntSize
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -34,8 +43,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val MAX_INPUT_SIZE = 720
-
 @Composable
 fun EnhanceScreen() {
     val context      = LocalContext.current
@@ -46,17 +53,23 @@ fun EnhanceScreen() {
     var fileName     by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     var statusText   by remember { mutableStateOf("") }
-    var errorLog     by remember { mutableStateOf<String?>(null) } // ← tampil di layar
+    var errorLog     by remember { mutableStateOf<String?>(null) }
     var isSuccess    by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             scope.launch {
                 outputBitmap = null
-                errorLog = null
-                isSuccess = false
-                fileName = it.lastPathSegment ?: "image"
-                val bmp = withContext(Dispatchers.IO) { safeDecodeBitmap(context, it) }
+                errorLog     = null
+                isSuccess    = false
+                fileName     = it.lastPathSegment ?: "image"
+                val bmp = withContext(Dispatchers.IO) {
+                    try {
+                        context.contentResolver.openInputStream(it)?.use { s ->
+                            BitmapFactory.decodeStream(s)
+                        }
+                    } catch (e: Exception) { null }
+                }
                 inputBitmap = bmp
                 statusText = if (bmp != null)
                     "Foto siap: ${bmp.width}x${bmp.height}px → output ~${bmp.width * 4}x${bmp.height * 4}px"
@@ -75,15 +88,11 @@ fun EnhanceScreen() {
 
             val ready = RealSrEngine.setup(context)
             if (!ready) {
-                statusText = "Gagal setup!"
-                errorLog   = "Binary atau model tidak bisa di-copy dari assets.\nPastiin file realsr-ncnn, libncnn.so, libomp.so, libc++_shared.so, x4.bin, x4.param ada di assets/realsr/"
-                isProcessing = false
-                return@launch
+                statusText = "Gagal setup!"; errorLog = "Gagal copy file dari assets."
+                isProcessing = false; return@launch
             }
 
             statusText = "Proses AI... sabar ya Kang 🙏"
-
-            // Jalankan upscale, tangkap error log
             val (result, log) = RealSrEngine.upscaleWithLog(context, inputBitmap!!)
 
             if (result != null) {
@@ -92,10 +101,8 @@ fun EnhanceScreen() {
                 statusText   = "✅ Selesai! Output ${result.width}x${result.height}px"
                 GalleryService.saveBitmap(context, result, "Kythera_HD_${System.currentTimeMillis()}.png")
             } else {
-                statusText = "❌ Gagal!"
-                errorLog   = log ?: "Tidak ada log — binary mungkin crash sebelum output"
+                statusText = "❌ Gagal!"; errorLog = log ?: "Error tidak diketahui"
             }
-
             isProcessing = false
         }
     }
@@ -111,12 +118,11 @@ fun EnhanceScreen() {
             Text("Real-ESRGANv3 Anime x4 — GPU Vulkan", color = KColor.Text2, fontSize = 13.sp)
             Spacer(Modifier.height(20.dp))
 
-            // ── Input ──
             GlassCard {
                 KDropZone(
                     onTap = { picker.launch("image/*") },
                     title = "Upload Poto Burik",
-                    subtitle = "JPG, PNG, WEBP",
+                    subtitle = "JPG, PNG, WEBP — Full Resolution",
                     icon = Icons.Rounded.Image,
                     accentColor = KColor.Accent,
                     selectedFileName = fileName
@@ -132,12 +138,37 @@ fun EnhanceScreen() {
                     Image(
                         bitmap = inputBitmap!!.asImageBitmap(),
                         contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().height(200.dp)
+                        modifier = Modifier.fillMaxWidth().height(220.dp),
+                        contentScale = ContentScale.Fit
                     )
                 }
             }
 
-            // ── Error Box — tampil kalau ada error ──
+            // Before/After slider
+            if (inputBitmap != null && outputBitmap != null) {
+                Spacer(Modifier.height(16.dp))
+                GlassCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Before / After", color = KColor.Accent,
+                            fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    BeforeAfterSlider(
+                        before   = inputBitmap!!,
+                        after    = outputBitmap!!,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                    )
+                }
+            }
+
             if (errorLog != null) {
                 Spacer(Modifier.height(14.dp))
                 Column(
@@ -150,33 +181,14 @@ fun EnhanceScreen() {
                     Text("⚠️ ERROR LOG", color = Color(0xFFFF4444),
                         fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        errorLog!!,
-                        color = Color(0xFFFFAAAA),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-
-            // ── Output ──
-            if (outputBitmap != null) {
-                Spacer(Modifier.height(14.dp))
-                GlassCard {
-                    Text("Hasil HD x4:", color = KColor.Accent, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Image(
-                        bitmap = outputBitmap!!.asImageBitmap(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().height(280.dp)
-                    )
+                    Text(errorLog!!, color = Color(0xFFFFAAAA),
+                        fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
                 }
             }
 
             Spacer(Modifier.height(20.dp))
             KPrimaryButton(
-                label = "Bikin HD Sekarang!",
+                label = if (outputBitmap != null) "Proses Ulang" else "Bikin HD Sekarang!",
                 icon = Icons.Rounded.AutoAwesome,
                 enabled = !isProcessing && inputBitmap != null,
                 onClick = ::processImage
@@ -184,7 +196,6 @@ fun EnhanceScreen() {
             Spacer(Modifier.height(24.dp))
         }
 
-        // Loading overlay
         if (isProcessing) {
             Box(
                 modifier = Modifier
@@ -203,30 +214,82 @@ fun EnhanceScreen() {
     }
 }
 
-// ─── Safe decode + resize ─────────────────────────────────────────────────────
-private fun safeDecodeBitmap(context: android.content.Context, uri: Uri): Bitmap? {
-    return try {
-        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, opts)
-        }
-        var sampleSize = 1
-        val maxDim = maxOf(opts.outWidth, opts.outHeight)
-        while (maxDim / sampleSize > MAX_INPUT_SIZE * 2) sampleSize *= 2
+// ─── Before/After Slider ─────────────────────────────────────────────────────
+@Composable
+fun BeforeAfterSlider(
+    before: Bitmap,
+    after: Bitmap,
+    modifier: Modifier = Modifier
+) {
+    var sliderPos by remember { mutableStateOf(0.5f) }
+    val beforeImg = remember(before) { before.asImageBitmap() }
+    val afterImg  = remember(after)  { after.asImageBitmap() }
 
-        val loadOpts = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val raw = context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, loadOpts)
-        } ?: return null
+    BoxWithConstraints(modifier = modifier) {
+        val boxWidth = constraints.maxWidth.toFloat()
 
-        val w = raw.width; val h = raw.height
-        if (maxOf(w, h) <= MAX_INPUT_SIZE) return raw
-        val scale = MAX_INPUT_SIZE.toFloat() / maxOf(w, h)
-        val resized = Bitmap.createScaledBitmap(raw, (w * scale).toInt(), (h * scale).toInt(), true)
-        if (resized != raw) raw.recycle()
-        resized
-    } catch (e: Exception) { null }
+        // Canvas untuk gambar
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures { change, _ ->
+                        sliderPos = (change.position.x / size.width).coerceIn(0.02f, 0.98f)
+                    }
+                }
+        ) {
+            val w = size.width.toInt()
+            val h = size.height.toInt()
+
+            // Gambar AFTER full
+            drawImage(afterImg, dstSize = IntSize(w, h))
+
+            // Gambar BEFORE di-clip kiri
+            clipRect(right = size.width * sliderPos) {
+                drawImage(beforeImg, dstSize = IntSize(w, h))
+            }
+
+            // Garis putih
+            drawLine(
+                color       = Color.White,
+                start       = Offset(size.width * sliderPos, 0f),
+                end         = Offset(size.width * sliderPos, size.height),
+                strokeWidth = 3f
+            )
+
+            // Lingkaran handle
+            drawCircle(
+                color  = Color.White,
+                radius = 24f,
+                center = Offset(size.width * sliderPos, size.height / 2)
+            )
+            drawCircle(
+                color  = KColor.Accent,
+                radius = 16f,
+                center = Offset(size.width * sliderPos, size.height / 2)
+            )
+        }
+
+        // Label BEFORE
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+                .background(Color.Black.copy(0.65f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text("BEFORE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+
+        // Label AFTER
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .background(KColor.Accent.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text("AFTER", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
 }
