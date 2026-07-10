@@ -93,22 +93,23 @@ object RealSrEngine {
                 // Cara tumuyan persis: -c 46 (tilesize) + full path model
                
 
-val shellCmd = buildString {
-    append("cd ${baseDir.absolutePath}; ")
-    append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
-    append("chmod +x *; ")
-    append("./realsr-ncnn ")
-    append("-i '${inputFile.absolutePath}' ")
-    append("-o '${outputFile.absolutePath}' ")
-    append("-m '${modelsDir.absolutePath}' ")
-    append("-s 4 ")
-    
-    // 🔥 SUNTIKAN TURBO TARUH DI SINI
-    append("-t 0 ")       // Auto Tile Size
-    append("-j 4:4:4 ")   // Paksa 4 Thread CPU
-    
-    append("-g 0")
-}
+                val shellCmd = buildString {
+                    append("cd ${baseDir.absolutePath}; ")
+                    append("export LD_LIBRARY_PATH=${baseDir.absolutePath}:\$LD_LIBRARY_PATH; ")
+                    append("chmod +x *; ")
+                    append("./realsr-ncnn ")
+                    append("-i '${inputFile.absolutePath}' ")
+                    append("-o '${outputFile.absolutePath}' ")
+                    append("-m '${modelsDir.absolutePath}' ")
+                    append("-s 4 ")
+                    
+                    // 🔥 INI KUNCI UTAMANYA BIAR GPU JALAN!
+                    append("-t 400 ")     // Pecah gambar jadi kotak 400x400 biar Vulkan GPU gak muntah
+                    append("-j 4:4:4 ")   
+                    
+                    append("-g 0")
+                }
+
 
                 Log.d(TAG, "CMD: $shellCmd")
 
