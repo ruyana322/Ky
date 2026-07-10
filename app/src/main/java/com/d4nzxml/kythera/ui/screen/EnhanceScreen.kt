@@ -58,16 +58,15 @@ fun EnhanceScreen() {
     var errorLog     by remember { mutableStateOf<String?>(null) }
     var isSuccess    by remember { mutableStateOf(false) }
     
-    // State untuk Stopwatch
+    // State untuk Waktu
     var elapsedTime  by remember { mutableStateOf(0L) }
 
-    // Efek untuk menjalankan Stopwatch saat isProcessing true
     LaunchedEffect(isProcessing) {
         if (isProcessing) {
             val startTime = System.currentTimeMillis()
             while (true) {
                 elapsedTime = (System.currentTimeMillis() - startTime) / 1000L
-                delay(100L) // Update teks setiap 100ms biar mulus
+                delay(100L) 
             }
         } else {
             elapsedTime = 0L
@@ -97,9 +96,8 @@ fun EnhanceScreen() {
             isProcessing = true; errorLog = null; isSuccess = false
             val inW = inputBitmap!!.width
             val inH = inputBitmap!!.height
-            statusText = "Menyiapkan Kanvas $inW x $inH..."
+            statusText = "Memuat AI Engine..."
             
-            // Catat waktu asli mulai memproses
             val timeStart = System.currentTimeMillis()
 
             val ready = RealSrEngine.setup(context)
@@ -108,7 +106,7 @@ fun EnhanceScreen() {
                 isProcessing = false; return@launch
             }
             
-            statusText = "Enhancing Resolution & Detail..."
+            statusText = "Meningkatkan Resolusi & Detail..."
             val (result, log) = RealSrEngine.upscaleWithLog(context, inputBitmap!!)
             
             val timeEnd = System.currentTimeMillis()
@@ -129,67 +127,99 @@ fun EnhanceScreen() {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)
-        ) {
-            // 🔥 BRANDING BARU
-            Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
-            Text("powered By Ai Ncn", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(20.dp))
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)
+    ) {
+        Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
+        Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(20.dp))
 
+        GlassCard {
+            KDropZone(
+                onTap = { picker.launch("image/*") },
+                title = "Upload Foto",
+                subtitle = "JPG, PNG, WEBP — Kualitas Lossless",
+                icon = Icons.Rounded.Image,
+                accentColor = KColor.Accent,
+                selectedFileName = fileName
+            )
+            if (statusText.isNotEmpty() && !isProcessing) {
+                Spacer(Modifier.height(10.dp))
+                Text(statusText, color = if (isSuccess) KColor.Accent else KColor.Text2, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            }
+            if (inputBitmap != null && outputBitmap == null) {
+                Spacer(Modifier.height(12.dp))
+                Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null,
+                    modifier = Modifier.fillMaxWidth().height(220.dp), contentScale = ContentScale.Fit)
+            }
+        }
+
+        if (inputBitmap != null && outputBitmap != null) {
+            Spacer(Modifier.height(16.dp))
             GlassCard {
-                KDropZone(
-                    onTap = { picker.launch("image/*") },
-                    title = "Upload Foto",
-                    subtitle = "JPG, PNG, WEBP — Kualitas Lossless",
-                    icon = Icons.Rounded.Image,
-                    accentColor = KColor.Accent,
-                    selectedFileName = fileName
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Before / After", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(10.dp))
+                BeforeAfterSlider(
+                    before = inputBitmap!!,
+                    after  = outputBitmap!!,
+                    modifier = Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(10.dp))
                 )
-                if (statusText.isNotEmpty() && !isProcessing) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(statusText, color = if (isSuccess) KColor.Accent else KColor.Text2, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                }
-                if (inputBitmap != null && outputBitmap == null) {
-                    Spacer(Modifier.height(12.dp))
-                    Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().height(220.dp), contentScale = ContentScale.Fit)
-                }
             }
+        }
 
-            if (inputBitmap != null && outputBitmap != null) {
-                Spacer(Modifier.height(16.dp))
-                GlassCard {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text("Before / After", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
+        if (errorLog != null) {
+            Spacer(Modifier.height(14.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
+                    .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
+                    .padding(14.dp)
+            ) {
+                Text("⚠️ SYSTEM LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
+            }
+        }
+
+        // 🔥 INI DIA PROGRESS BAR ELEGAN ALA FFMPEG WEB LU 🔥
+        if (isProcessing) {
+            Spacer(Modifier.height(20.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(KColor.Surface2) // Warna background gelap
+                    .border(1.dp, KColor.Border, RoundedCornerShape(14.dp))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⏳", fontSize = 14.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(statusText, color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    Spacer(Modifier.height(10.dp))
-                    BeforeAfterSlider(
-                        before = inputBitmap!!,
-                        after  = outputBitmap!!,
-                        modifier = Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(10.dp))
+                    Spacer(Modifier.height(14.dp))
+                    
+                    // Linear Progress Bar (Hijau/Accent)
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(2.dp)),
+                        color = Color(0xFF3FB950), // Warna ijo ala FFmpeg web lu
+                        trackColor = KColor.Border
                     )
+                    
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Writing output...", color = KColor.Text3, fontSize = 11.sp)
+                        Text("$elapsedTime Detik", color = KColor.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-
-            if (errorLog != null) {
-                Spacer(Modifier.height(14.dp))
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                        .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
-                        .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
-                        .padding(14.dp)
-                ) {
-                    Text("⚠️ SYSTEM LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
-                }
-            }
-
+        } else {
             Spacer(Modifier.height(20.dp))
             KPrimaryButton(
                 label = if (outputBitmap != null) "Proses Ulang Gambar" else "Tingkatkan Resolusi",
@@ -197,36 +227,9 @@ fun EnhanceScreen() {
                 enabled = !isProcessing && inputBitmap != null,
                 onClick = ::processImage
             )
-            Spacer(Modifier.height(24.dp))
         }
-
-        // 🔥 OVERLAY LOADING BARU (GAYA STOPWATCH)
-        if (isProcessing) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.90f)),
-                contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    
-                    // Angka Stopwatch Raksasa
-                    Text(
-                        text = "$elapsedTime",
-                        color = KColor.Accent,
-                        fontSize = 80.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Text("Detik", color = KColor.Accent, fontSize = 20.sp, fontWeight = FontWeight.Medium)
-                    
-                    Spacer(Modifier.height(32.dp))
-                    
-                    Text("Kythera Upscale", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("powered By Ai Ncn", color = KColor.Text2, fontSize = 12.sp)
-                    
-                    Spacer(Modifier.height(12.dp))
-                    
-                    // Status text (misal: "Meningkatkan Resolusi...")
-                    Text(statusText, color = KColor.Accent, fontSize = 14.sp, textAlign = TextAlign.Center)
-                }
-            }
-        }
+        
+        Spacer(Modifier.height(24.dp))
     }
 }
 
