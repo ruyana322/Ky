@@ -33,6 +33,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.service.GalleryService
@@ -40,6 +41,7 @@ import com.d4nzxml.kythera.service.RealSrEngine
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -55,6 +57,22 @@ fun EnhanceScreen() {
     var statusText   by remember { mutableStateOf("") }
     var errorLog     by remember { mutableStateOf<String?>(null) }
     var isSuccess    by remember { mutableStateOf(false) }
+    
+    // State untuk Stopwatch
+    var elapsedTime  by remember { mutableStateOf(0L) }
+
+    // Efek untuk menjalankan Stopwatch saat isProcessing true
+    LaunchedEffect(isProcessing) {
+        if (isProcessing) {
+            val startTime = System.currentTimeMillis()
+            while (true) {
+                elapsedTime = (System.currentTimeMillis() - startTime) / 1000L
+                delay(100L) // Update teks setiap 100ms biar mulus
+            }
+        } else {
+            elapsedTime = 0L
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -67,8 +85,8 @@ fun EnhanceScreen() {
                 }
                 inputBitmap = bmp
                 statusText = if (bmp != null)
-                    "Foto siap: ${bmp.width}x${bmp.height}px → output ~${bmp.width*4}x${bmp.height*4}px"
-                else "Gagal baca foto!"
+                    "Siap diproses: ${bmp.width}x${bmp.height} ➔ ~${bmp.width*4}x${bmp.height*4}"
+                else "Gagal membaca gambar!"
             }
         }
     }
@@ -77,20 +95,35 @@ fun EnhanceScreen() {
         if (inputBitmap == null) return
         scope.launch {
             isProcessing = true; errorLog = null; isSuccess = false
-            statusText = "Manasin mesin AI..."
+            val inW = inputBitmap!!.width
+            val inH = inputBitmap!!.height
+            statusText = "Menyiapkan Kanvas $inW x $inH..."
+            
+            // Catat waktu asli mulai memproses
+            val timeStart = System.currentTimeMillis()
+
             val ready = RealSrEngine.setup(context)
             if (!ready) {
-                statusText = "Gagal setup!"; errorLog = "Gagal copy file dari assets."
+                statusText = "Gagal memuat engine Kythera!"; errorLog = "Initialization failed."
                 isProcessing = false; return@launch
             }
-            statusText = "Proses AI... sabar ya Kang 🙏"
+            
+            statusText = "Enhancing Resolution & Detail..."
             val (result, log) = RealSrEngine.upscaleWithLog(context, inputBitmap!!)
+            
+            val timeEnd = System.currentTimeMillis()
+            val totalSeconds = (timeEnd - timeStart) / 1000L
+
             if (result != null) {
                 outputBitmap = result; isSuccess = true
-                statusText = "✅ Selesai! Output ${result.width}x${result.height}px"
+                statusText = """
+                    ✅ Selesai dalam $totalSeconds detik 🔥
+                    Resolusi: ${inW}x${inH} ➔ ${result.width}x${result.height}
+                """.trimIndent()
                 GalleryService.saveBitmap(context, result, "Kythera_HD_${System.currentTimeMillis()}.png")
             } else {
-                statusText = "❌ Gagal!"; errorLog = log ?: "Error tidak diketahui"
+                statusText = "❌ Proses Gagal!"
+                errorLog = log ?: "Unknown Engine Error"
             }
             isProcessing = false
         }
@@ -100,22 +133,23 @@ fun EnhanceScreen() {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)
         ) {
-            Text("AI Enhance Poto", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-            Text("Real-ESRGANv3 Anime x4 — GPU Vulkan", color = KColor.Text2, fontSize = 13.sp)
+            // 🔥 BRANDING BARU
+            Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
+            Text("powered By Ai Ncn", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(20.dp))
 
             GlassCard {
                 KDropZone(
                     onTap = { picker.launch("image/*") },
-                    title = "Upload Poto Burik",
-                    subtitle = "JPG, PNG, WEBP — Full Resolution",
+                    title = "Upload Foto",
+                    subtitle = "JPG, PNG, WEBP — Kualitas Lossless",
                     icon = Icons.Rounded.Image,
                     accentColor = KColor.Accent,
                     selectedFileName = fileName
                 )
-                if (statusText.isNotEmpty()) {
+                if (statusText.isNotEmpty() && !isProcessing) {
                     Spacer(Modifier.height(10.dp))
-                    Text(statusText, color = if (isSuccess) KColor.Accent else KColor.Text2, fontSize = 12.sp)
+                    Text(statusText, color = if (isSuccess) KColor.Accent else KColor.Text2, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
                 if (inputBitmap != null && outputBitmap == null) {
                     Spacer(Modifier.height(12.dp))
@@ -149,7 +183,7 @@ fun EnhanceScreen() {
                         .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
                         .padding(14.dp)
                 ) {
-                    Text("⚠️ ERROR LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("⚠️ SYSTEM LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
                     Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
@@ -158,7 +192,7 @@ fun EnhanceScreen() {
 
             Spacer(Modifier.height(20.dp))
             KPrimaryButton(
-                label = if (outputBitmap != null) "Proses Ulang" else "Bikin HD Sekarang!",
+                label = if (outputBitmap != null) "Proses Ulang Gambar" else "Tingkatkan Resolusi",
                 icon = Icons.Rounded.AutoAwesome,
                 enabled = !isProcessing && inputBitmap != null,
                 onClick = ::processImage
@@ -166,14 +200,30 @@ fun EnhanceScreen() {
             Spacer(Modifier.height(24.dp))
         }
 
+        // 🔥 OVERLAY LOADING BARU (GAYA STOPWATCH)
         if (isProcessing) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)),
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.90f)),
                 contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = KColor.Accent, modifier = Modifier.size(64.dp))
-                    Spacer(Modifier.height(16.dp))
-                    Text("Memproses...", color = KColor.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text(statusText, color = KColor.Text2, fontSize = 13.sp)
+                    
+                    // Angka Stopwatch Raksasa
+                    Text(
+                        text = "$elapsedTime",
+                        color = KColor.Accent,
+                        fontSize = 80.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text("Detik", color = KColor.Accent, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                    
+                    Spacer(Modifier.height(32.dp))
+                    
+                    Text("Kythera Upscale", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("powered By Ai Ncn", color = KColor.Text2, fontSize = 12.sp)
+                    
+                    Spacer(Modifier.height(12.dp))
+                    
+                    // Status text (misal: "Meningkatkan Resolusi...")
+                    Text(statusText, color = KColor.Accent, fontSize = 14.sp, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -197,7 +247,6 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
             val w = size.width
             val h = size.height
 
-            // Scale factor untuk fit gambar ke canvas
             val afterScaleX = w / afterImg.width.toFloat()
             val afterScaleY = h / afterImg.height.toFloat()
             val afterScale  = minOf(afterScaleX, afterScaleY)
@@ -214,34 +263,28 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
             val beforeOx = (w - beforeW) / 2f
             val beforeOy = (h - beforeH) / 2f
 
-            // Gambar AFTER penuh
             withTransform({ translate(afterOx, afterOy); scale(afterScale, afterScale, pivot = Offset.Zero) }) {
                 drawImage(afterImg)
             }
 
-            // Gambar BEFORE di-clip kiri
             clipRect(right = w * sliderPos) {
                 withTransform({ translate(beforeOx, beforeOy); scale(beforeScale, beforeScale, pivot = Offset.Zero) }) {
                     drawImage(beforeImg)
                 }
             }
 
-            // Garis putih
-            drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 3f)
+            drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 4f)
 
-            // Handle lingkaran
             drawCircle(Color.White, radius = 26f, center = Offset(w * sliderPos, h / 2))
             drawCircle(KColor.Accent, radius = 18f, center = Offset(w * sliderPos, h / 2))
         }
 
-        // Label BEFORE
         Box(Modifier.align(Alignment.TopStart).padding(8.dp)
             .background(Color.Black.copy(0.65f), RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp)) {
             Text("BEFORE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
 
-        // Label AFTER
         Box(Modifier.align(Alignment.TopEnd).padding(8.dp)
             .background(KColor.Accent.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp)) {
