@@ -29,6 +29,7 @@ object RealSrEngine {
         if (isReady) return@withContext true
         try {
             val baseDir = context.filesDir
+
             for (assetPath in BINARIES) {
                 val outFile = File(baseDir, assetPath)
                 outFile.parentFile?.mkdirs()
@@ -36,9 +37,6 @@ object RealSrEngine {
                     context.assets.open(assetPath).use { input ->
                         FileOutputStream(outFile).use { output -> input.copyTo(output) }
                     }
-                }
-                if (assetPath.endsWith("realsr-ncnn")) {
-                    outFile.setExecutable(true, false)
                 }
             }
             for (assetPath in MODELS) {
@@ -50,6 +48,12 @@ object RealSrEngine {
                     }
                 }
             }
+
+            // FIX: chmod via shell, bukan Java setExecutable
+            val binaryPath = File(baseDir, "realsr/realsr-ncnn").absolutePath
+            val chmodResult = Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath)).waitFor()
+            Log.d(TAG, "chmod result: $chmodResult")
+
             isReady = true
             Log.d(TAG, "Setup selesai!")
             true
@@ -59,12 +63,11 @@ object RealSrEngine {
         }
     }
 
-    // Return Pair<Bitmap?, errorLog>
     suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
         withContext(Dispatchers.IO) {
             try {
-                val baseDir   = context.filesDir
-                val tmpDir    = context.cacheDir
+                val baseDir    = context.filesDir
+                val tmpDir     = context.cacheDir
                 val inputFile  = File(tmpDir, "realsr_input.png")
                 val outputFile = File(tmpDir, "realsr_output.png")
 
@@ -79,14 +82,8 @@ object RealSrEngine {
                 val modelDir   = File(baseDir, "realsr/models").absolutePath
                 val libDir     = File(baseDir, "realsr").absolutePath
 
-                // Cek binary ada dan executable
-                val binaryFile = File(binaryPath)
-                if (!binaryFile.exists()) {
-                    return@withContext Pair(null, "Binary tidak ditemukan: $binaryPath")
-                }
-                if (!binaryFile.canExecute()) {
-                    binaryFile.setExecutable(true, false)
-                }
+                // chmod lagi setiap kali jalan, pastiin executable
+                Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath)).waitFor()
 
                 val cmd = arrayOf(
                     binaryPath,
@@ -124,7 +121,6 @@ object RealSrEngine {
                         appendLine("EXIT CODE: $exitCode")
                         appendLine("BINARY: $binaryPath")
                         appendLine("MODEL DIR: $modelDir")
-                        appendLine("LIB DIR: $libDir")
                         appendLine("---OUTPUT LOG---")
                         appendLine(log.ifEmpty { "(kosong)" })
                     }
@@ -135,7 +131,6 @@ object RealSrEngine {
                 val errMsg = buildString {
                     appendLine("EXCEPTION: ${e.javaClass.simpleName}")
                     appendLine("MESSAGE: ${e.message}")
-                    appendLine("---STACKTRACE---")
                     appendLine(e.stackTraceToString().take(800))
                 }
                 Pair(null, errMsg)
