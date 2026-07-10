@@ -12,7 +12,9 @@ import java.io.FileOutputStream
 object RealSrEngine {
 
     private const val TAG = "Kythera_AI"
-    private var isReady = false
+
+    // Cek versi — kalau assets berubah, copy ulang
+    private const val VERSION = "v3"
 
     private val BINARIES = listOf(
         "realsr/realsr-ncnn",
@@ -25,38 +27,56 @@ object RealSrEngine {
         "realsr/models/x4.param"
     )
 
-    suspend fun setup(context: Context): Boolean = withContext(Dispatchers.IO) {
-        if (isReady) return@withContext true
-        try {
-            val baseDir = context.filesDir
+    // Pakai codeCacheDir — satu2nya folder Android yang allow write + execute
+    private fun getBaseDir(context: Context) = context.codeCacheDir
 
+    private fun isSetupDone(context: Context): Boolean {
+        val versionFile = File(getBaseDir(context), "realsr/.version")
+        return versionFile.exists() && versionFile.readText().trim() == VERSION
+    }
+
+    suspend fun setup(context: Context): Boolean = withContext(Dispatchers.IO) {
+        if (isSetupDone(context)) {
+            Log.d(TAG, "Setup sudah ada, skip copy.")
+            return@withContext true
+        }
+
+        try {
+            val baseDir = getBaseDir(context)
+            Log.d(TAG, "Base dir: ${baseDir.absolutePath}")
+
+            // Copy semua binary
             for (assetPath in BINARIES) {
                 val outFile = File(baseDir, assetPath)
                 outFile.parentFile?.mkdirs()
-                if (!outFile.exists()) {
-                    context.assets.open(assetPath).use { input ->
-                        FileOutputStream(outFile).use { output -> input.copyTo(output) }
-                    }
+                context.assets.open(assetPath).use { input ->
+                    FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
+                Log.d(TAG, "Copied: $assetPath → ${outFile.absolutePath}")
             }
+
+            // Copy model files
             for (assetPath in MODELS) {
                 val outFile = File(baseDir, assetPath)
                 outFile.parentFile?.mkdirs()
-                if (!outFile.exists()) {
-                    context.assets.open(assetPath).use { input ->
-                        FileOutputStream(outFile).use { output -> input.copyTo(output) }
-                    }
+                context.assets.open(assetPath).use { input ->
+                    FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
+                Log.d(TAG, "Copied: $assetPath → ${outFile.absolutePath}")
             }
 
-            // FIX: chmod via shell, bukan Java setExecutable
+            // chmod binary via shell
             val binaryPath = File(baseDir, "realsr/realsr-ncnn").absolutePath
-            val chmodResult = Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath)).waitFor()
-            Log.d(TAG, "chmod result: $chmodResult")
+            val chmodProc = Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath))
+            val chmodExit = chmodProc.waitFor()
+            Log.d(TAG, "chmod exit: $chmodExit")
 
-            isReady = true
+            // Tulis version file sebagai marker
+            File(baseDir, "realsr/.version").writeText(VERSION)
+
             Log.d(TAG, "Setup selesai!")
             true
+
         } catch (e: Exception) {
             Log.e(TAG, "Gagal setup: ${e.message}")
             false
@@ -66,14 +86,17 @@ object RealSrEngine {
     suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
         withContext(Dispatchers.IO) {
             try {
-                val baseDir = context.codeCacheDir
+                val baseDir    = getBaseDir(context)
                 val tmpDir     = context.cacheDir
                 val inputFile  = File(tmpDir, "realsr_input.png")
                 val outputFile = File(tmpDir, "realsr_output.png")
 
+                // Hapus output lama kalau ada
+                if (outputFile.exists()) outputFile.delete()
+
+                // Simpan input ke PNG
                 val safeBitmap = if (input.config != Bitmap.Config.ARGB_8888)
                     input.copy(Bitmap.Config.ARGB_8888, false) else input
-
                 FileOutputStream(inputFile).use { out ->
                     safeBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
@@ -82,7 +105,13 @@ object RealSrEngine {
                 val modelDir   = File(baseDir, "realsr/models").absolutePath
                 val libDir     = File(baseDir, "realsr").absolutePath
 
-                // chmod lagi setiap kali jalan, pastiin executable
+                // Pastiin binary ada
+                if (!File(binaryPath).exists()) {
+                    return@withContext Pair(null,
+                        "Binary tidak ada di: $binaryPath\nCoba clear app data dan coba lagi!")
+                }
+
+                // chmod lagi setiap kali
                 Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryPath)).waitFor()
 
                 val cmd = arrayOf(
@@ -121,8 +150,9 @@ object RealSrEngine {
                         appendLine("EXIT CODE: $exitCode")
                         appendLine("BINARY: $binaryPath")
                         appendLine("MODEL DIR: $modelDir")
+                        appendLine("LIB DIR: $libDir")
                         appendLine("---OUTPUT LOG---")
-                        appendLine(log.ifEmpty { "(kosong)" })
+                        appendLine(log.ifEmpty { "(kosong — binary mungkin crash sebelum output)" })
                     }
                     Pair(null, errMsg)
                 }
@@ -131,6 +161,7 @@ object RealSrEngine {
                 val errMsg = buildString {
                     appendLine("EXCEPTION: ${e.javaClass.simpleName}")
                     appendLine("MESSAGE: ${e.message}")
+                    appendLine("---STACKTRACE---")
                     appendLine(e.stackTraceToString().take(800))
                 }
                 Pair(null, errMsg)
