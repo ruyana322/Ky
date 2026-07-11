@@ -6,7 +6,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState // 🔥 Tambahan Import
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll // 🔥 Tambahan Import
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Movie
@@ -36,7 +38,6 @@ fun VideoEnhanceScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // 🔥 FIX: Pakai rememberSaveable biar data gak hilang pas balik dari Galeri (RAM dibersihkan)
     var inputUriString by rememberSaveable { mutableStateOf<String?>(null) }
     var isProcessing by rememberSaveable { mutableStateOf(false) }
     var statusText by rememberSaveable { mutableStateOf("") }
@@ -68,7 +69,8 @@ fun VideoEnhanceScreen() {
             val safUrl = FFmpegKitConfig.getSafParameterForRead(context, inputUri!!)
 
             statusText = "Meningkatkan Resolusi & Detail..."
-            val command = "-i \"$safUrl\" -vf \"scale=1920:-1:flags=lanczos,unsharp=5:5:1.0,eq=contrast=1.05:saturation=1.15\" -c:v libx264 -preset superfast -crf 18 -c:a copy \"$outPath\""
+            // 🔥 FIX 1: Tambahin -hide_banner di awal command biar log-nya gak kepanjangan
+            val command = "-hide_banner -i \"$safUrl\" -vf \"scale=1920:-1:flags=lanczos,unsharp=5:5:1.0,eq=contrast=1.05:saturation=1.15\" -c:v libx264 -preset superfast -crf 18 -c:a copy \"$outPath\""
 
             withContext(Dispatchers.IO) {
                 val session = FFmpegKit.execute(command)
@@ -77,7 +79,7 @@ fun VideoEnhanceScreen() {
                     statusText = "✅ Berhasil! File tersimpan di: $fileName"
                 } else {
                     statusText = "❌ Proses Gagal!"
-                    errorLog = session.allLogsAsString // 🔥 Tangkap log error asli FFmpeg
+                    errorLog = session.allLogsAsString 
                 }
             }
             isProcessing = false
@@ -104,11 +106,17 @@ fun VideoEnhanceScreen() {
             }
         }
         
-        // 🔥 TAMBAHAN: Kotak Log Error biar ketahuan kalau FFmpeg-nya ngambek
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
-                modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp)).background(Color(0x22FF0000), RoundedCornerShape(10.dp)).padding(14.dp)
+                // 🔥 FIX 2: Tambahin tinggi maksimal dan verticalScroll biar bisa digeser ke bawah
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 250.dp)
+                    .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
+                    .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
+                    .padding(14.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Text("⚠️ FFMPEG ERROR LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Spacer(Modifier.height(8.dp))
