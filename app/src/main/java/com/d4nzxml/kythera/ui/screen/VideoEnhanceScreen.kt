@@ -70,7 +70,7 @@ fun VideoEnhanceScreen() {
 
             statusText = "Meningkatkan Resolusi & Detail..."
             // 🔥 FIX 1: Tambahin -hide_banner di awal command biar log-nya gak kepanjangan
-            val command = "-hide_banner -i \"$safUrl\" -vf \"scale=1920:-1:flags=lanczos,unsharp=5:5:1.0,eq=contrast=1.05:saturation=1.15\" -c:v libx264 -preset superfast -crf 18 -c:a copy \"$outPath\""
+            val command = "-hide_banner -i \"$safUrl\" -vf \"scale=1920:-2:flags=lanczos,unsharp=5:5:1.0,eq=contrast=1.05:saturation=1.15\" -c:v libx264 -preset superfast -crf 18 -c:a copy \"$outPath\""
 
             withContext(Dispatchers.IO) {
                 val session = FFmpegKit.execute(command)
