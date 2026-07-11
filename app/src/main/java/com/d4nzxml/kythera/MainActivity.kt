@@ -108,7 +108,7 @@ fun KytheraShell() {
                     onTap = { currentIndex = it }
                 )
             },
-            floatingActionButton = {
+                        floatingActionButton = {
                 // 🔥 FAB "Upload TikTok" muncul khusus di halaman Dashboard aja
                 AnimatedVisibility(
                     visible = currentIndex == 0,
@@ -117,8 +117,17 @@ fun KytheraShell() {
                 ) {
                     FloatingActionButton(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.tiktok.com/upload"))
-                            context.startActivity(intent)
+                            // 🔥 IN-APP BROWSER (Custom Tabs): Buka web di dalem aplikasi
+                            try {
+                                val customTabsIntent = androidx.browser.customtabs.CustomTabsIntent.Builder()
+                                    .setShowTitle(true)
+                                    .build()
+                                customTabsIntent.launchUrl(context, Uri.parse("https://www.tiktok.com/upload"))
+                            } catch (e: Exception) {
+                                // Fallback kalau HP user nggak punya browser sama sekali
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.tiktok.com/upload"))
+                                context.startActivity(intent)
+                            }
                         },
                         containerColor = KColor.Accent,
                         contentColor = Color.Black,
@@ -129,6 +138,7 @@ fun KytheraShell() {
                     }
                 }
             }
+
         ) { innerPadding ->
             Box(Modifier.padding(innerPadding)) {
                 AnimatedContent(
