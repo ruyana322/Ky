@@ -166,22 +166,21 @@ fun VideoEnhanceScreen() {
             val bufSize = "${preset.bitrate.replace("M", "").toInt() * 10}M"
 
             val command = buildString {
-                append("-hide_banner ")
-                append("-i \"$safUrl\" ")
-                append("-threads 0 ")
-                append("-vf \"$vf\" ")
-                append("-c:v h264_mediacodec ")
-                append("-b:v ${preset.bitrate} ")
-                append("-maxrate ${preset.bitrate} ")
-                append("-bufsize $bufSize ")
-                append("-profile:v high ")
-                append("-level:v 4.1 ")
-                append("-c:a aac ")
-                append("-b:a 192k ")
-                append("-ar 44100 ")
-                append("-movflags +faststart ")
-                append("\"$outPath\"")
-            }
+    append("-hide_banner ")
+    append("-i \"$safUrl\" ")
+    append("-threads 0 ")
+    append("-vf \"$vf\" ")
+    append("-c:v h264_mediacodec ")
+    append("-b:v ${preset.bitrate} ")
+    append("-maxrate ${preset.bitrate} ")
+    append("-bufsize $bufSize ")
+    // HAPUS -profile:v dan -level:v — tidak support di mediacodec!
+    append("-c:a aac ")
+    append("-b:a 192k ")
+    append("-ar 44100 ")
+    append("-movflags +faststart ")
+    append("\"$outPath\"")
+}
 
             withContext(Dispatchers.IO) {
                 val session = FFmpegKit.execute(command)
