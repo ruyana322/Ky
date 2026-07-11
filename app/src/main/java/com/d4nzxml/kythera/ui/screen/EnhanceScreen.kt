@@ -3,6 +3,7 @@ package com.d4nzxml.kythera.ui.screen
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -95,31 +97,29 @@ fun EnhanceScreen() {
             val inH = inputBitmap!!.height
             statusText = "Memuat AI Engine..."
             
-            val timeStart = System.currentTimeMillis()
-
-            val ready = RealSrEngine.setup(context)
+            // Pindah ke background biar gak freeze
+            val ready = withContext(Dispatchers.IO) { RealSrEngine.setup(context) }
             if (!ready) {
                 statusText = "Gagal memuat engine Kythera!"; errorLog = "Initialization failed."
                 isProcessing = false; return@launch
             }
             
             statusText = "Meningkatkan Resolusi & Detail..."
-            val (result, log) = RealSrEngine.upscaleWithLog(context, inputBitmap!!)
             
-            val timeEnd = System.currentTimeMillis()
-            val totalSeconds = (timeEnd - timeStart) / 1000L
-
+            // Proses upscale di background
+            val (result, log) = withContext(Dispatchers.IO) { 
+                RealSrEngine.upscaleWithLog(context, inputBitmap!!) 
+            }
+            
             if (result != null) {
-                outputBitmap = result; isSuccess = true
-                statusText = """
-                    ✅ Selesai dalam $totalSeconds detik 🔥
-                    Resolusi: ${inW}x${inH} ➔ ${result.width}x${result.height}
-                """.trimIndent()
-                GalleryService.saveBitmap(context, result, "Kythera_HD_${System.currentTimeMillis()}.png")
+                // Auto-save dihapus, gambar langsung tampil
+                outputBitmap = result
+                isSuccess = true
             } else {
                 statusText = "❌ Proses Gagal!"
                 errorLog = log ?: "Unknown Engine Error"
             }
+            
             isProcessing = false
         }
     }
@@ -129,9 +129,7 @@ fun EnhanceScreen() {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // 🔥 LOGIKA DUAL-STATE UI: Sembunyiin atasnya kalau gambar udah jadi! 🔥
         if (outputBitmap == null) {
-            // --- TAMPILAN 1: MODE UPLOAD ---
             Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
             Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
@@ -156,32 +154,26 @@ fun EnhanceScreen() {
                 }
             }
             
-            Spacer(modifier = Modifier.weight(1f)) // Dorong sisa elemen ke bawah
+            Spacer(modifier = Modifier.weight(1f)) 
             
         } else {
-            // --- TAMPILAN 2: MODE FULLSCREEN PREVIEW ---
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Bandingkan Hasil (HD)", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
             }
             Spacer(Modifier.height(12.dp))
             
-            // Slider langsung ngambil 100% sisa layar yang udah kosong!
             BeforeAfterSlider(
                 before = inputBitmap!!,
                 after  = outputBitmap!!,
                 modifier = Modifier
-                    .weight(1f) // Kunci layar penuh
+                    .weight(1f) 
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .border(1.dp, KColor.Border, RoundedCornerShape(16.dp))
             )
-            
-            Spacer(Modifier.height(12.dp))
-            Text(statusText, color = KColor.Accent, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
 
-        // --- ERROR LOG ---
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
@@ -193,7 +185,6 @@ fun EnhanceScreen() {
             }
         }
 
-        // --- PROGRESS BAR & TOMBOL ---
         if (isProcessing) {
             Spacer(Modifier.height(16.dp))
             Box(
@@ -219,16 +210,35 @@ fun EnhanceScreen() {
         } else {
             Spacer(Modifier.height(16.dp))
             if (outputBitmap != null) {
-                // Tombol ganti jadi "Edit Gambar Lain" buat mereset layar kembali ke awal
-                KPrimaryButton(
-                    label = "Selesai & Gambar Lain",
-                    icon = Icons.Rounded.Refresh,
-                    onClick = { 
-                        outputBitmap = null
-                        inputBitmap = null 
-                        statusText = ""
-                    }
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    KPrimaryButton(
+                        label = "Simpan",
+                        icon = Icons.Rounded.Save,
+                        modifier = Modifier.weight(1f),
+                        onClick = { 
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    GalleryService.saveBitmap(context, outputBitmap!!, "Kythera_HD_${System.currentTimeMillis()}.png")
+                                }
+                                Toast.makeText(context, "Tersimpan di Galeri! 🔥", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                    
+                    KPrimaryButton(
+                        label = "Ulangi",
+                        icon = Icons.Rounded.Refresh,
+                        modifier = Modifier.weight(1f),
+                        onClick = { 
+                            outputBitmap = null
+                            inputBitmap = null 
+                            statusText = ""
+                        }
+                    )
+                }
             } else {
                 KPrimaryButton(
                     label = "Tingkatkan Resolusi",
@@ -249,7 +259,7 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
     val beforeImg = remember(before) { before.asImageBitmap() }
     val afterImg  = remember(after)  { after.asImageBitmap() }
 
-    BoxWithConstraints(modifier = modifier.background(KColor.Surface)) { // Background gelap buat nambal kekosongan
+    BoxWithConstraints(modifier = modifier.background(KColor.Surface)) {
         Canvas(
             modifier = Modifier.fillMaxSize().pointerInput(Unit) {
                 detectHorizontalDragGestures { change, _ ->
@@ -262,7 +272,7 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
 
             val afterScaleX = w / afterImg.width.toFloat()
             val afterScaleY = h / afterImg.height.toFloat()
-            val afterScale  = minOf(afterScaleX, afterScaleY) // Gambar dijamin gak kepotong
+            val afterScale  = minOf(afterScaleX, afterScaleY)
             val afterW = afterImg.width * afterScale
             val afterH = afterImg.height * afterScale
             val afterOx = (w - afterW) / 2f
