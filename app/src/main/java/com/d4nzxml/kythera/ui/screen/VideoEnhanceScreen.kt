@@ -170,11 +170,9 @@ fun VideoEnhanceScreen() {
     append("-i \"$safUrl\" ")
     append("-threads 0 ")
     append("-vf \"$vf\" ")
-    append("-c:v h264_mediacodec ")
-    append("-b:v ${preset.bitrate} ")
-    append("-maxrate ${preset.bitrate} ")
-    append("-bufsize $bufSize ")
-    // HAPUS -profile:v dan -level:v — tidak support di mediacodec!
+    append("-c:v libx264 ")        // ← ganti dari h264_mediacodec
+    append("-preset ultrafast ")   // ← cepet tapi file agak besar
+    append("-crf 23 ")             // ← kualitas (18=HQ, 23=default, 28=kecil)
     append("-c:a aac ")
     append("-b:a 192k ")
     append("-ar 44100 ")
