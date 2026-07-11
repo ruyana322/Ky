@@ -54,9 +54,9 @@ fun EnhanceScreen() {
     var outputBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var fileName     by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var isSaving     by remember { mutableStateOf(false) }
     var statusText   by remember { mutableStateOf("") }
     var errorLog     by remember { mutableStateOf<String?>(null) }
-    var isSuccess    by remember { mutableStateOf(false) }
     
     var elapsedTime  by remember { mutableStateOf(0L) }
 
@@ -75,16 +75,14 @@ fun EnhanceScreen() {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             scope.launch {
-                outputBitmap = null; errorLog = null; isSuccess = false
+                outputBitmap = null; errorLog = null
                 fileName = it.lastPathSegment ?: "image"
                 val bmp = withContext(Dispatchers.IO) {
                     try { context.contentResolver.openInputStream(it)?.use { s -> BitmapFactory.decodeStream(s) } }
                     catch (e: Exception) { null }
                 }
                 inputBitmap = bmp
-                statusText = if (bmp != null)
-                    "Siap diproses: ${bmp.width}x${bmp.height} ➔ ~${bmp.width*4}x${bmp.height*4}"
-                else "Gagal membaca gambar!"
+                statusText = if (bmp != null) "Siap diproses" else "Gagal membaca gambar!"
             }
         }
     }
@@ -92,43 +90,31 @@ fun EnhanceScreen() {
     fun processImage() {
         if (inputBitmap == null) return
         scope.launch {
-            isProcessing = true; errorLog = null; isSuccess = false
-            val inW = inputBitmap!!.width
-            val inH = inputBitmap!!.height
+            isProcessing = true; errorLog = null
             statusText = "Memuat AI Engine..."
             
-            // Pindah ke background biar gak freeze
             val ready = withContext(Dispatchers.IO) { RealSrEngine.setup(context) }
             if (!ready) {
-                statusText = "Gagal memuat engine Kythera!"; errorLog = "Initialization failed."
+                statusText = "Gagal memuat engine!"; errorLog = "Initialization failed."
                 isProcessing = false; return@launch
             }
             
-            statusText = "Meningkatkan Resolusi & Detail..."
-            
-            // Proses upscale di background
-            val (result, log) = withContext(Dispatchers.IO) { 
+            statusText = "Meningkatkan Resolusi..."
+            val (result, _) = withContext(Dispatchers.IO) { 
                 RealSrEngine.upscaleWithLog(context, inputBitmap!!) 
             }
             
             if (result != null) {
-                // Auto-save dihapus, gambar langsung tampil
                 outputBitmap = result
-                isSuccess = true
             } else {
                 statusText = "❌ Proses Gagal!"
-                errorLog = log ?: "Unknown Engine Error"
+                errorLog = "Engine Error"
             }
-            
             isProcessing = false
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         if (outputBitmap == null) {
             Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
             Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -138,117 +124,86 @@ fun EnhanceScreen() {
                 KDropZone(
                     onTap = { picker.launch("image/*") },
                     title = "Upload Foto",
-                    subtitle = "JPG, PNG, WEBP — Kualitas Lossless",
+                    subtitle = "JPG, PNG, WEBP",
                     icon = Icons.Rounded.Image,
                     accentColor = KColor.Accent,
                     selectedFileName = fileName
                 )
-                if (statusText.isNotEmpty() && !isProcessing) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(statusText, color = KColor.Text2, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                }
                 if (inputBitmap != null) {
                     Spacer(Modifier.height(12.dp))
                     Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null,
                         modifier = Modifier.fillMaxWidth().height(220.dp), contentScale = ContentScale.Fit)
                 }
             }
-            
-            Spacer(modifier = Modifier.weight(1f)) 
-            
+            Spacer(modifier = Modifier.weight(1f))
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Bandingkan Hasil (HD)", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
             }
             Spacer(Modifier.height(12.dp))
-            
             BeforeAfterSlider(
                 before = inputBitmap!!,
                 after  = outputBitmap!!,
-                modifier = Modifier
-                    .weight(1f) 
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, KColor.Border, RoundedCornerShape(16.dp))
+                modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, KColor.Border, RoundedCornerShape(16.dp))
             )
         }
 
         if (errorLog != null) {
-            Spacer(Modifier.height(14.dp))
-            Column(
-                modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp)).background(Color(0x22FF0000), RoundedCornerShape(10.dp)).padding(14.dp)
-            ) {
-                Text("⚠️ SYSTEM LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
-                Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp)
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp).background(Color(0x22FF0000), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                Text("⚠️ Error: $errorLog", color = Color(0xFFFF4444), fontSize = 11.sp)
             }
         }
 
         if (isProcessing) {
             Spacer(Modifier.height(16.dp))
-            Box(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(KColor.Surface2).border(1.dp, KColor.Border, RoundedCornerShape(14.dp)).padding(16.dp)
-            ) {
+            Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(KColor.Surface2).padding(16.dp)) {
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("⏳", fontSize = 14.sp)
-                        Spacer(Modifier.width(8.dp))
-                        Text(statusText, color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(2.dp)), color = Color(0xFF3FB950), trackColor = KColor.Border
-                    )
+                    Text("⏳ $statusText", color = KColor.Accent, fontSize = 13.sp)
                     Spacer(Modifier.height(10.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Writing output...", color = KColor.Text3, fontSize = 11.sp)
-                        Text("$elapsedTime Detik", color = KColor.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp), color = Color(0xFF3FB950))
+                    Spacer(Modifier.height(10.dp))
+                    Text("$elapsedTime Detik", color = KColor.Text, fontSize = 11.sp)
                 }
             }
         } else {
             Spacer(Modifier.height(16.dp))
             if (outputBitmap != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     KPrimaryButton(
-                        label = "Simpan",
+                        label = if (isSaving) "Menyimpan..." else "Simpan",
                         icon = Icons.Rounded.Save,
                         modifier = Modifier.weight(1f),
+                        enabled = !isSaving,
                         onClick = { 
                             scope.launch {
+                                isSaving = true
+                                Toast.makeText(context, "Proses menyimpan...", Toast.LENGTH_SHORT).show()
                                 withContext(Dispatchers.IO) {
                                     GalleryService.saveBitmap(context, outputBitmap!!, "Kythera_HD_${System.currentTimeMillis()}.png")
                                 }
                                 Toast.makeText(context, "Tersimpan di Galeri! 🔥", Toast.LENGTH_SHORT).show()
+                                isSaving = false
                             }
                         }
                     )
-                    
                     KPrimaryButton(
                         label = "Ulangi",
                         icon = Icons.Rounded.Refresh,
                         modifier = Modifier.weight(1f),
-                        onClick = { 
-                            outputBitmap = null
-                            inputBitmap = null 
-                            statusText = ""
-                        }
+                        enabled = !isSaving,
+                        onClick = { outputBitmap = null; inputBitmap = null }
                     )
                 }
             } else {
                 KPrimaryButton(
                     label = "Tingkatkan Resolusi",
                     icon = Icons.Rounded.AutoAwesome,
-                    enabled = !isProcessing && inputBitmap != null,
+                    enabled = inputBitmap != null,
                     onClick = ::processImage
                 )
             }
         }
-        
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -260,55 +215,21 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
     val afterImg  = remember(after)  { after.asImageBitmap() }
 
     BoxWithConstraints(modifier = modifier.background(KColor.Surface)) {
-        Canvas(
-            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                detectHorizontalDragGestures { change, _ ->
-                    sliderPos = (change.position.x / size.width).coerceIn(0.02f, 0.98f)
-                }
+        Canvas(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+            detectHorizontalDragGestures { change, _ ->
+                sliderPos = (change.position.x / size.width).coerceIn(0.02f, 0.98f)
             }
-        ) {
-            val w = size.width
-            val h = size.height
+        }) {
+            val w = size.width; val h = size.height
+            val afterScale = minOf(w / afterImg.width, h / afterImg.height)
+            val beforeScale = minOf(w / beforeImg.width, h / beforeImg.height)
 
-            val afterScaleX = w / afterImg.width.toFloat()
-            val afterScaleY = h / afterImg.height.toFloat()
-            val afterScale  = minOf(afterScaleX, afterScaleY)
-            val afterW = afterImg.width * afterScale
-            val afterH = afterImg.height * afterScale
-            val afterOx = (w - afterW) / 2f
-            val afterOy = (h - afterH) / 2f
-
-            val beforeScaleX = w / beforeImg.width.toFloat()
-            val beforeScaleY = h / beforeImg.height.toFloat()
-            val beforeScale  = minOf(beforeScaleX, beforeScaleY)
-            val beforeW = beforeImg.width * beforeScale
-            val beforeH = beforeImg.height * beforeScale
-            val beforeOx = (w - beforeW) / 2f
-            val beforeOy = (h - beforeH) / 2f
-
-            withTransform({ translate(afterOx, afterOy); scale(afterScale, afterScale, pivot = Offset.Zero) }) {
-                drawImage(afterImg)
-            }
-
+            withTransform({ translate((w - afterImg.width * afterScale) / 2f, (h - afterImg.height * afterScale) / 2f); scale(afterScale) }) { drawImage(afterImg) }
             clipRect(right = w * sliderPos) {
-                withTransform({ translate(beforeOx, beforeOy); scale(beforeScale, beforeScale, pivot = Offset.Zero) }) {
-                    drawImage(beforeImg)
-                }
+                withTransform({ translate((w - beforeImg.width * beforeScale) / 2f, (h - beforeImg.height * beforeScale) / 2f); scale(beforeScale) }) { drawImage(beforeImg) }
             }
-
             drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 5f)
-            drawCircle(Color.White, radius = 28f, center = Offset(w * sliderPos, h / 2))
             drawCircle(KColor.Accent, radius = 20f, center = Offset(w * sliderPos, h / 2))
-        }
-
-        Box(Modifier.align(Alignment.TopStart).padding(12.dp)
-            .background(Color.Black.copy(0.7f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text("BEFORE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Box(Modifier.align(Alignment.TopEnd).padding(12.dp)
-            .background(KColor.Accent.copy(alpha = 0.9f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text("AFTER", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
