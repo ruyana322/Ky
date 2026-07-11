@@ -55,13 +55,16 @@ val bottomNavItems = listOf(
 )
 
 val drawerItems = listOf(
-    Triple(Icons.Rounded.GridView,      "Dashboard",   0),
-    Triple(Icons.Rounded.SwapHoriz,     "Converter",   1),
-    Triple(Icons.Rounded.Compress,      "Compress",    2),
-    Triple(Icons.Rounded.Edit,          "Patch Video", 3),
-    Triple(Icons.Rounded.History,       "History",     4),
+    Triple(Icons.Rounded.GridView,      "Dashboard",     0),
+    Triple(Icons.Rounded.SwapHoriz,     "Converter",     1),
+    Triple(Icons.Rounded.Compress,      "Compress",      2),
+    Triple(Icons.Rounded.Edit,          "Patch Video",   3),
+    Triple(Icons.Rounded.History,       "History",       4),
     Triple(Icons.Rounded.Image,         "Photo Enhance", 5),
-    Triple(Icons.Rounded.Settings,      "Pengaturan",  6),
+    // 🔥 TAMBAHIN MENU VIDEO ENHANCE DI SINI (Index 6)
+    Triple(Icons.Rounded.Movie,         "Video Enhance", 6), 
+    // 🔥 PENGATURAN GESER JADI INDEX 7
+    Triple(Icons.Rounded.Settings,      "Pengaturan",    7),
 )
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
@@ -114,7 +117,9 @@ fun KytheraShell() {
                         3    -> PatchScreen()
                         4    -> HistoryScreen()
                         5    -> EnhanceScreen()
-                        6    -> SettingsScreen()
+                        // 🔥 RUTENYA DIHUBUNGKAN KE FILE BARU KITA
+                        6    -> VideoEnhanceScreen() 
+                        7    -> SettingsScreen()
                         else -> DashboardScreen(onNavigate = { currentIndex = it })
                     }
                 }
@@ -126,7 +131,8 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Pengaturan")
+    // 🔥 TITLES DIUPDATE BIAR NGGAK ERROR PAS GANTI LAYAR
+    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Video Enhance", "Pengaturan")
     Row(
         modifier = Modifier
             .fillMaxWidth()
