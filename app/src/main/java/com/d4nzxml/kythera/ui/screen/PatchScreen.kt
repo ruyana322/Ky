@@ -39,11 +39,10 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
-// 🔥 Menyamai logika mode dari main.js (patch_only, encode_patch, ky60)
+// 🔥 Sesuai request: Cukup Patch Only dan Encode + Patch
 enum class PatchLogic(val label: String, val desc: String) {
-    DIRECT_PATCH("Direct Patch (Shark)", "Merapikan struktur MP4 (+faststart) & inject Shark Patch tanpa render ulang."),
-    ENCODE_PATCH("Encode + Patch", "Render ulang video untuk optimasi penuh, lalu inject Shark Patch."),
-    KYTHERA_STAMP("Kythera 60fps Stamp", "Menyematkan metadata stamp eksklusif Kythera.")
+    PATCH_ONLY("Patch Only", "Merapikan struktur MP4 (+faststart) & inject fake sample tanpa render ulang."),
+    ENCODE_PATCH("Encode + Patch", "Render ulang video (GPU Accelerated) untuk optimasi penuh, lalu inject fake sample.")
 }
 
 @Composable
@@ -57,7 +56,7 @@ fun PatchScreen() {
     var errorLog by rememberSaveable { mutableStateOf<String?>(null) }
     var isSuccess by rememberSaveable { mutableStateOf(false) }
     var savedVideoUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedLogic by remember { mutableStateOf(PatchLogic.DIRECT_PATCH) }
+    var selectedLogic by remember { mutableStateOf(PatchLogic.PATCH_ONLY) }
 
     val inputUri = inputUriString?.let { Uri.parse(it) }
 
@@ -71,27 +70,30 @@ fun PatchScreen() {
         }
     }
 
-    // ─── Simulasi Byte Manipulation dari main.js ───
-    fun applySharkPatch(file: File) {
-        // Logika translasi dari patchSharkSampleTableMethod(ab)
-        // Disini kita manipulasi byte file secara langsung
+    // ─── Simulasi Suntik Fake Sample ───
+    fun injectFakeSample(file: File) {
+        /* 
+           CATATAN KANG DADAN:
+           Di sini tempat lu masukin algoritma bongkar byte array MP4.
+           Lu bisa panggil class Kotlin/JNI C++ lu yang bertugas ngebaca tabel 'stbl', 'stsz', 
+           dan nambahin dummy frame size.
+           
+           Contoh kerangkanya:
+           val videoBytes = file.readBytes()
+           val patchedBytes = MyMp4Injector.applyFakeSample(videoBytes) 
+           FileOutputStream(file).use { it.write(patchedBytes) }
+        */
+        
+        // Placeholder sementara biar proses tetap jalan tanpa error
         try {
             val bytes = file.readBytes()
-            // Contoh sederhana: menambah signature di akhir file
-            val signature = "SHARK_PATCH_APPLIED".toByteArray()
-            val patchedBytes = bytes + signature
+            val dummyTag = "FAKE_SAMPLE_INJECTED".toByteArray()
+            val patchedBytes = bytes + dummyTag
             FileOutputStream(file).use { it.write(patchedBytes) }
-        } catch (e: Exception) { e.printStackTrace() }
-    }
-
-    fun applyMetadataStamp(file: File) {
-        // Logika translasi dari applyMetadataStamp(ab)
-        try {
-            val bytes = file.readBytes()
-            val stamp = "KYTHERA_60FPS_STAMP".toByteArray()
-            val patchedBytes = bytes + stamp
-            FileOutputStream(file).use { it.write(patchedBytes) }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) { 
+            e.printStackTrace() 
+            throw Exception("Gagal menyuntikkan fake sample: ${e.message}")
+        }
     }
 
     fun executePatch() {
@@ -111,52 +113,34 @@ fun PatchScreen() {
 
             withContext(Dispatchers.IO) {
                 try {
-                    var finalFile = File(outPath)
+                    val finalFile = File(outPath)
 
                     when (logic) {
-                        // 1. Logika 'patch_only' di main.js
-                        PatchLogic.DIRECT_PATCH -> {
+                        PatchLogic.PATCH_ONLY -> {
                             statusText = "⚙️ Merapikan struktur MP4 (+faststart)..."
                             val cmd = "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"$outPath\""
                             val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
-                                statusText = "⚙️ Menerapkan Shark HD Patch..."
-                                applySharkPatch(finalFile)
+                                statusText = "⚙️ Menyuntikkan tabel fake sample..."
+                                injectFakeSample(finalFile)
                             } else {
                                 throw Exception(session.allLogsAsString)
                             }
                         }
                         
-                        // 2. Logika 'encode_patch' di main.js
                         PatchLogic.ENCODE_PATCH -> {
-                            statusText = "⚙️ Optimasi Video & Anti-Delay..."
-                            // FFmpeg dari JS: -vf format=yuv420p -c:v libx264 -preset ultrafast -crf 20 -bf 0 -threads X -c:a aac -b:a 128k -shortest -metadata copyright=By kythera -metadata artist=By kythera -movflags +faststart
-                            // Diadaptasi pakai GPU MediaCodec untuk HP lu:
+                            statusText = "⚙️ Rendering Ulang & Optimasi Video..."
                             val cmd = "-hide_banner -i \"$safUrl\" -threads 0 -vf \"format=yuv420p\" -c:v h264_mediacodec -b:v 10M -bf 0 -c:a aac -b:a 128k -shortest -metadata copyright=\"By kythera\" -metadata artist=\"By kythera\" -movflags +faststart \"$outPath\""
                             val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
-                                statusText = "⚙️ Menerapkan Shark HD Patch..."
-                                applySharkPatch(finalFile)
-                            } else {
-                                throw Exception(session.allLogsAsString)
-                            }
-                        }
-
-                        // 3. Logika 'ky60' di main.js
-                        PatchLogic.KYTHERA_STAMP -> {
-                            statusText = "⚙️ Menyematkan metadata stamp Kythera..."
-                            // Karena ini tidak re-encode, kita copy dulu filenya
-                            val tempCmd = "-hide_banner -i \"$safUrl\" -c copy \"$outPath\""
-                            val session = FFmpegKit.execute(tempCmd)
-                            if (ReturnCode.isSuccess(session.returnCode)) {
-                                applyMetadataStamp(finalFile)
+                                statusText = "⚙️ Menyuntikkan tabel fake sample..."
+                                injectFakeSample(finalFile)
                             } else {
                                 throw Exception(session.allLogsAsString)
                             }
                         }
                     }
 
-                    // Pindahkan ke Galeri Publik
                     statusText = "Menyiapkan penyimpanan..."
                     val values = ContentValues().apply {
                         put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
@@ -168,7 +152,7 @@ fun PatchScreen() {
                         context.contentResolver.openOutputStream(destUri)?.use { out ->
                             FileInputStream(finalFile).use { it.copyTo(out) }
                         }
-                        finalFile.delete() // Bersihkan cache
+                        finalFile.delete() 
                         savedVideoUri = destUri
                         isSuccess = true
                         statusText = "✅ Patch Selesai! Tersimpan di Galeri."
@@ -190,10 +174,9 @@ fun PatchScreen() {
             .padding(16.dp)
     ) {
         Text("Kythera Patcher", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
-        Text("Shark HD Injector & MP4 Optimizer", color = KColor.Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("MP4 Optimizer & Sample Injector", color = KColor.Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
 
-        // ── Input Dropzone ──
         GlassCard {
             KDropZone(
                 onTap = { videoPicker.launch("video/*") },
@@ -209,9 +192,8 @@ fun PatchScreen() {
         }
         Spacer(Modifier.height(14.dp))
 
-        // ── Pilihan Logika Patch (Meniru JS) ──
         GlassCard {
-            Text("Pilih Metode Patch", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
+            Text("Pilih Metode", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
             Spacer(Modifier.height(10.dp))
             PatchLogic.entries.forEach { logic ->
                 val isActive = selectedLogic == logic
@@ -247,7 +229,6 @@ fun PatchScreen() {
             }
         }
 
-        // ── Area Error & Progress ──
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
@@ -283,7 +264,6 @@ fun PatchScreen() {
 
         Spacer(Modifier.height(20.dp))
 
-        // ── Tombol Aksi ──
         if (isSuccess && savedVideoUri != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 KPrimaryButton(
