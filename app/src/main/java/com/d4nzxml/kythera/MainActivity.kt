@@ -1,7 +1,5 @@
 package com.d4nzxml.kythera
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -70,6 +68,7 @@ val drawerItems = listOf(
     Triple(Icons.Rounded.History,       "History",       4),
     Triple(Icons.Rounded.Image,         "Photo Enhance", 5),
     Triple(Icons.Rounded.Movie,         "Video Enhance", 6),
+    Triple(Icons.Rounded.CloudUpload,   "Upload TikTok", 8), // 🔥 TAMBAHAN BARU
     Triple(Icons.Rounded.Settings,      "Pengaturan",    7),
 )
 
@@ -108,7 +107,7 @@ fun KytheraShell() {
                     onTap = { currentIndex = it }
                 )
             },
-                        floatingActionButton = {
+            floatingActionButton = {
                 // 🔥 FAB "Upload TikTok" muncul khusus di halaman Dashboard aja
                 AnimatedVisibility(
                     visible = currentIndex == 0,
@@ -117,17 +116,8 @@ fun KytheraShell() {
                 ) {
                     FloatingActionButton(
                         onClick = {
-                            // 🔥 IN-APP BROWSER (Custom Tabs): Buka web di dalem aplikasi
-                            try {
-                                val customTabsIntent = androidx.browser.customtabs.CustomTabsIntent.Builder()
-                                    .setShowTitle(true)
-                                    .build()
-                                customTabsIntent.launchUrl(context, Uri.parse("https://www.tiktok.com/upload"))
-                            } catch (e: Exception) {
-                                // Fallback kalau HP user nggak punya browser sama sekali
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.tiktok.com/upload"))
-                                context.startActivity(intent)
-                            }
+                            // 🔥 CUKUP PINDAH INDEX, BUKAN BUKA BROWSER LAGI
+                            currentIndex = 8 
                         },
                         containerColor = KColor.Accent,
                         contentColor = Color.Black,
@@ -138,7 +128,6 @@ fun KytheraShell() {
                     }
                 }
             }
-
         ) { innerPadding ->
             Box(Modifier.padding(innerPadding)) {
                 AnimatedContent(
@@ -157,6 +146,7 @@ fun KytheraShell() {
                         5    -> EnhanceScreen()
                         6    -> VideoEnhanceScreen()
                         7    -> SettingsScreen()
+                        8    -> TikTokScreen() // 🔥 DAFTARIN SCREEN-NYA DI SINI
                         else -> DashboardScreen(onNavigate = { currentIndex = it })
                     }
                 }
@@ -168,7 +158,8 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Video Enhance", "Pengaturan")
+    // 🔥 Tambahin "TikTok Upload" di ujung (Index 8)
+    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Video Enhance", "Pengaturan", "TikTok Upload")
     Row(
         modifier = Modifier
             .fillMaxWidth()
