@@ -1,14 +1,16 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.content.ContentValues
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState // 🔥 Tambahan Import
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll // 🔥 Tambahan Import
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Movie
@@ -32,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 
 @Composable
 fun VideoEnhanceScreen() {
@@ -69,14 +72,33 @@ fun VideoEnhanceScreen() {
             val safUrl = FFmpegKitConfig.getSafParameterForRead(context, inputUri!!)
 
             statusText = "Meningkatkan Resolusi & Detail..."
-            // 🔥 FIX 1: Tambahin -hide_banner di awal command biar log-nya gak kepanjangan
-            val command = "-hide_banner -i \"$safUrl\" -vf \"scale=1920:-2:flags=lanczos,unsharp=5:5:1.0,eq=contrast=1.05:saturation=1.15\" -c:v libx264 -preset superfast -crf 18 -c:a copy \"$outPath\""
+            // 🔥 FFmpeg Command: Auto-genap (-2), Fix Warna (yuv420p), Sembunyi Banner (-hide_banner)
+            val command = "-hide_banner -i \"$safUrl\" -vf \"scale=1920:-2:flags=lanczos,unsharp=5:5:1.0,eq=contrast=1.05:saturation=1.15\" -c:v libx264 -pix_fmt yuv420p -preset superfast -crf 18 -c:a copy \"$outPath\""
 
             withContext(Dispatchers.IO) {
                 val session = FFmpegKit.execute(command)
                 if (ReturnCode.isSuccess(session.returnCode)) {
+                    
+                    // 🔥 JASA KURIR: Memindahkan dari folder rahasia ke Galeri Publik
+                    val values = ContentValues().apply {
+                        put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
+                    }
+
+                    val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                    uri?.let { destUri ->
+                        context.contentResolver.openOutputStream(destUri)?.use { outStream ->
+                            FileInputStream(File(outPath)).use { inStream ->
+                                inStream.copyTo(outStream)
+                            }
+                        }
+                        // Hapus sampah sementara
+                        File(outPath).delete()
+                    }
+
                     isSuccess = true
-                    statusText = "✅ Berhasil! File tersimpan di: $fileName"
+                    statusText = "✅ Berhasil! Cek Galeri (Album Movies/Kythera)"
                 } else {
                     statusText = "❌ Proses Gagal!"
                     errorLog = session.allLogsAsString 
@@ -109,7 +131,6 @@ fun VideoEnhanceScreen() {
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
-                // 🔥 FIX 2: Tambahin tinggi maksimal dan verticalScroll biar bisa digeser ke bawah
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 250.dp)
