@@ -1,17 +1,23 @@
 package com.d4nzxml.kythera
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,8 +27,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,9 +69,7 @@ val drawerItems = listOf(
     Triple(Icons.Rounded.Edit,          "Patch Video",   3),
     Triple(Icons.Rounded.History,       "History",       4),
     Triple(Icons.Rounded.Image,         "Photo Enhance", 5),
-    // 🔥 TAMBAHIN MENU VIDEO ENHANCE DI SINI (Index 6)
-    Triple(Icons.Rounded.Movie,         "Video Enhance", 6), 
-    // 🔥 PENGATURAN GESER JADI INDEX 7
+    Triple(Icons.Rounded.Movie,         "Video Enhance", 6),
     Triple(Icons.Rounded.Settings,      "Pengaturan",    7),
 )
 
@@ -74,6 +80,7 @@ fun KytheraShell() {
     var currentIndex by remember { mutableStateOf(0) }
     val drawerState  = rememberDrawerState(DrawerValue.Closed)
     val scope        = rememberCoroutineScope()
+    val context      = LocalContext.current
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -100,6 +107,27 @@ fun KytheraShell() {
                     currentIndex = if (currentIndex > 4) -1 else currentIndex,
                     onTap = { currentIndex = it }
                 )
+            },
+            floatingActionButton = {
+                // 🔥 FAB "Upload TikTok" muncul khusus di halaman Dashboard aja
+                AnimatedVisibility(
+                    visible = currentIndex == 0,
+                    enter = scaleIn(tween(200)) + fadeIn(tween(200)),
+                    exit = scaleOut(tween(150)) + fadeOut(tween(150))
+                ) {
+                    FloatingActionButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.tiktok.com/upload"))
+                            context.startActivity(intent)
+                        },
+                        containerColor = KColor.Accent,
+                        contentColor = Color.Black,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
+                    ) {
+                        Icon(Icons.Rounded.Upload, contentDescription = "Upload TikTok")
+                    }
+                }
             }
         ) { innerPadding ->
             Box(Modifier.padding(innerPadding)) {
@@ -117,8 +145,7 @@ fun KytheraShell() {
                         3    -> PatchScreen()
                         4    -> HistoryScreen()
                         5    -> EnhanceScreen()
-                        // 🔥 RUTENYA DIHUBUNGKAN KE FILE BARU KITA
-                        6    -> VideoEnhanceScreen() 
+                        6    -> VideoEnhanceScreen()
                         7    -> SettingsScreen()
                         else -> DashboardScreen(onNavigate = { currentIndex = it })
                     }
@@ -131,7 +158,6 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    // 🔥 TITLES DIUPDATE BIAR NGGAK ERROR PAS GANTI LAYAR
     val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Video Enhance", "Pengaturan")
     Row(
         modifier = Modifier
@@ -178,32 +204,53 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(KColor.Surface)
-            .border(1.dp, KColor.Border,
-                shape = androidx.compose.ui.graphics.RectangleShape)
+            .border(1.dp, KColor.Border, androidx.compose.ui.graphics.RectangleShape)
             .navigationBarsPadding()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 10.dp), // Spacing dirapikan
         horizontalArrangement = Arrangement.SpaceAround,
     ) {
         bottomNavItems.forEachIndexed { i, item ->
             val isActive = currentIndex == i
-            Box(
+            val interactionSource = remember { MutableInteractionSource() }
+
+            Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isActive) KColor.Accent.copy(0.1f) else Color.Transparent)
-                    .clickable { onTap(i) }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center
+                    .weight(1f)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null, // 🔥 Hilangkan efek ripple abu-abu yang kaku
+                        onClick = { onTap(i) }
+                    ),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(item.icon, null,
+                // 🔥 Icon wrapper (Ikon membesar saat aktif)
+                Box(
+                    modifier = Modifier.height(32.dp).padding(bottom = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
                         tint = if (isActive) KColor.Accent else KColor.Text3,
-                        modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.height(4.dp))
-                    Text(item.label,
-                        color = if (isActive) KColor.Accent else KColor.Text3,
-                        fontSize = 10.sp,
-                        fontWeight = if (isActive) FontWeight.W600 else FontWeight.W400)
+                        modifier = Modifier.size(if (isActive) 24.dp else 20.dp) 
+                    )
                 }
+                
+                Text(
+                    text = item.label,
+                    color = if (isActive) KColor.Accent else KColor.Text3,
+                    fontSize = 10.sp,
+                    fontWeight = if (isActive) FontWeight.W600 else FontWeight.W400
+                )
+                
+                // 🔥 Indikator garis glowing ala Material You
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .size(width = 16.dp, height = 3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (isActive) KColor.Accent else Color.Transparent)
+                )
             }
         }
     }
