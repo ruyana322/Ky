@@ -1,5 +1,7 @@
 package com.d4nzxml.kythera.ui.screen
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
