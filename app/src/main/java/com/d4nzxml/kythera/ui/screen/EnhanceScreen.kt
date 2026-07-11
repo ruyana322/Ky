@@ -224,9 +224,21 @@ fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifi
             val afterScale = minOf(w / afterImg.width, h / afterImg.height)
             val beforeScale = minOf(w / beforeImg.width, h / beforeImg.height)
 
-            withTransform({ translate((w - afterImg.width * afterScale) / 2f, (h - afterImg.height * afterScale) / 2f); scale(afterScale) }) { drawImage(afterImg) }
+            // 🔥 FIX: scale() sekarang diisi dua parameter (X dan Y) 🔥
+            withTransform({ 
+                translate((w - afterImg.width * afterScale) / 2f, (h - afterImg.height * afterScale) / 2f)
+                scale(afterScale, afterScale) 
+            }) { 
+                drawImage(afterImg) 
+            }
+            
             clipRect(right = w * sliderPos) {
-                withTransform({ translate((w - beforeImg.width * beforeScale) / 2f, (h - beforeImg.height * beforeScale) / 2f); scale(beforeScale) }) { drawImage(beforeImg) }
+                withTransform({ 
+                    translate((w - beforeImg.width * beforeScale) / 2f, (h - beforeImg.height * beforeScale) / 2f)
+                    scale(beforeScale, beforeScale) 
+                }) { 
+                    drawImage(beforeImg) 
+                }
             }
             drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 5f)
             drawCircle(KColor.Accent, radius = 20f, center = Offset(w * sliderPos, h / 2))
