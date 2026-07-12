@@ -51,7 +51,7 @@ import java.io.File
 // ═══════════════════════════════════════════════════════════════════════════
 enum class PipelineMode(val label: String, val icon: String, val desc: String) {
     PATCH_ONLY("Patch Only", "🩹", "Shark HD patch langsung ke video asli"),
-    ENCODE_PATCH("Encode + Patch", "🎬", "Re-encode dulu lalu Shark patch"),
+    ENCODE_PATCH("Encode + Patch", "🎬", "Render super kilat (CRF 18) lalu Shark patch"),
     KYTHERA_60("Kythera 60fps", "⚡", "Z-Payload + encoder tag")
 }
 
@@ -342,7 +342,6 @@ private object SharkPatcher {
             stsz to buildStsz(originalSizes, fakeSampleCount)
         )
 
-        // Pass 1: Kalkulasi Moov size & delta
         val placeholderReplacements = HashMap(fixedReplacements)
         stcoBoxes.forEach { b -> placeholderReplacements[b] = buildStco(parseStco(b), 0L, if (b == stco) 0L else null, fakeSampleCount) }
         val moovPlaceholder = rebuildBox(moov, placeholderReplacements)
@@ -353,12 +352,10 @@ private object SharkPatcher {
         var delta = (newMdatPayloadStart - mdat.contentStart).toLong()
         var fakeOffset = (newMdatPayloadStart + oldMdatPayload.size).toLong()
 
-        // Pass 2: Rebuild stco dengan delta pergeseran
         var finalReplacements = HashMap(fixedReplacements)
         stcoBoxes.forEach { b -> finalReplacements[b] = buildStco(parseStco(b), delta, if (b == stco) fakeOffset else null, fakeSampleCount) }
         var moovNew = rebuildBox(moov, finalReplacements)
 
-        // Pass 3: Koreksi offset mdat setelah rebuild
         val recalculatedMdatPayloadStart = ftyp.size + moovNew.size + preservedBytes.size + 8
         delta = (recalculatedMdatPayloadStart - mdat.contentStart).toLong()
         fakeOffset = (recalculatedMdatPayloadStart + oldMdatPayload.size).toLong()
@@ -424,8 +421,6 @@ private suspend fun runPipeline(
     context:    Context,
     sourceUri:  Uri,
     mode:       PipelineMode,
-    crf:        Int,
-    preset:     String,
     onProgress: (String, Int) -> Unit
 ): Uri? = withContext(Dispatchers.IO) {
 
@@ -473,11 +468,12 @@ private suspend fun runPipeline(
                     }
                 }
 
+                // 🔥 COMMAND DIKUNCI: Preset Ultrafast, CRF 18, Audio Copy
                 val cmd = "-y -i \"${inputFile.absolutePath}\" " +
                           "-vf format=yuv420p " +
-                          "-c:v libx264 -preset $preset -crf $crf " +
+                          "-c:v libx264 -preset ultrafast -crf 18 " +
                           "-bf 0 -movflags +faststart " +
-                          "-c:a aac -b:a 128k -shortest " +
+                          "-c:a copy " +
                           "-metadata copyright=\"By Kythera\" " +
                           "-metadata artist=\"D4nzxml\" " +
                           "\"${encFile.absolutePath}\""
@@ -530,7 +526,6 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Lingkaran AI Melayang
         Box(contentAlignment = Alignment.Center) {
             Box(modifier = Modifier.size(110.dp).scale(pulse).clip(CircleShape).background(Color(0x407C4DFF)))
             Box(
@@ -551,14 +546,12 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BOTTOM SHEET
+// BOTTOM SHEET (Disederhanakan)
 // ═══════════════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PipelineSheet(onConfirm: (mode: PipelineMode, crf: Int, preset: String) -> Unit, onDismiss: () -> Unit) {
+private fun PipelineSheet(onConfirm: (mode: PipelineMode) -> Unit, onDismiss: () -> Unit) {
     var selectedMode by remember { mutableStateOf(PipelineMode.ENCODE_PATCH) }
-    var selectedCrf by remember { mutableStateOf(18) }
-    var selectedPreset by remember { mutableStateOf("fast") }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF1A1A2E), contentColor = Color.White) {
         Column(
@@ -586,38 +579,9 @@ private fun PipelineSheet(onConfirm: (mode: PipelineMode, crf: Int, preset: Stri
                 }
             }
 
-            if (selectedMode == PipelineMode.ENCODE_PATCH) {
-                Text("Kualitas (CRF)", fontSize = 13.sp, color = Color(0xFFAAAAAA))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    listOf(18 to "Maksimal", 20 to "Seimbang").forEach { (crf, lbl) ->
-                        val active = selectedCrf == crf
-                        Box(
-                            modifier = Modifier.weight(1f).background(if (active) Color(0xFF7C4DFF) else Color(0xFF2A2A3E), RoundedCornerShape(10.dp))
-                                .clickable { selectedCrf = crf }.padding(vertical = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("CRF $crf", fontWeight = FontWeight.Bold, color = if (active) Color.White else Color(0xFFCCCCCC))
-                                Text(lbl, fontSize = 11.sp, color = if (active) Color(0xFFDDCCFF) else Color(0xFF888888))
-                            }
-                        }
-                    }
-                }
-                Text("Preset Encode", fontSize = 13.sp, color = Color(0xFFAAAAAA))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("ultrafast" to "⚡ Ultrafast", "fast" to "🚀 Fast", "medium" to "🎯 Medium").forEach { (preset, label) ->
-                        val active = selectedPreset == preset
-                        Box(
-                            modifier = Modifier.weight(1f).background(if (active) Color(0xFF7C4DFF) else Color(0xFF2A2A3E), RoundedCornerShape(10.dp))
-                                .clickable { selectedPreset = preset }.padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) { Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else Color(0xFFCCCCCC)) }
-                    }
-                }
-            }
-
+            Spacer(Modifier.height(8.dp))
             Button(
-                onClick = { onConfirm(selectedMode, selectedCrf, selectedPreset) },
+                onClick = { onConfirm(selectedMode) },
                 modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF)), shape = RoundedCornerShape(12.dp)
             ) { Text("🚀 Proses & Upload ke TikTok", modifier = Modifier.padding(vertical = 4.dp)) }
 
@@ -648,7 +612,7 @@ fun TikTokScreen() {
 
     if (showSheet) {
         PipelineSheet(
-            onConfirm = { mode, crf, preset ->
+            onConfirm = { mode ->
                 showSheet = false
                 val src = pendingUri ?: return@PipelineSheet
                 pendingUri = null
@@ -657,7 +621,7 @@ fun TikTokScreen() {
                 progressVal = 0
 
                 scope.launch {
-                    val resultUri = runPipeline(context, src, mode, crf, preset) { msg, p ->
+                    val resultUri = runPipeline(context, src, mode) { msg, p ->
                         statusMsg = msg; progressVal = p.coerceAtLeast(0); postNotif(context, "Kythera Pipeline", msg, p)
                     }
                     isProcessing = false
@@ -696,15 +660,12 @@ fun TikTokScreen() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             
-                            // 🔥 GABUNGAN: Viewport fix + D4NZXML Godmode Toast + API Interceptor
                             val jsInjection = """
-                                // 1. Viewport Fix (Biar bisa di-scroll & digeser)
                                 var meta = document.querySelector('meta[name="viewport"]');
                                 if (meta) { meta.setAttribute('content','width=1280'); }
                                 else { var m=document.createElement('meta'); m.name='viewport'; m.content='width=1280'; document.head.appendChild(m); }
                                 document.body.style.overflow='auto'; document.documentElement.style.overflow='auto';
 
-                                // 2. D4NZXML GODMODE TOAST
                                 (function () {
                                   if (window.__d4nzToastDone) return;
                                   window.__d4nzToastDone = true;
@@ -725,8 +686,59 @@ fun TikTokScreen() {
                                   if (document.body) { showToast(); } else { document.addEventListener('DOMContentLoaded', showToast); }
                                 })();
 
-                                // 3. API INTERCEPTOR (Caption Kythera & Original Audio)
-                                (function _c(){setInterval(function(){const t=new Date();try{Function("debugger")()}catch(e){}if(new Date()-t>200)document.body.innerHTML=''},1e3);const _s1=String.fromCharCode(9889,65038,32,85,112,108,111,97,100,32,109,101,116,104,111,100,32,98,121,32,75,121,116,104,101,114,97,32,9889,65038),_s2=String.fromCharCode(75,121,116,104,101,114,97);if(window.__cUInjected)return;window.__cUInjected=!0;const C_SIG=_s1,C_KEYS=new Set(["caption","captiontext","captiontextdraft","captiondraft","markuptext","text","title","desc","description","itemdescription","itemdesc","video_description","videodescription","posttext","posttitle","videodesc","video_title","videotitle"]),TB_RE=/(?:music|audio|cover|url|uri|path|file|id|uid|sec|user|author|hash|token|key|material|effect|sticker|challenge)/i,TV_RE=/^(?:https?:\/\/|\/|blob:|data:|urn:|[a-z]:\\)/i,escRe=t=>t.replace(/[.*+?^${'$'}()|[\]\\]/g,"\\${'$'}&"),CS_RE=new RegExp("\\s*"+escRe(_s1)+"\\s*","g"),CM_RE=new RegExp("(?:"+_s2+"\\s*)+","g");function apSig(t){const e=stSig(t);return e?`${'$'}{e}\n\n${'$'}{C_SIG}`:C_SIG}function escMk(t){return String(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}function stMk(t){return String(t||"").replace(/<\/?[hm][^>]*>/g,"")}function stSig(t){return stMk(t).replace(/&amp;/g,"&").split(C_SIG).join("").replace(CS_RE,"").replace(CM_RE,"").trimEnd()}function apTE(t,e){return Array.isArray(t)?t.filter(t=>{const n=String(t&&t.hashtag_name||"").replace(/^@/,""),r=t&&Number.isFinite(t.start)&&Number.isFinite(t.end)?String(e||"").slice(t.start,t.end):"";return!(t&&0===t.type&&(n.toLowerCase()===_s2.toLowerCase()||r.toLowerCase()==="@"+_s2.toLowerCase()))}):[]}function bdMk(t,e,n){const r=String(t||"").replace(CS_RE,"").replace(CM_RE,"").trimEnd(),c=escMk(C_SIG);return r?`${'$'}{r}\n\n${'$'}{c}`:c}function isPub(t){return"string"==typeof t&&(t.includes("tiktok/web/project/post/v1/")||/(?:post|publish|upload|aweme|item)/i.test(t)&&/tiktok/i.test(t))}function getRU(t){return"string"==typeof t?t:t&&"string"==typeof t.url?t.url:""}function ptBd(t){let e=JSON.parse(t);const n=e.single_post_req_list&&e.single_post_req_list[0]&&e.single_post_req_list[0].single_post_feature_info&&e.single_post_req_list[0].single_post_feature_info.music_info&&e.single_post_req_list[0].single_post_feature_info.music_info.music_id_string;["draft","canvas_config","vedit_segment_info"].forEach(t=>{void 0!==e[t]&&delete e[t]}),void 0!==e.cloud_edit_is_use_video_canvas&&(e.cloud_edit_is_use_video_canvas=!1),void 0!==e.enter_post_page_from&&(e.enter_post_page_from=1),e.post_common_info&&(e.post_common_info.post_type=3,e.post_common_info.enter_post_page_from=1),n&&Array.isArray(e.feature_common_info_list)&&e.feature_common_info_list.forEach(t=>{t&&t.vedit_common_info&&(void 0!==t.vedit_common_info.tiktok_snap_shot_lite_params&&delete t.vedit_common_info.tiktok_snap_shot_lite_params,void 0!==t.vedit_common_info.application&&(t.vedit_common_info.application=1))}),Array.isArray(e.single_post_req_list)&&e.single_post_req_list.forEach(t=>{t&&t.single_post_feature_info&&(void 0!==t.single_post_feature_info.vedit_segment_info&&delete t.single_post_feature_info.vedit_segment_info,t.single_post_feature_info.has_original_audio=1,t.single_post_feature_info.cloud_edit_is_use_video_canvas=!1)});enSig(e);return JSON.stringify(e)}function isCP(t){return!!(t&&"object"==typeof t&&(Array.isArray(t.single_post_req_list)||Array.isArray(t.post_items)||Array.isArray(t.item_list)||t.post_common_info||t.item_common_info||t.publish_info||t.item_info))}function nmK(t){return String(t||"").replace(/[_-]/g,"").toLowerCase()}function isC(t){return C_KEYS.has(nmK(t))}function shS(t){return TB_RE.test(String(t||""))&&!/(?:caption|desc|title|text|post)/i.test(String(t||""))}function isSV(t){return"string"==typeof t&&t.length<=2200&&!TV_RE.test(t.trim())}function enSig(t){if(!isCP(t))return!1;if(enSt(t))return!0;if(Array.isArray(t.single_post_req_list))return!1;const e=new WeakSet;let n=!1;function r(t,c,i){if(!t||"object"!=typeof t||i>8||e.has(t))return;e.add(t),Object.keys(t).forEach(e=>{const c=t[e];if("markuptext"===nmK(e)&&isSV(c)){const i=apSig(stSig(c)),o=bdMk(c,apTE([],i),i);c!==o&&(t[e]=o,n=!0);return}if(isC(e)&&isSV(c)){const i=apSig(c);c!==i&&(t[e]=i,n=!0);return}c&&"object"==typeof c&&!shS(e)&&r(c,e,i+1)})}return r(t,"",0),n||(n=enKn(t)),n}function enP(t,e){let n=t;for(let t=0;t<e.length-1;t++){if(n=n&&n[e[t]],!n||"object"!=typeof n)return!1}const r=e[e.length-1];if(!isSV(n[r]))return!1;const c=apSig(n[r]);return n[r]!==c&&(n[r]=c,!0)}function enKn(t){let e=!1;return Array.isArray(t.single_post_req_list)&&t.single_post_req_list.forEach(t=>{t&&"object"==typeof t&&[["caption"],["desc"],["title"],["text"],["description"],["single_post_feature_info","caption"],["single_post_feature_info","desc"],["single_post_feature_info","markup_text"],["single_post_feature_info","title"],["single_post_feature_info","text"],["single_post_feature_info","description"]].forEach(n=>{enP(t,n)&&(e=!0)})}),t.post_common_info&&"object"==typeof t.post_common_info&&["caption","desc","title","text","description"].forEach(n=>{enP(t.post_common_info,[n])&&(e=!0)}),e}function enSt(t){if(!Array.isArray(t.single_post_req_list))return!1;let e=!1;return t.single_post_req_list.forEach(t=>{const n=t&&t.single_post_feature_info;if(!n||"object"!=typeof n)return;const r=stSig(n.text||n.markup_text||""),c=apSig(r),i=apTE(n.text_extra,c),o=bdMk(n.markup_text||escMk(r),i,c);n.text!==c&&(n.text=c,e=!0),n.markup_text!==o&&(n.markup_text=o,e=!0),JSON.stringify(n.text_extra||[])!==JSON.stringify(i)&&(n.text_extra=i,e=!0)}),e}const oS=JSON.stringify;JSON.stringify=function(t,e,n){if(t&&"object"==typeof t){const e=t.single_post_req_list&&t.single_post_req_list[0]&&t.single_post_req_list[0].single_post_feature_info&&t.single_post_req_list[0].single_post_feature_info.music_info&&t.single_post_req_list[0].single_post_feature_info.music_info.music_id_string;["draft","canvas_config","vedit_segment_info"].forEach(e=>{void 0!==t[e]&&delete t[e]}),void 0!==t.cloud_edit_is_use_video_canvas&&(t.cloud_edit_is_use_video_canvas=!1),void 0!==t.enter_post_page_from&&(t.enter_post_page_from=1),t.post_common_info&&(void 0!==t.post_common_info.post_type&&(t.post_common_info.post_type=3),void 0!==t.post_common_info.enter_post_page_from&&(t.post_common_info.enter_post_page_from=1)),e&&Array.isArray(t.feature_common_info_list)&&t.feature_common_info_list.forEach(t=>{t&&t.vedit_common_info&&(void 0!==t.vedit_common_info.tiktok_snap_shot_lite_params&&delete t.vedit_common_info.tiktok_snap_shot_lite_params,void 0!==t.vedit_common_info.application&&(t.vedit_common_info.application=1))}),Array.isArray(t.single_post_req_list)&&t.single_post_req_list.forEach(t=>{t&&t.single_post_feature_info&&(void 0!==t.single_post_feature_info.vedit_segment_info&&delete t.single_post_feature_info.vedit_segment_info,t.single_post_feature_info.has_original_audio=1,t.single_post_feature_info.cloud_edit_is_use_video_canvas=!1)})}return oS.call(this,t,e,n)};const oF=window.fetch;window.fetch=async function(t,e={}){if(isPub(getRU(t)))if(e.body&&"string"==typeof e.body)try{e.body=ptBd(e.body)}catch(t){}else if("undefined"!=typeof Request&&t instanceof Request)try{const n=await t.clone().text();n&&(t=new Request(t,{body:ptBd(n)}))}catch(t){}return oF.call(this,t,e)};const X=XMLHttpRequest.prototype,oO=X.open,oSe=X.send;X.open=function(t,e){return this._u=e,oO.apply(this,arguments)},X.send=function(t){if(isPub(this._u))if("string"==typeof t)try{let e=JSON.parse(t);const n=e.single_post_req_list&&e.single_post_req_list[0]&&e.single_post_req_list[0].single_post_feature_info&&e.single_post_req_list[0].single_post_feature_info.music_info&&e.single_post_req_list[0].single_post_feature_info.music_info.music_id_string;["draft","canvas_config","vedit_segment_info"].forEach(t=>{void 0!==e[t]&&delete e[t]}),void 0!==e.cloud_edit_is_use_video_canvas&&(e.cloud_edit_is_use_video_canvas=!1),void 0!==e.enter_post_page_from&&(e.enter_post_page_from=1),e.post_common_info&&(e.post_common_info.post_type=3,e.post_common_info.enter_post_page_from=1),n&&Array.isArray(e.feature_common_info_list)&&e.feature_common_info_list.forEach(t=>{t&&t.vedit_common_info&&(void 0!==t.vedit_common_info.tiktok_snap_shot_lite_params&&delete t.vedit_common_info.tiktok_snap_shot_lite_params,void 0!==t.vedit_common_info.application&&(t.vedit_common_info.application=1))}),Array.isArray(e.single_post_req_list)&&e.single_post_req_list.forEach(t=>{t&&t.single_post_feature_info&&(void 0!==t.single_post_feature_info.vedit_segment_info&&delete t.single_post_feature_info.vedit_segment_info,t.single_post_feature_info.has_original_audio=1,t.single_post_feature_info.cloud_edit_is_use_video_canvas=!1)}),enSig(e),t=JSON.stringify(e)}catch(t){}return oSe.call(this,t)}})();
+                                (function() {
+                                    if (window.__cUInjected) return;
+                                    window.__cUInjected = true;
+                                    const SIGNATURE = "\n\n⚡ Upload method by Kythera ⚡";
+                                    function modifyPayload(bodyStr) {
+                                        try {
+                                            let data = JSON.parse(bodyStr);
+                                            let modified = false;
+                                            if (data.single_post_req_list && data.single_post_req_list[0]) {
+                                                let featureInfo = data.single_post_req_list[0].single_post_feature_info;
+                                                if (featureInfo) {
+                                                    featureInfo.has_original_audio = 1;
+                                                    if (featureInfo.music_info) delete featureInfo.music_info;
+                                                    modified = true;
+                                                }
+                                            }
+                                            const injectText = (obj) => {
+                                                if (!obj || typeof obj !== 'object') return;
+                                                ['text', 'markup_text', 'desc', 'title', 'caption'].forEach(key => {
+                                                    if (typeof obj[key] === 'string' && !obj[key].includes('Kythera')) {
+                                                        obj[key] += SIGNATURE;
+                                                        modified = true;
+                                                    }
+                                                });
+                                                Object.values(obj).forEach(val => injectText(val));
+                                            };
+                                            injectText(data);
+                                            return modified ? JSON.stringify(data) : bodyStr;
+                                        } catch(e) { 
+                                            return bodyStr; 
+                                        }
+                                    }
+                                    const origFetch = window.fetch;
+                                    window.fetch = async function(resource, config) {
+                                        let url = typeof resource === 'string' ? resource : resource?.url;
+                                        if (url && (url.includes('/upload') || url.includes('/publish') || url.includes('/post')) && config && typeof config.body === 'string') {
+                                            config.body = modifyPayload(config.body);
+                                        }
+                                        return origFetch.apply(this, arguments);
+                                    };
+                                    const origOpen = XMLHttpRequest.prototype.open;
+                                    const origSend = XMLHttpRequest.prototype.send;
+                                    XMLHttpRequest.prototype.open = function(method, url) {
+                                        this._url = url;
+                                        return origOpen.apply(this, arguments);
+                                    };
+                                    XMLHttpRequest.prototype.send = function(body) {
+                                        if (this._url && (this._url.includes('/upload') || this._url.includes('/publish') || this._url.includes('/post')) && typeof body === 'string') {
+                                            body = modifyPayload(body);
+                                        }
+                                        return origSend.call(this, body);
+                                    };
+                                })();
                             """.trimIndent()
                             
                             view?.evaluateJavascript(jsInjection, null)
@@ -748,16 +760,14 @@ fun TikTokScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize() 
-                    .background(Color(0xCC000000)) // 🔥 Background Hitam Full Layar (80% transparan)
-                    .clickable(enabled = false) {}, // 🔥 Mencegah user klik apapun di belakangnya
+                    .background(Color(0xCC000000))
+                    .clickable(enabled = false) {},
                 contentAlignment = Alignment.Center
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text("KYTHERA AI", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C4DFF), letterSpacing = 4.sp)
-                    Spacer(Modifier.height(8.dp))
                     AiScanAnimation(statusMsg = statusMsg, progress = progressVal)
                 }
             }
