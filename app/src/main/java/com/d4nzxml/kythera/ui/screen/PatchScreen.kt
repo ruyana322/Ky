@@ -84,6 +84,12 @@ enum class EncodeQuality(val label: String, val desc: String, val cmdParams: Str
 //  MP4 PATCHER ENGINE — port dari patcher.js
 // ═════════════════════════════════════════════════════════════
 
+// ═════════════════════════════════════════════════════════════
+//  MP4 PATCHER ENGINE — fixed version
+//  Fix 1: preserved boxes ikut kalkulasi offset (sama kayak Python)
+//  Fix 2: fakeCount hardcode 8573 (bukan origSizes.size * 9)
+// ═════════════════════════════════════════════════════════════
+
 private object Mp4Engine {
 
     // ── Shark constants ───────────────────────────────────────
@@ -91,6 +97,7 @@ private object Mp4Engine {
     private const val VIDEO_DURATION        = 2269500
     private const val VIDEO_EDIT_MEDIA_TIME = 3000
     private const val VIDEO_SAMPLE_DELTA    = 1500
+    private const val FAKE_SAMPLE_COUNT     = 8573  // ✅ FIX: dulu origSizes.size * 9
     private const val FAKE_SAMPLE_SIZE      = 8
     private val FAKE_SAMPLE_BYTES = byteArrayOf(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00)
 
@@ -165,16 +172,35 @@ private object Mp4Engine {
         return if (off + 4 <= buf.size) cc(buf, off) else ""
     }
 
+    // ── Collect preserved boxes (free, wide, dll) ─────────────
+
+    private fun collectPreserved(buf: ByteArray): ByteArray {
+        // ✅ FIX: box selain ftyp/moov/mdat harus ikut di output
+        // supaya kalkulasi offset stco tetap akurat
+        val parts = mutableListOf<ByteArray>()
+        var p = 0
+        while (p + 8 <= buf.size) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            if (t != "ftyp" && t != "moov" && t != "mdat") {
+                parts.add(buf.copyOfRange(p, p + sz))
+            }
+            p += sz
+        }
+        return if (parts.isEmpty()) ByteArray(0) else cat(*parts.toTypedArray())
+    }
+
     // ─────────────────────────────────────────────────────────
     //  SHARK SAMPLE TABLE
-    //  Setara patchSharkSampleTableMethod() di JS
-    //  → dipakai PATCH_ONLY & ENCODE_PATCH
     // ─────────────────────────────────────────────────────────
 
     fun patchSharkSampleTable(input: ByteArray): ByteArray {
         val ftyp = topLevel(input, "ftyp") ?: throw Exception("ftyp tidak ditemukan.")
         val moov = topLevel(input, "moov") ?: throw Exception("moov tidak ditemukan.")
         val mdat = topLevel(input, "mdat") ?: throw Exception("mdat tidak ditemukan.")
+
+        // ✅ FIX: kumpulkan preserved boxes dulu sebelum kalkulasi offset
+        val preserved = collectPreserved(input)
 
         // Cari video track
         var videoTrak: B? = null
@@ -199,10 +225,10 @@ private object Mp4Engine {
         val stco = child(input, stbl, "stco") ?: throw Exception("stco tidak ditemukan.")
 
         // Parse
-        val origSizes   = parseStsz(input, stsz)
+        val origSizes    = parseStsz(input, stsz)
         val origStscRows = parseStsc(input, stsc)
-        val origOffsets = parseStco(input, stco)
-        val fakeCount   = origSizes.size * 9
+        val origOffsets  = parseStco(input, stco)
+        val fakeCount    = FAKE_SAMPLE_COUNT  // ✅ FIX: hardcode 8573
 
         // Build replacements
         fun fixedRep() = mapOf(
@@ -219,25 +245,30 @@ private object Mp4Engine {
             buildStco(origOffsets, delta, if (sc == stco) fakeOff else null, fakeCount)
         }
 
+        val mdatPayload = input.copyOfRange(mdat.contentStart, mdat.end)
+
         // Pass 1 — ukur moov placeholder
+        // ✅ FIX: + preserved.size ikut dihitung (dulu hilang)
         val moovPlaceholder = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(0, 0))
-        val mdatPayload     = input.copyOfRange(mdat.contentStart, mdat.end)
-        val startPos        = ftyp.size + moovPlaceholder.size + 8
+        val startPos        = ftyp.size + moovPlaceholder.size + preserved.size + 8
 
         // Pass 2 — delta real
-        var delta    = startPos - mdat.contentStart
-        var fakeOff  = startPos + mdatPayload.size
-        var moovNew  = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(delta, fakeOff))
+        var delta   = startPos - mdat.contentStart
+        var fakeOff = startPos + mdatPayload.size
+        var moovNew = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(delta, fakeOff))
 
-        // Pass 3 — recalculate (sama kayak JS)
-        val recalc  = ftyp.size + moovNew.size + 8
-        delta        = recalc - mdat.contentStart
-        fakeOff      = recalc + mdatPayload.size
-        moovNew      = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(delta, fakeOff))
+        // Pass 3 — recalculate
+        // ✅ FIX: + preserved.size ikut dihitung (dulu hilang)
+        val recalc = ftyp.size + moovNew.size + preserved.size + 8
+        delta       = recalc - mdat.contentStart
+        fakeOff     = recalc + mdatPayload.size
+        moovNew     = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(delta, fakeOff))
 
         val ftypBytes = input.copyOfRange(ftyp.off, ftyp.end)
         val mdatNew   = box("mdat", cat(mdatPayload, FAKE_SAMPLE_BYTES))
-        return cat(ftypBytes, moovNew, mdatNew)
+
+        // ✅ FIX: preserved ikut disertakan di output (dulu di-skip)
+        return cat(ftypBytes, moovNew, preserved, mdatNew)
     }
 
     // ── Parse helpers ──────────────────────────────────────────
@@ -371,6 +402,7 @@ private object Mp4Engine {
         return box(b.type, cat(*children.toTypedArray()))
     }
 }
+
 
 // ═════════════════════════════════════════════════════════════
 //  COMPOSABLE
