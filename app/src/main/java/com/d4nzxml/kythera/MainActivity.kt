@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -52,20 +53,19 @@ class MainActivity : ComponentActivity() {
 // ─── Navigation items ─────────────────────────────────────────────────────────
 data class NavItem(val icon: ImageVector, val label: String)
 
-// 🔥 Patch dihapus, sisa 4 menu utama
+// 🔥 Menu History diganti jadi Profile (Pakai Icon Standar Person)
 val bottomNavItems = listOf(
     NavItem(Icons.Rounded.GridView,    "Dashboard"),
     NavItem(Icons.Rounded.SwapHoriz,   "Convert"),
     NavItem(Icons.Rounded.Compress,    "Compress"),
-    NavItem(Icons.Rounded.History,     "History"),
+    NavItem(Icons.Rounded.Person,      "Profile") 
 )
 
-// 🔥 Index digeser dan dirapikan
 val drawerItems = listOf(
     Triple(Icons.Rounded.GridView,      "Dashboard",     0),
     Triple(Icons.Rounded.SwapHoriz,     "Converter",     1),
     Triple(Icons.Rounded.Compress,      "Compress",      2),
-    Triple(Icons.Rounded.History,       "History",       3),
+    Triple(Icons.Rounded.Person,        "Profile",       3), 
     Triple(Icons.Rounded.Image,         "Photo Enhance", 4),
     Triple(Icons.Rounded.Movie,         "Video Enhance", 5),
     Triple(Icons.Rounded.CloudUpload,   "Upload TikTok", 6),
@@ -102,7 +102,6 @@ fun KytheraShell() {
                 )
             },
             bottomBar = {
-                // 🔥 Bottom Nav disembunyikan kalau buka index di atas 3
                 KytheraBottomNav(
                     currentIndex = if (currentIndex > 3) -1 else currentIndex,
                     onTap = { currentIndex = it }
@@ -115,10 +114,7 @@ fun KytheraShell() {
                     exit = scaleOut(tween(150)) + fadeOut(tween(150))
                 ) {
                     FloatingActionButton(
-                        onClick = {
-                            // 🔥 Lompat ke index 6 (TikTok Screen yang baru)
-                            currentIndex = 6 
-                        },
+                        onClick = { currentIndex = 6 },
                         containerColor = KColor.Accent,
                         contentColor = Color.Black,
                         shape = RoundedCornerShape(16.dp),
@@ -141,7 +137,7 @@ fun KytheraShell() {
                         0    -> DashboardScreen(onNavigate = { currentIndex = it })
                         1    -> ConverterScreen()
                         2    -> CompressScreen()
-                        3    -> HistoryScreen()
+                        3    -> HistoryScreen() // Tetap arahin ke file ini buat sementara, lu bisa rombak isinya nanti
                         4    -> EnhanceScreen()
                         5    -> VideoEnhanceScreen()
                         6    -> TikTokScreen()
@@ -157,8 +153,7 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    // 🔥 Susunan title disesuaikan dengan index baru
-    val titles = listOf("Dashboard", "Converter", "Compress", "History", "Photo Enhance", "Video Enhance", "TikTok Upload", "Pengaturan")
+    val titles = listOf("Dashboard", "Converter", "Compress", "Profile", "Photo Enhance", "Video Enhance", "TikTok Upload", "Pengaturan")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -180,20 +175,11 @@ fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
         Spacer(Modifier.width(10.dp))
         Text("Kythera", color = KColor.Text, fontWeight = FontWeight.W800, fontSize = 16.sp)
         Spacer(Modifier.weight(1f))
-        Text(
-            titles.getOrElse(currentIndex) { "" },
-            color = KColor.Text3, fontSize = 12.sp
-        )
+        Text(titles.getOrElse(currentIndex) { "" }, color = KColor.Text3, fontSize = 12.sp)
         Spacer(Modifier.width(12.dp))
-        Box(
-            Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                .background(KColor.Accent3)
-        )
+        Box(Modifier.size(8.dp).clip(CircleShape).background(KColor.Accent3))
         Spacer(Modifier.width(12.dp))
-        Icon(
-            Icons.Rounded.Menu, null,
-            tint = KColor.Text2, modifier = Modifier.size(22.dp).clickable(onClick = onMenuTap)
-        )
+        Icon(Icons.Rounded.Menu, null, tint = KColor.Text2, modifier = Modifier.size(22.dp).clickable(onClick = onMenuTap))
     }
 }
 
@@ -231,7 +217,7 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
                         imageVector = item.icon,
                         contentDescription = item.label,
                         tint = if (isActive) KColor.Accent else KColor.Text3,
-                        modifier = Modifier.size(if (isActive) 24.dp else 20.dp) 
+                        modifier = Modifier.size(if (isActive) 24.dp else 20.dp)
                     )
                 }
                 
@@ -264,11 +250,7 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .border(
-                    width = 1.dp,
-                    color = KColor.Border,
-                    shape = androidx.compose.ui.graphics.RectangleShape
-                )
+                .border(width = 1.dp, color = KColor.Border, shape = androidx.compose.ui.graphics.RectangleShape)
                 .padding(20.dp)
         ) {
             Box(
@@ -282,7 +264,7 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
             ) { Icon(Icons.Rounded.Bolt, null, tint = Color.Black, modifier = Modifier.size(24.dp)) }
             Spacer(Modifier.height(12.dp))
             Text("Kythera Tools", color = KColor.Text, fontWeight = FontWeight.W800, fontSize = 18.sp)
-            Text("Developer by D4nzxml", color = KColor.Text3, fontSize = 11.sp)
+            Text("Powered by D4nzxml Studio", color = KColor.Text3, fontSize = 11.sp)
         }
 
         Spacer(Modifier.height(8.dp))
@@ -314,14 +296,23 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
         }
 
         Spacer(Modifier.weight(1f))
+        
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Icon(Icons.Rounded.Email, contentDescription = "Email", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+            Icon(Icons.Rounded.Share, contentDescription = "Share", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+            Icon(Icons.Rounded.Language, contentDescription = "Web", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+        }
+
         Box(
             Modifier.fillMaxWidth()
                 .border(1.dp, KColor.Border, androidx.compose.ui.graphics.RectangleShape)
                 .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("v1.0.0 · FFmpeg min-gpl 6.x",
-                color = KColor.Text3, fontSize = 10.sp)
+            Text("v2.0.1 · FFmpeg min-gpl 6.x", color = KColor.Text3, fontSize = 10.sp)
         }
     }
 }
