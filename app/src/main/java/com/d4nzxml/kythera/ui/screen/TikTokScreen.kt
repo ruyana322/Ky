@@ -48,21 +48,19 @@ fun TikTokScreen() {
                     allowFileAccess = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     
-                    // 🔥 TRIK FORCED DESKTOP MODE
-                    // 1. Ubah User Agent seolah-olah ini adalah Google Chrome di PC Windows
+                    // User Agent Desktop (Windows 11 Chrome)
                     userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     
-                    // 2. Paksa WebView buat ngerender halaman versi layar lebar (Desktop)
+                    // Wajib nyala biar web nge-zoom out ke ukuran layar
                     useWideViewPort = true
                     loadWithOverviewMode = true
                     
-                    // 3. Biar user bisa nge-zoom out/in layarnya layaknya buka PC di HP
+                    // Zoom Controls
                     setSupportZoom(true)
                     builtInZoomControls = true
                     displayZoomControls = false
                 }
 
-                // 🔥 KUNCI PERBAIKAN LOGIN (Nangkap lemparan ke aplikasi asli)
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
@@ -70,12 +68,10 @@ fun TikTokScreen() {
                     ): Boolean {
                         val url = request?.url?.toString() ?: return false
                         
-                        // Kalau URL-nya web biasa (http/https), biarin WebView yang muat halamannya
                         if (url.startsWith("http://") || url.startsWith("https://")) {
                             return false
                         }
                         
-                        // Kalau web minta lompat ke Aplikasi TikTok asli atau aplikasi lain (Custom Intent)
                         return try {
                             val intent = if (url.startsWith("intent://")) {
                                 Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
@@ -85,13 +81,38 @@ fun TikTokScreen() {
                             context.startActivity(intent)
                             true
                         } catch (e: Exception) {
-                            // Kalau aplikasi aslinya belum ke-install / error, tahan aja biar gak crash
                             true 
                         }
                     }
+
+                    // 🔥 INI OBATNYA KANG! Dieksekusi otomatis tiap web kelar loading
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        val jsInjection = """
+                            // 1. Paksa lebar web jadi ukuran laptop (1280px) biar muat fitur upload
+                            var meta = document.querySelector('meta[name="viewport"]');
+                            if (meta) {
+                                meta.setAttribute('content', 'width=1280');
+                            } else {
+                                var newMeta = document.createElement('meta');
+                                newMeta.name = 'viewport';
+                                newMeta.content = 'width=1280';
+                                document.head.appendChild(newMeta);
+                            }
+                            
+                            // 2. Paksa jebol kunci CSS TikTok biar bisa di-scroll & digeser!
+                            document.body.style.overflow = 'auto';
+                            document.documentElement.style.overflow = 'auto';
+                            
+                            // (Opsional) Hapus elemen footer atau iklan nutupin kalau ada
+                            // var footer = document.querySelector('footer'); if(footer) footer.style.display = 'none';
+                        """.trimIndent()
+                        
+                        // Suntik JS-nya ke WebView
+                        view?.evaluateJavascript(jsInjection, null)
+                    }
                 }
                 
-                // 🔥 KUNCI BUAT BISA UPLOAD FILE
                 webChromeClient = object : WebChromeClient() {
                     override fun onShowFileChooser(
                         webView: WebView?,
