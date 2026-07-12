@@ -1,7 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
 
 import android.content.ContentValues
-import android.content.Intent
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
@@ -43,28 +42,23 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ENUMS
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  ENUMS
+// ─────────────────────────────────────────────────────────────
+
 enum class PatchLogic(val label: String, val desc: String) {
-    SHARK_PATCH_ONLY(
-        "Shark Patch Only",
-        "NXT_SHARK537 Method: Rebuild tabel MP4 + inject fake samples. Tanpa re-encode."
+    PATCH_ONLY(
+        "Kythera Patch Only",
+        "Merapikan struktur MP4 & inject Shark Sample Table + MTLib stamp (Tanpa Re-encode)."
     ),
-    ENCODE_THEN_SHARK(
-        "Encode + Shark Patch",
-        "Re-encode dulu, lalu terapkan NXT_SHARK537 Method. Kualitas optimal."
-    ),
-    ENCODE_ONLY(
-        "Encode Only",
-        "Hanya re-encode tanpa patch. Untuk perbaikan video rusak."
+    ENCODE_PATCH(
+        "Encode + Patch",
+        "Render ulang video untuk optimasi penuh, lalu inject Shark Sample Table."
     ),
     KYTHERA_60FPS(
-        "Kythera 60fps Stamp",
-        "Sematkan metadata stamp eksklusif Kythera 60fps."
+        "Kythera 60fps",
+        "Menyematkan Z-Payload + MTLib + Encoder String stamp eksklusif Kythera."
     )
 }
 
@@ -76,388 +70,414 @@ enum class EncodeQuality(val label: String, val desc: String, val cmdParams: Str
     ),
     CPU_HIGH(
         "Sultan High Bitrate (25M)",
-        "CPU libx264. Kualitas maksimal, file lebih besar.",
+        "CPU libx264. Kualitas maksimal, ukuran file besar.",
         "-c:v libx264 -preset fast -b:v 25M -maxrate 25M -bufsize 50M -bf 0"
     ),
     GPU_FAST(
         "Super Cepat (GPU)",
-        "Akselerasi GPU Hardware (15M). Proses kilat.",
+        "Akselerasi GPU Hardware (15M). Cocok untuk proses kilat.",
         "-c:v h264_mediacodec -b:v 15M -bf 0"
     )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NXT_SHARK537 METHOD — Port dari popup.js
-// ─────────────────────────────────────────────────────────────────────────────
-object SharkPatcher {
+// ═════════════════════════════════════════════════════════════
+//  MP4 PATCHER ENGINE — port dari patcher.js
+// ═════════════════════════════════════════════════════════════
 
+private object Mp4Engine {
+
+    // ── Shark constants ───────────────────────────────────────
+    private const val VIDEO_TIMESCALE       = 90000
+    private const val VIDEO_DURATION        = 2269500
+    private const val VIDEO_EDIT_MEDIA_TIME = 3000
+    private const val VIDEO_SAMPLE_DELTA    = 1500
+    private const val FAKE_SAMPLE_SIZE      = 8
     private val FAKE_SAMPLE_BYTES = byteArrayOf(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00)
-    private const val FAKE_SAMPLE_SIZE = 8
-    private const val VIDEO_TIMESCALE = 90000L
-    private const val VIDEO_DURATION = 2269500L
-    private const val VIDEO_EDIT_MEDIA_TIME = 0L
-    private const val VIDEO_SAMPLE_DELTA = 1500L
 
-    private val CONTAINER_BOXES = setOf("moov","trak","mdia","minf","stbl","edts","dinf","udta","meta","ilst")
+    // ── Low-level helpers ─────────────────────────────────────
 
-    data class Box(
-        val type: String,
-        val offset: Int,
-        val size: Int,
-        val headerSize: Int,
-        val data: ByteArray,
-        val children: MutableList<Box> = mutableListOf(),
-        var prefixStart: Int = 0,
-        var prefixEnd: Int = 0
-    ) {
-        val contentStart get() = offset + headerSize
-        val end get() = offset + size
+    private fun r32(b: ByteArray, i: Int) =
+        ((b[i].toInt() and 0xFF) shl 24) or ((b[i+1].toInt() and 0xFF) shl 16) or
+        ((b[i+2].toInt() and 0xFF) shl 8) or (b[i+3].toInt() and 0xFF)
+
+    private fun w32(b: ByteArray, i: Int, v: Int) {
+        b[i]   = ((v shr 24) and 0xFF).toByte()
+        b[i+1] = ((v shr 16) and 0xFF).toByte()
+        b[i+2] = ((v shr  8) and 0xFF).toByte()
+        b[i+3] = (v and 0xFF).toByte()
     }
 
-    private fun getBoxType(data: ByteArray, offset: Int): String {
-        return String(byteArrayOf(data[offset], data[offset+1], data[offset+2], data[offset+3]))
+    private fun cc(b: ByteArray, i: Int) =
+        if (i + 4 > b.size) "" else String(b, i, 4, Charsets.ISO_8859_1)
+
+    private fun box(type: String, payload: ByteArray): ByteArray {
+        val out = ByteArray(8 + payload.size)
+        w32(out, 0, 8 + payload.size)
+        type.toByteArray(Charsets.ISO_8859_1).copyInto(out, 4)
+        payload.copyInto(out, 8)
+        return out
     }
 
-    private fun readUint32(data: ByteArray, offset: Int): Long {
-        return ((data[offset].toLong() and 0xFF) shl 24) or
-               ((data[offset+1].toLong() and 0xFF) shl 16) or
-               ((data[offset+2].toLong() and 0xFF) shl 8) or
-               (data[offset+3].toLong() and 0xFF)
+    private fun cat(vararg parts: ByteArray): ByteArray {
+        val out = ByteArray(parts.sumOf { it.size })
+        var p = 0; for (a in parts) { a.copyInto(out, p); p += a.size }
+        return out
     }
 
-    private fun writeUint32(buf: ByteArray, offset: Int, value: Long) {
-        buf[offset]   = ((value shr 24) and 0xFF).toByte()
-        buf[offset+1] = ((value shr 16) and 0xFF).toByte()
-        buf[offset+2] = ((value shr 8)  and 0xFF).toByte()
-        buf[offset+3] = (value and 0xFF).toByte()
+    // ── Box model ─────────────────────────────────────────────
+
+    data class B(val off: Int, val size: Int, val type: String) {
+        val end          get() = off + size
+        val contentStart get() = off + 8
     }
 
-    private fun parseBoxes(data: ByteArray, start: Int = 0, end: Int = data.size): List<Box> {
-        val boxes = mutableListOf<Box>()
-        var offset = start
-        while (offset + 8 <= end) {
-            val smallSize = readUint32(data, offset)
-            val type = getBoxType(data, offset + 4)
-            val size = when {
-                smallSize == 1L -> {
-                    val high = readUint32(data, offset + 8)
-                    val low  = readUint32(data, offset + 12)
-                    high * 4294967296L + low
+    private fun topLevel(buf: ByteArray, type: String): B? {
+        var p = 0
+        while (p + 8 <= buf.size) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            if (t == type) return B(p, sz, t)
+            p += sz
+        }
+        return null
+    }
+
+    private fun child(buf: ByteArray, parent: B, type: String): B? {
+        var p = parent.contentStart
+        while (p + 8 <= parent.end) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            if (t == type) return B(p, sz, t)
+            p += sz
+        }
+        return null
+    }
+
+    private fun descend(buf: ByteArray, start: B, path: List<String>): B? {
+        var cur = start
+        for (s in path) { cur = child(buf, cur, s) ?: return null }
+        return cur
+    }
+
+    private fun hdlrType(buf: ByteArray, trak: B): String {
+        val hdlr = descend(buf, trak, listOf("mdia", "hdlr")) ?: return ""
+        val off = hdlr.contentStart + 8
+        return if (off + 4 <= buf.size) cc(buf, off) else ""
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  PATCH 1 — Z-PAYLOAD
+    //  Isi 128 byte setelah offset mdat+10 dengan 0x5A
+    // ─────────────────────────────────────────────────────────
+
+    private fun patchZPayload(buf: ByteArray) {
+        val mdat = topLevel(buf, "mdat")
+            ?: throw Exception("Struktur video tidak valid. Pastikan file MP4 tidak corrupt.")
+        val zt = mdat.off + 10
+        for (i in 0 until 128) { if (zt + i < buf.size) buf[zt + i] = 0x5A }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  PATCH 2 — ENCODER STRING
+    //  Rewrite "Lavf..." → "Lavf59.16.100"
+    // ─────────────────────────────────────────────────────────
+
+    private fun patchEncoderStr(buf: ByteArray) {
+        val lavf   = "Lavf".toByteArray(Charsets.ISO_8859_1)
+        val target = "Lavf59.16.100".toByteArray(Charsets.ISO_8859_1)
+        var i = 0
+        while (i <= buf.size - 16) {
+            if (buf[i] == lavf[0] && buf[i+1] == lavf[1] &&
+                buf[i+2] == lavf[2] && buf[i+3] == lavf[3]) {
+                val nb = buf[i+4].toInt() and 0xFF
+                if (nb in 0x30..0x39) {
+                    var end = i + 4
+                    while (end < buf.size) {
+                        val b = buf[end].toInt() and 0xFF
+                        if (b >= 0x20 && b < 0x7F) end++ else break
+                    }
+                    val ol = end - i
+                    for (j in 0 until ol) buf[i+j] = if (j < target.size) target[j] else 0x00
+                    return
                 }
-                smallSize == 0L -> (end - offset).toLong()
-                else -> smallSize
             }
-            val headerSize = if (smallSize == 1L) 16 else 8
-            val box = Box(
-                type       = type,
-                offset     = offset,
-                size       = size.toInt(),
-                headerSize = headerSize,
-                data       = data,
-                prefixStart = offset + headerSize,
-                prefixEnd   = offset + headerSize
-            )
-            if (CONTAINER_BOXES.contains(type)) {
-                val childStart = if (type == "meta") box.contentStart + 4 else box.contentStart
-                box.prefixEnd = childStart
-                box.children.addAll(parseBoxes(data, childStart, box.end))
-            }
-            boxes.add(box)
-            offset += size.toInt()
-        }
-        return boxes
-    }
-
-    private fun findChild(box: Box, type: String): Box? =
-        box.children.find { it.type == type }
-
-    private fun findDescendant(box: Box, path: List<String>): Box? {
-        var current: Box? = box
-        for (t in path) { current = current?.let { findChild(it, t) } ?: return null }
-        return current
-    }
-
-    private fun findTopLevel(boxes: List<Box>, type: String): Box? =
-        boxes.find { it.type == type }
-
-    private fun handlerTypeForTrak(trak: Box): String? {
-        val hdlr = findDescendant(trak, listOf("mdia", "hdlr")) ?: return null
-        return if (hdlr.offset + 20 <= hdlr.end) getBoxType(hdlr.data, hdlr.offset + 16) else null
-    }
-
-    private fun parseStsz(stsz: Box): List<Long> {
-        val sampleSize = readUint32(stsz.data, stsz.offset + 12)
-        val count      = readUint32(stsz.data, stsz.offset + 16).toInt()
-        if (sampleSize != 0L) return List(count) { sampleSize }
-        val tableStart = stsz.offset + 20
-        return List(count) { i -> readUint32(stsz.data, tableStart + i * 4) }
-    }
-
-    private fun parseStco(stco: Box): List<Long> {
-        val count      = readUint32(stco.data, stco.offset + 12).toInt()
-        val tableStart = stco.offset + 16
-        return List(count) { i -> readUint32(stco.data, tableStart + i * 4) }
-    }
-
-    private fun parseStsc(stsc: Box): List<Triple<Long,Long,Long>> {
-        val count      = readUint32(stsc.data, stsc.offset + 12).toInt()
-        val tableStart = stsc.offset + 16
-        return List(count) { i ->
-            val base = tableStart + i * 12
-            Triple(
-                readUint32(stsc.data, base),
-                readUint32(stsc.data, base + 4),
-                readUint32(stsc.data, base + 8)
-            )
+            i++
         }
     }
 
-    private fun makeBox(type: String, payload: ByteArray): ByteArray {
-        val size = 8 + payload.size
-        val buf  = ByteArray(size)
-        writeUint32(buf, 0, size.toLong())
-        type.forEachIndexed { i, c -> buf[4 + i] = c.code.toByte() }
-        System.arraycopy(payload, 0, buf, 8, payload.size)
-        return buf
-    }
+    // ─────────────────────────────────────────────────────────
+    //  PATCH 3 — MTLib freeform atom
+    //  Inject ---- box (mean/name/data) ke moov/udta
+    // ─────────────────────────────────────────────────────────
 
-    private fun boxBytes(box: Box): ByteArray =
-        box.data.copyOfRange(box.offset, box.end)
+    private fun injectMTLib(buf: ByteArray): ByteArray {
+        fun meanBox(): ByteArray {
+            val d = "com.apple.quicktime".toByteArray(Charsets.ISO_8859_1)
+            return box("mean", ByteArray(4) + d)
+        }
+        fun nameBox(): ByteArray {
+            val k = "MTLib".toByteArray(Charsets.ISO_8859_1)
+            return box("name", ByteArray(4) + k)
+        }
+        fun dataBox(): ByteArray {
+            val v = "PyPVGCodec".toByteArray(Charsets.ISO_8859_1)
+            val p = ByteArray(4 + v.size)
+            w32(p, 0, 1); v.copyInto(p, 4)
+            return box("data", p)
+        }
+        val freeform = box("----", cat(meanBox(), nameBox(), dataBox()))
+        val moov = topLevel(buf, "moov") ?: return buf
+        val udta = child(buf, moov, "udta")
 
-    private fun concatBytes(parts: List<ByteArray>): ByteArray {
-        val total  = parts.sumOf { it.size }
-        val result = ByteArray(total)
-        var pos    = 0
-        parts.forEach { System.arraycopy(it, 0, result, pos, it.size); pos += it.size }
-        return result
-    }
-
-    // ── Build mdhd ───────────────────────────────────────────────────────────
-    private fun buildMdhd(mdhd: Box): ByteArray {
-        val payload = mdhd.data.copyOfRange(mdhd.contentStart, mdhd.end).copyOf()
-        val version = payload[0].toInt()
-        if (version == 1) {
-            writeUint32(payload, 24, (VIDEO_TIMESCALE shr 32) and 0xFFFFFFFFL)
-            writeUint32(payload, 28, VIDEO_TIMESCALE and 0xFFFFFFFFL)
-            writeUint32(payload, 32, (VIDEO_DURATION shr 32) and 0xFFFFFFFFL)
-            writeUint32(payload, 36, VIDEO_DURATION and 0xFFFFFFFFL)
+        return if (udta != null) {
+            val ins = udta.end
+            val out = ByteArray(buf.size + freeform.size)
+            buf.copyInto(out, 0, 0, ins)
+            freeform.copyInto(out, ins)
+            buf.copyInto(out, ins + freeform.size, ins)
+            w32(out, moov.off, moov.size + freeform.size)
+            w32(out, udta.off, udta.size + freeform.size)
+            out
         } else {
-            writeUint32(payload, 12, VIDEO_TIMESCALE)
-            writeUint32(payload, 16, VIDEO_DURATION)
+            val udtaBox = box("udta", freeform)
+            val ins = moov.end
+            val out = ByteArray(buf.size + udtaBox.size)
+            buf.copyInto(out, 0, 0, ins)
+            udtaBox.copyInto(out, ins)
+            buf.copyInto(out, ins + udtaBox.size, ins)
+            w32(out, moov.off, moov.size + udtaBox.size)
+            out
         }
-        return makeBox("mdhd", payload)
     }
 
-    // ── Build elst ───────────────────────────────────────────────────────────
-    private fun buildElst(elst: Box): ByteArray {
-        val payload = elst.data.copyOfRange(elst.contentStart, elst.end).copyOf()
-        val version = payload[0].toInt()
-        val count   = readUint32(payload, 4).toInt()
-        if (count >= 1) {
-            if (version == 1) {
-                writeUint32(payload, 8,  (VIDEO_DURATION shr 32) and 0xFFFFFFFFL)
-                writeUint32(payload, 12, VIDEO_DURATION and 0xFFFFFFFFL)
-                writeUint32(payload, 16, (VIDEO_EDIT_MEDIA_TIME shr 32) and 0xFFFFFFFFL)
-                writeUint32(payload, 20, VIDEO_EDIT_MEDIA_TIME and 0xFFFFFFFFL)
-            } else {
-                writeUint32(payload, 8,  VIDEO_DURATION)
-                writeUint32(payload, 12, VIDEO_EDIT_MEDIA_TIME)
+    // ─────────────────────────────────────────────────────────
+    //  applyMetadataStamp — Z-Payload + MTLib + EncoderStr
+    //  Setara applyMetadataStamp() di JS → dipakai KYTHERA_60FPS
+    // ─────────────────────────────────────────────────────────
+
+    fun applyMetadataStamp(input: ByteArray): ByteArray {
+        val buf1 = input.copyOf()
+        patchZPayload(buf1)
+        val buf2 = injectMTLib(buf1)
+        patchEncoderStr(buf2)
+        return buf2
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  SHARK SAMPLE TABLE
+    //  Setara patchSharkSampleTableMethod() di JS
+    //  → dipakai PATCH_ONLY & ENCODE_PATCH
+    // ─────────────────────────────────────────────────────────
+
+    fun patchSharkSampleTable(input: ByteArray): ByteArray {
+        val ftyp = topLevel(input, "ftyp") ?: throw Exception("ftyp tidak ditemukan.")
+        val moov = topLevel(input, "moov") ?: throw Exception("moov tidak ditemukan.")
+        val mdat = topLevel(input, "mdat") ?: throw Exception("mdat tidak ditemukan.")
+
+        // Cari video track
+        var videoTrak: B? = null
+        var p = moov.contentStart
+        while (p + 8 <= moov.end) {
+            val sz = r32(input, p); val t = cc(input, p + 4)
+            if (sz < 8) break
+            if (t == "trak") {
+                val tb = B(p, sz, t)
+                if (hdlrType(input, tb) == "vide") { videoTrak = tb; break }
             }
+            p += sz
         }
-        return makeBox("elst", payload)
-    }
+        val vTrak = videoTrak ?: throw Exception("Track video tidak ditemukan.")
 
-    // ── Build stts ───────────────────────────────────────────────────────────
-    private fun buildStts(realSampleCount: Int, fakeSampleCount: Int): ByteArray {
-        val payload = ByteArray(4 + 4 + 2 * 8)
-        writeUint32(payload, 4, 2L)
-        writeUint32(payload, 8,  realSampleCount.toLong())
-        writeUint32(payload, 12, VIDEO_SAMPLE_DELTA)
-        writeUint32(payload, 16, fakeSampleCount.toLong())
-        writeUint32(payload, 20, VIDEO_SAMPLE_DELTA)
-        return makeBox("stts", payload)
-    }
+        val stbl = descend(input, vTrak, listOf("mdia", "minf", "stbl")) ?: throw Exception("stbl tidak ditemukan.")
+        val mdhd = descend(input, vTrak, listOf("mdia", "mdhd"))          ?: throw Exception("mdhd tidak ditemukan.")
+        val elst = descend(input, vTrak, listOf("edts", "elst"))           ?: throw Exception("elst tidak ditemukan.")
+        val stts = child(input, stbl, "stts") ?: throw Exception("stts tidak ditemukan.")
+        val stsc = child(input, stbl, "stsc") ?: throw Exception("stsc tidak ditemukan.")
+        val stsz = child(input, stbl, "stsz") ?: throw Exception("stsz tidak ditemukan.")
+        val stco = child(input, stbl, "stco") ?: throw Exception("stco tidak ditemukan.")
 
-    // ── Build stsz ───────────────────────────────────────────────────────────
-    private fun buildStsz(originalSizes: List<Long>, fakeSampleCount: Int): ByteArray {
-        val total   = originalSizes.size + fakeSampleCount
-        val payload = ByteArray(4 + 4 + total * 4)
-        writeUint32(payload, 4, total.toLong())
-        var offset  = 8
-        originalSizes.forEach { sz -> writeUint32(payload, offset, sz); offset += 4 }
-        repeat(fakeSampleCount) { writeUint32(payload, offset, FAKE_SAMPLE_SIZE.toLong()); offset += 4 }
-        return makeBox("stsz", payload)
-    }
+        // Parse
+        val origSizes   = parseStsz(input, stsz)
+        val origStscRows = parseStsc(input, stsc)
+        val origOffsets = parseStco(input, stco)
+        val fakeCount   = origSizes.size * 9
 
-    // ── Build stsc ───────────────────────────────────────────────────────────
-    private fun buildStsc(originalRows: List<Triple<Long,Long,Long>>, originalChunkCount: Int): ByteArray {
-        val rows    = originalRows.toMutableList()
-        val lastRow = rows.lastOrNull()
-        if (lastRow == null || lastRow.second != 1L) {
-            rows.add(Triple((originalChunkCount + 1).toLong(), 1L, 1L))
-        }
-        val payload = ByteArray(4 + 4 + rows.size * 12)
-        writeUint32(payload, 4, rows.size.toLong())
-        var offset = 8
-        rows.forEach { (first, spc, sdi) ->
-            writeUint32(payload, offset,     first)
-            writeUint32(payload, offset + 4, spc)
-            writeUint32(payload, offset + 8, sdi)
-            offset += 12
-        }
-        return makeBox("stsc", payload)
-    }
-
-    // ── Build stco ───────────────────────────────────────────────────────────
-    private fun buildStco(
-        originalOffsets: List<Long>,
-        delta: Long,
-        fakeOffset: Long? = null,
-        fakeSampleCount: Int = 0
-    ): ByteArray {
-        val count   = originalOffsets.size + (if (fakeOffset != null) fakeSampleCount else 0)
-        val payload = ByteArray(4 + 4 + count * 4)
-        writeUint32(payload, 4, count.toLong())
-        var tableOffset = 8
-        originalOffsets.forEach { off ->
-            writeUint32(payload, tableOffset, off + delta)
-            tableOffset += 4
-        }
-        if (fakeOffset != null) {
-            repeat(fakeSampleCount) {
-                writeUint32(payload, tableOffset, fakeOffset)
-                tableOffset += 4
-            }
-        }
-        return makeBox("stco", payload)
-    }
-
-    // ── Rebuild box recursively ───────────────────────────────────────────────
-    private fun rebuildBox(box: Box, replacements: Map<Box, ByteArray>): ByteArray {
-        replacements[box]?.let { return it }
-        if (box.children.isEmpty()) return boxBytes(box)
-        val parts = mutableListOf<ByteArray>()
-        parts.add(box.data.copyOfRange(box.prefixStart, box.prefixEnd))
-        box.children.forEach { parts.add(rebuildBox(it, replacements)) }
-        return makeBox(box.type, concatBytes(parts))
-    }
-
-    // ── Collect all stco boxes ────────────────────────────────────────────────
-    private fun collectTrackStcoBoxes(moov: Box): List<Box> {
-        val result = mutableListOf<Box>()
-        moov.children.filter { it.type == "trak" }.forEach { trak ->
-            val stbl = findDescendant(trak, listOf("mdia", "minf", "stbl")) ?: return@forEach
-            findChild(stbl, "stco")?.let { result.add(it) }
-        }
-        return result
-    }
-
-    private fun buildStcoReplacements(
-        stcoBoxes: List<Box>,
-        videoStco: Box,
-        delta: Long,
-        fakeOffset: Long,
-        fakeSampleCount: Int
-    ): Map<Box, ByteArray> {
-        return stcoBoxes.associate { stco ->
-            stco to buildStco(
-                parseStco(stco), delta,
-                if (stco === videoStco) fakeOffset else null,
-                fakeSampleCount
-            )
-        }
-    }
-
-    // ── MAIN PATCH FUNCTION ───────────────────────────────────────────────────
-    fun patch(inputFile: File, outputFile: File) {
-        val data     = inputFile.readBytes()
-        val topLevel = parseBoxes(data)
-
-        val ftyp = findTopLevel(topLevel, "ftyp")
-            ?: throw Exception("Box 'ftyp' tidak ditemukan. File bukan MP4 valid.")
-        val moov = findTopLevel(topLevel, "moov")
-            ?: throw Exception("Box 'moov' tidak ditemukan.")
-        val mdat = findTopLevel(topLevel, "mdat")
-            ?: throw Exception("Box 'mdat' tidak ditemukan.")
-
-        val videoTrak = moov.children.find { it.type == "trak" && handlerTypeForTrak(it) == "vide" }
-            ?: throw Exception("Track video tidak ditemukan.")
-
-        val stbl = findDescendant(videoTrak, listOf("mdia", "minf", "stbl"))
-            ?: throw Exception("Box stbl tidak ditemukan.")
-        val mdhd = findDescendant(videoTrak, listOf("mdia", "mdhd"))
-            ?: throw Exception("Box mdhd tidak ditemukan.")
-        val elst = findDescendant(videoTrak, listOf("edts", "elst"))
-            ?: throw Exception("Box elst tidak ditemukan.")
-        val stts = findChild(stbl, "stts") ?: throw Exception("Box stts tidak ditemukan.")
-        val stsc = findChild(stbl, "stsc") ?: throw Exception("Box stsc tidak ditemukan.")
-        val stsz = findChild(stbl, "stsz") ?: throw Exception("Box stsz tidak ditemukan.")
-        val stco = findChild(stbl, "stco") ?: throw Exception("Box stco tidak ditemukan.")
-
-        val originalSizes    = parseStsz(stsz)
-        val realSampleCount  = originalSizes.size
-        val fakeSampleCount  = realSampleCount * 9
-
-        val originalStscRows     = parseStsc(stsc)
-        val originalChunkOffsets = parseStco(stco)
-        val stcoBoxes            = collectTrackStcoBoxes(moov)
-
-        val preservedTopLevel = topLevel
-            .filter { it.type !in listOf("ftyp", "moov", "mdat") }
-            .map { boxBytes(it) }
-
-        val fixedReplacements = mutableMapOf<Box, ByteArray>(
-            mdhd to buildMdhd(mdhd),
-            elst to buildElst(elst),
-            stts to buildStts(realSampleCount, fakeSampleCount),
-            stsc to buildStsc(originalStscRows, originalChunkOffsets.size),
-            stsz to buildStsz(originalSizes, fakeSampleCount)
+        // Build replacements
+        fun fixedRep() = mapOf(
+            mdhd to buildMdhd(input, mdhd),
+            elst to buildElst(input, elst),
+            stts to buildStts(origSizes.size, fakeCount),
+            stsc to buildStsc(origStscRows, origOffsets.size),
+            stsz to buildStsz(origSizes, fakeCount)
         )
 
-        // Pass 1 — placeholder buat hitung delta
-        val placeholderReplacements = HashMap(fixedReplacements)
-        buildStcoReplacements(stcoBoxes, stco, 0L, 0L, fakeSampleCount).forEach { (k,v) ->
-            placeholderReplacements[k] = v
+        val allStco = collectStco(input, moov)
+
+        fun stcoRep(delta: Int, fakeOff: Int) = allStco.associateWith { sc ->
+            buildStco(origOffsets, delta, if (sc == stco) fakeOff else null, fakeCount)
         }
-        val moovPlaceholder  = rebuildBox(moov, placeholderReplacements)
-        val preservedBytes   = concatBytes(preservedTopLevel)
-        val oldMdatPayload   = data.copyOfRange(mdat.contentStart, mdat.end)
-        val newMdatPayloadStart = ftyp.size + moovPlaceholder.size + preservedBytes.size + 8L
-        var delta      = newMdatPayloadStart - mdat.contentStart
-        var fakeOffset = newMdatPayloadStart + oldMdatPayload.size
 
-        // Pass 2 — hitung ulang setelah tahu delta real
-        var finalReplacements = HashMap(fixedReplacements)
-        buildStcoReplacements(stcoBoxes, stco, delta, fakeOffset, fakeSampleCount).forEach { (k,v) ->
-            finalReplacements[k] = v
+        // Pass 1 — ukur moov placeholder
+        val moovPlaceholder = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(0, 0))
+        val mdatPayload     = input.copyOfRange(mdat.contentStart, mdat.end)
+        val startPos        = ftyp.size + moovPlaceholder.size + 8
+
+        // Pass 2 — delta real
+        var delta    = startPos - mdat.contentStart
+        var fakeOff  = startPos + mdatPayload.size
+        var moovNew  = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(delta, fakeOff))
+
+        // Pass 3 — recalculate (sama kayak JS)
+        val recalc  = ftyp.size + moovNew.size + 8
+        delta        = recalc - mdat.contentStart
+        fakeOff      = recalc + mdatPayload.size
+        moovNew      = rebuildMoov(input, moov, vTrak, fixedRep() + stcoRep(delta, fakeOff))
+
+        val ftypBytes = input.copyOfRange(ftyp.off, ftyp.end)
+        val mdatNew   = box("mdat", cat(mdatPayload, FAKE_SAMPLE_BYTES))
+        return cat(ftypBytes, moovNew, mdatNew)
+    }
+
+    // ── Parse helpers ──────────────────────────────────────────
+
+    private fun parseStsz(buf: ByteArray, b: B): List<Int> {
+        val cnt = r32(buf, b.contentStart + 8)
+        return (0 until cnt).map { r32(buf, b.contentStart + 12 + it * 4) }
+    }
+
+    private fun parseStsc(buf: ByteArray, b: B): List<Triple<Int,Int,Int>> {
+        val cnt = r32(buf, b.contentStart + 4)
+        return (0 until cnt).map { i ->
+            val o = b.contentStart + 8 + i * 12
+            Triple(r32(buf, o), r32(buf, o+4), r32(buf, o+8))
         }
-        var moovNew = rebuildBox(moov, finalReplacements)
-        val recalcStart = ftyp.size + moovNew.size + preservedBytes.size + 8L
-        delta      = recalcStart - mdat.contentStart
-        fakeOffset = recalcStart + oldMdatPayload.size
+    }
 
-        // Pass 3 — final
-        finalReplacements = HashMap(fixedReplacements)
-        buildStcoReplacements(stcoBoxes, stco, delta, fakeOffset, fakeSampleCount).forEach { (k,v) ->
-            finalReplacements[k] = v
+    private fun parseStco(buf: ByteArray, b: B): List<Int> {
+        val cnt = r32(buf, b.contentStart + 4)
+        return (0 until cnt).map { r32(buf, b.contentStart + 8 + it * 4) }
+    }
+
+    // ── Build replacement boxes ────────────────────────────────
+
+    private fun buildMdhd(buf: ByteArray, b: B): ByteArray {
+        val p = buf.copyOfRange(b.contentStart, b.end)
+        if (p[0] != 0.toByte()) throw Exception("Versi mdhd tidak didukung.")
+        w32(p, 12, VIDEO_TIMESCALE); w32(p, 16, VIDEO_DURATION)
+        return box("mdhd", p)
+    }
+
+    private fun buildElst(buf: ByteArray, b: B): ByteArray {
+        val p = buf.copyOfRange(b.contentStart, b.end)
+        if (p[0] != 0.toByte()) throw Exception("elst butuh version 0.")
+        w32(p, 12, VIDEO_EDIT_MEDIA_TIME)
+        return box("elst", p)
+    }
+
+    private fun buildStts(realCnt: Int, fakeCnt: Int): ByteArray {
+        val p = ByteArray(4 + 4 + 8 + 8)
+        w32(p, 4, 2); w32(p, 8, realCnt); w32(p, 12, VIDEO_SAMPLE_DELTA)
+        w32(p, 16, fakeCnt); w32(p, 20, VIDEO_SAMPLE_DELTA)
+        return box("stts", p)
+    }
+
+    private fun buildStsz(sizes: List<Int>, fakeCnt: Int): ByteArray {
+        val total = sizes.size + fakeCnt
+        val p = ByteArray(4 + 4 + 4 + total * 4)
+        w32(p, 8, total); var o = 12
+        for (s in sizes) { w32(p, o, s); o += 4 }
+        repeat(fakeCnt) { w32(p, o, FAKE_SAMPLE_SIZE); o += 4 }
+        return box("stsz", p)
+    }
+
+    private fun buildStsc(rows: List<Triple<Int,Int,Int>>, chunkCnt: Int): ByteArray {
+        val r = rows.map { listOf(it.first, it.second, it.third) }.toMutableList()
+        if (r.lastOrNull()?.get(1) != 1) r.add(listOf(chunkCnt + 1, 1, 1))
+        val p = ByteArray(4 + 4 + r.size * 12); w32(p, 4, r.size); var o = 8
+        for (row in r) { w32(p, o, row[0]); w32(p, o+4, row[1]); w32(p, o+8, row[2]); o += 12 }
+        return box("stsc", p)
+    }
+
+    private fun buildStco(offsets: List<Int>, delta: Int, fakeOff: Int?, fakeCnt: Int): ByteArray {
+        val cnt = offsets.size + (if (fakeOff != null) fakeCnt else 0)
+        val p = ByteArray(4 + 4 + cnt * 4); w32(p, 4, cnt); var o = 8
+        for (off in offsets) { w32(p, o, off + delta); o += 4 }
+        if (fakeOff != null) repeat(fakeCnt) { w32(p, o, fakeOff); o += 4 }
+        return box("stco", p)
+    }
+
+    // ── Collect all stco ───────────────────────────────────────
+
+    private fun collectStco(buf: ByteArray, moov: B): List<B> {
+        val result = mutableListOf<B>()
+        var p = moov.contentStart
+        while (p + 8 <= moov.end) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            if (t == "trak") {
+                val trak = B(p, sz, t)
+                val stbl = descend(buf, trak, listOf("mdia", "minf", "stbl"))
+                val stco = stbl?.let { child(buf, it, "stco") }
+                if (stco != null) result.add(stco)
+            }
+            p += sz
         }
-        moovNew = rebuildBox(moov, finalReplacements)
+        return result
+    }
 
-        val mdatPayloadNew = concatBytes(listOf(oldMdatPayload, FAKE_SAMPLE_BYTES))
-        val mdatNew        = makeBox("mdat", mdatPayloadNew)
-        val output         = concatBytes(listOf(boxBytes(ftyp), moovNew, preservedBytes, mdatNew))
+    // ── Rebuild moov ───────────────────────────────────────────
 
-        outputFile.writeBytes(output)
+    private fun rebuildMoov(buf: ByteArray, moov: B, vTrak: B, rep: Map<B, ByteArray>): ByteArray {
+        val children = mutableListOf<ByteArray>()
+        var p = moov.contentStart
+        while (p + 8 <= moov.end) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            val cb = B(p, sz, t)
+            children.add(
+                if (t == "trak" && cb.off == vTrak.off) rebuildTrak(buf, vTrak, rep)
+                else rebuildGeneric(buf, cb, rep)
+            )
+            p += sz
+        }
+        return box("moov", cat(*children.toTypedArray()))
+    }
+
+    private fun rebuildTrak(buf: ByteArray, trak: B, rep: Map<B, ByteArray>): ByteArray {
+        val children = mutableListOf<ByteArray>()
+        var p = trak.contentStart
+        while (p + 8 <= trak.end) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            children.add(rebuildGeneric(buf, B(p, sz, t), rep)); p += sz
+        }
+        return box("trak", cat(*children.toTypedArray()))
+    }
+
+    private val CONTAINERS = setOf("mdia", "minf", "stbl", "edts", "udta", "dinf")
+
+    private fun rebuildGeneric(buf: ByteArray, b: B, rep: Map<B, ByteArray>): ByteArray {
+        rep.entries.firstOrNull { it.key.off == b.off && it.key.type == b.type }?.let { return it.value }
+        if (b.type !in CONTAINERS) return buf.copyOfRange(b.off, b.end)
+        val children = mutableListOf<ByteArray>()
+        var p = b.contentStart
+        while (p + 8 <= b.end) {
+            val sz = r32(buf, p); val t = cc(buf, p + 4)
+            if (sz < 8) break
+            children.add(rebuildGeneric(buf, B(p, sz, t), rep)); p += sz
+        }
+        return box(b.type, cat(*children.toTypedArray()))
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPOSABLE
-// ─────────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+//  COMPOSABLE
+// ═════════════════════════════════════════════════════════════
+
 @Composable
 fun PatchScreen() {
     val context = LocalContext.current
-    val scope   = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
     var inputUriString  by rememberSaveable { mutableStateOf<String?>(null) }
     var isProcessing    by rememberSaveable { mutableStateOf(false) }
@@ -467,23 +487,20 @@ fun PatchScreen() {
     var savedVideoUri   by remember { mutableStateOf<Uri?>(null) }
     var progressPercent by remember { mutableFloatStateOf(0f) }
     var videoDurationMs by remember { mutableLongStateOf(0L) }
-    var selectedLogic   by remember { mutableStateOf(PatchLogic.SHARK_PATCH_ONLY) }
+    var selectedLogic   by remember { mutableStateOf(PatchLogic.PATCH_ONLY) }
     var selectedQuality by remember { mutableStateOf(EncodeQuality.CPU_CRF20) }
 
     val inputUri = inputUriString?.let { Uri.parse(it) }
 
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
-            inputUriString  = it.toString()
-            errorLog        = null
-            isSuccess       = false
-            savedVideoUri   = null
-            progressPercent = 0f
+            inputUriString = it.toString()
+            errorLog = null; isSuccess = false; savedVideoUri = null; progressPercent = 0f
             try {
-                val retriever = MediaMetadataRetriever()
-                retriever.setDataSource(context, it)
-                videoDurationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                retriever.release()
+                val r = MediaMetadataRetriever()
+                r.setDataSource(context, it)
+                videoDurationMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                r.release()
                 statusText = "✅ Siap: ${it.lastPathSegment}"
             } catch (e: Exception) {
                 videoDurationMs = 0L
@@ -492,141 +509,122 @@ fun PatchScreen() {
         }
     }
 
-    fun saveToGallery(file: File, fileName: String): Uri? {
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
-        }
-        val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-        uri?.let { dest ->
-            context.contentResolver.openOutputStream(dest)?.use { out ->
-                FileInputStream(file).use { it.copyTo(out) }
-            }
-            file.delete()
-        }
-        return uri
-    }
-
     fun executePatch() {
         if (inputUri == null) return
         scope.launch {
-            isProcessing    = true
-            isSuccess       = false
-            errorLog        = null
-            savedVideoUri   = null
-            progressPercent = 0f
+            isProcessing = true; isSuccess = false; errorLog = null
+            savedVideoUri = null; progressPercent = 0f
 
             val fileName = "Kythera_Patched_${System.currentTimeMillis()}.mp4"
-            val tmpPath  = File(context.getExternalFilesDir(null), fileName)
+            val outPath  = File(context.getExternalFilesDir(null), fileName).absolutePath
             val safUrl   = FFmpegKitConfig.getSafParameterForRead(context, inputUri!!)
             val logic    = selectedLogic
             val quality  = selectedQuality
 
             FFmpegKitConfig.enableStatisticsCallback { stats ->
                 if (videoDurationMs > 0) {
-                    val pct = (stats.time.toFloat() / videoDurationMs).coerceIn(0f, 1f)
+                    val pct = (stats.time.toFloat() / videoDurationMs).coerceIn(0f, 0.88f)
                     progressPercent = pct
-                    statusText = "⚙️ Encoding: ${(pct * 100).toInt()}%"
+                    statusText = "⚙️ Memproses: ${(pct * 100).toInt()}%"
                 }
             }
 
             withContext(Dispatchers.IO) {
                 try {
+                    val finalFile = File(outPath)
+
                     when (logic) {
 
-                        PatchLogic.SHARK_PATCH_ONLY -> {
-                            // Step 1: remux + faststart
-                            statusText = "⚙️ Remux MP4 (+faststart)..."
-                            val tmpRemux = File(context.cacheDir, "remux_${System.currentTimeMillis()}.mp4")
-                            val cmd = "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"${tmpRemux.absolutePath}\""
-                            val session = FFmpegKit.execute(cmd)
+                        PatchLogic.PATCH_ONLY -> {
+                            statusText = "⚙️ Merapikan MP4 (+faststart)..."
+                            val session = FFmpegKit.execute(
+                                "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"$outPath\""
+                            )
                             if (!ReturnCode.isSuccess(session.returnCode))
                                 throw Exception(session.allLogsAsString)
-
-                            // Step 2: Shark patch
-                            progressPercent = 0.85f
-                            statusText = "⚙️ Menerapkan NXT_SHARK537 Method..."
-                            SharkPatcher.patch(tmpRemux, tmpPath)
-                            tmpRemux.delete()
-                        }
-
-                        PatchLogic.ENCODE_THEN_SHARK -> {
-                            // Step 1: Encode
-                            statusText = "⚙️ Encoding video..."
-                            val tmpEncoded = File(context.cacheDir, "enc_${System.currentTimeMillis()}.mp4")
-                            val cmd = "-hide_banner -i \"$safUrl\" ${quality.cmdParams} -c:a aac -b:a 192k -movflags +faststart \"${tmpEncoded.absolutePath}\""
-                            val session = FFmpegKit.execute(cmd)
-                            if (!ReturnCode.isSuccess(session.returnCode))
-                                throw Exception(session.allLogsAsString)
-
-                            // Step 2: Shark patch
                             progressPercent = 0.9f
-                            statusText = "⚙️ Menerapkan NXT_SHARK537 Method..."
-                            SharkPatcher.patch(tmpEncoded, tmpPath)
-                            tmpEncoded.delete()
+                            statusText = "⚙️ Menerapkan Shark Sample Table..."
+                            val patched = Mp4Engine.patchSharkSampleTable(finalFile.readBytes())
+                            FileOutputStream(finalFile).use { it.write(patched) }
                         }
 
-                        PatchLogic.ENCODE_ONLY -> {
-                            statusText = "⚙️ Encoding video..."
-                            val cmd = "-hide_banner -i \"$safUrl\" ${quality.cmdParams} -c:a aac -b:a 192k -movflags +faststart \"${tmpPath.absolutePath}\""
-                            val session = FFmpegKit.execute(cmd)
+                        PatchLogic.ENCODE_PATCH -> {
+                            statusText = "⚙️ Encoding (${quality.label})..."
+                            val audioP = "-c:a aac -b:a 128k -shortest " +
+                                "-metadata copyright=\"By kythera\" " +
+                                "-metadata artist=\"By kythera\" -movflags +faststart"
+                            val session = FFmpegKit.execute(
+                                "-hide_banner -i \"$safUrl\" -threads 0 -vf \"format=yuv420p\" " +
+                                "${quality.cmdParams} $audioP \"$outPath\""
+                            )
                             if (!ReturnCode.isSuccess(session.returnCode))
                                 throw Exception(session.allLogsAsString)
+                            progressPercent = 0.9f
+                            statusText = "⚙️ Menerapkan Shark Sample Table..."
+                            val patched = Mp4Engine.patchSharkSampleTable(finalFile.readBytes())
+                            FileOutputStream(finalFile).use { it.write(patched) }
                         }
 
                         PatchLogic.KYTHERA_60FPS -> {
-                            statusText = "⚙️ Remux + 60fps stamp..."
-                            val tmpRemux = File(context.cacheDir, "remux_${System.currentTimeMillis()}.mp4")
-                            val cmd = "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"${tmpRemux.absolutePath}\""
-                            val session = FFmpegKit.execute(cmd)
+                            statusText = "⚙️ Menyiapkan file dasar..."
+                            val session = FFmpegKit.execute(
+                                "-hide_banner -i \"$safUrl\" -c copy \"$outPath\""
+                            )
                             if (!ReturnCode.isSuccess(session.returnCode))
                                 throw Exception(session.allLogsAsString)
-
                             progressPercent = 0.9f
-                            statusText = "⚙️ Menyematkan Kythera Stamp..."
-                            val bytes = tmpRemux.readBytes()
-                            val stamp = "KYTHERA_60FPS".toByteArray()
-                            tmpPath.writeBytes(bytes + stamp)
-                            tmpRemux.delete()
+                            statusText = "⚙️ Menyematkan Kythera Metadata Stamp..."
+                            val stamped = Mp4Engine.applyMetadataStamp(finalFile.readBytes())
+                            FileOutputStream(finalFile).use { it.write(stamped) }
                         }
                     }
 
-                    FFmpegKitConfig.enableStatisticsCallback(null)
-                    progressPercent = 0.98f
-                    statusText = "⚙️ Menyimpan ke galeri..."
-                    savedVideoUri = saveToGallery(tmpPath, fileName)
-                    isSuccess  = true
-                    statusText = "✅ Berhasil! Tersimpan di Galeri/Kythera"
+                    // Simpan ke galeri
+                    progressPercent = 1f; statusText = "Menyimpan ke galeri..."
+                    val values = ContentValues().apply {
+                        put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
+                    }
+                    val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                    uri?.let { destUri ->
+                        context.contentResolver.openOutputStream(destUri)?.use { out ->
+                            FileInputStream(finalFile).use { it.copyTo(out) }
+                        }
+                        finalFile.delete()
+                        savedVideoUri = destUri
+                        isSuccess = true
+                        statusText = "✅ Done! Tersimpan di Movies/Kythera"
+                    } ?: throw Exception("Gagal menyimpan ke Galeri")
 
                 } catch (e: Exception) {
+                    statusText = "❌ Proses Gagal"
+                    errorLog = e.message ?: "Unknown Error"
+                } finally {
                     FFmpegKitConfig.enableStatisticsCallback(null)
-                    errorLog   = e.message ?: "Unknown error"
-                    statusText = "❌ Gagal!"
-                    tmpPath.delete()
                 }
             }
             isProcessing = false
         }
     }
 
-    // ── UI ────────────────────────────────────────────────────────────────────
+    // ── UI ────────────────────────────────────────────────────
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(16.dp)
     ) {
-        Text("Patch Video", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-        Text("NXT_SHARK537 Method — MP4 Sample Table Rebuild", color = KColor.Orange, fontSize = 13.sp)
+        Text("Kythera Patcher", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
+        Text("MP4 Optimizer & Frame Injector", color = KColor.Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
 
-        // Input
         GlassCard {
             KDropZone(
                 onTap = { videoPicker.launch("video/*") },
-                title = if (inputUri != null) "Ganti Video" else "Pilih Video",
-                subtitle = "MP4 — Patch, Encode, atau Keduanya",
+                title = if (inputUri != null) "Ganti Video Target" else "Select video",
+                subtitle = "MP4 File Only",
                 icon = Icons.Rounded.CloudUpload,
                 accentColor = KColor.Orange
             )
@@ -637,7 +635,6 @@ fun PatchScreen() {
         }
         Spacer(Modifier.height(14.dp))
 
-        // Metode
         GlassCard {
             Text("Metode Patch", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
             Spacer(Modifier.height(10.dp))
@@ -645,15 +642,12 @@ fun PatchScreen() {
                 val isActive = selectedLogic == logic
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
+                        .fillMaxWidth().padding(vertical = 4.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (isActive) KColor.Orange.copy(0.12f) else Color.Transparent)
-                        .border(
-                            width = if (isActive) 1.dp else 0.dp,
-                            color = if (isActive) KColor.Orange.copy(0.4f) else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
-                        )
+                        .border(if (isActive) 1.dp else 0.dp,
+                            if (isActive) KColor.Orange.copy(0.4f) else Color.Transparent,
+                            RoundedCornerShape(10.dp))
                         .clickable { selectedLogic = logic }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -666,20 +660,15 @@ fun PatchScreen() {
                             fontSize = 13.sp)
                         Text(logic.desc, color = KColor.Text2, fontSize = 11.sp, lineHeight = 16.sp)
                     }
-                    RadioButton(
-                        selected = isActive,
-                        onClick  = { selectedLogic = logic },
-                        colors   = RadioButtonDefaults.colors(selectedColor = KColor.Orange)
-                    )
+                    RadioButton(selected = isActive, onClick = { selectedLogic = logic },
+                        colors = RadioButtonDefaults.colors(selectedColor = KColor.Orange))
                 }
             }
         }
 
-        // Kualitas encode (muncul kalau pilih mode encode)
         AnimatedVisibility(
-            visible = selectedLogic == PatchLogic.ENCODE_THEN_SHARK || selectedLogic == PatchLogic.ENCODE_ONLY,
-            enter   = expandVertically(tween(300)),
-            exit    = shrinkVertically(tween(300))
+            visible = selectedLogic == PatchLogic.ENCODE_PATCH,
+            enter = expandVertically(tween(300)), exit = shrinkVertically(tween(300))
         ) {
             Column {
                 Spacer(Modifier.height(14.dp))
@@ -690,15 +679,12 @@ fun PatchScreen() {
                         val isActive = selectedQuality == quality
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
+                                .fillMaxWidth().padding(vertical = 4.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isActive) KColor.Orange.copy(0.12f) else Color.Transparent)
-                                .border(
-                                    width = if (isActive) 1.dp else 0.dp,
-                                    color = if (isActive) KColor.Orange.copy(0.4f) else Color.Transparent,
-                                    shape = RoundedCornerShape(10.dp)
-                                )
+                                .border(if (isActive) 1.dp else 0.dp,
+                                    if (isActive) KColor.Orange.copy(0.4f) else Color.Transparent,
+                                    RoundedCornerShape(10.dp))
                                 .clickable { selectedQuality = quality }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -711,28 +697,21 @@ fun PatchScreen() {
                                     fontSize = 13.sp)
                                 Text(quality.desc, color = KColor.Text2, fontSize = 11.sp, lineHeight = 16.sp)
                             }
-                            RadioButton(
-                                selected = isActive,
-                                onClick  = { selectedQuality = quality },
-                                colors   = RadioButtonDefaults.colors(selectedColor = KColor.Orange)
-                            )
+                            RadioButton(selected = isActive, onClick = { selectedQuality = quality },
+                                colors = RadioButtonDefaults.colors(selectedColor = KColor.Orange))
                         }
                     }
                 }
             }
         }
 
-        // Error
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 200.dp)
+                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)
                     .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
                     .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
                     .padding(14.dp)
-                    .verticalScroll(rememberScrollState())
             ) {
                 Text("⚠️ ERROR", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Spacer(Modifier.height(8.dp))
@@ -740,32 +719,26 @@ fun PatchScreen() {
             }
         }
 
-        // Progress
         if (isProcessing) {
             Spacer(Modifier.height(16.dp))
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
+                modifier = Modifier.fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(KColor.Surface)
-                    .padding(16.dp)
+                    .background(KColor.Surface).padding(16.dp)
             ) {
                 Column {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("⏳ $statusText", color = KColor.Orange, fontSize = 13.sp)
                         if (progressPercent > 0f)
-                            Text("${(progressPercent * 100).toInt()}%", color = KColor.Orange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("${(progressPercent * 100).toInt()}%",
+                                color = KColor.Orange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                     Spacer(Modifier.height(10.dp))
-                    if (progressPercent > 0f && progressPercent < 1f) {
-                        LinearProgressIndicator(
-                            progress = { progressPercent },
-                            modifier = Modifier.fillMaxWidth().height(5.dp),
-                            color    = KColor.Orange
-                        )
-                    } else {
+                    if (progressPercent > 0f && progressPercent < 1f)
+                        LinearProgressIndicator(progress = { progressPercent },
+                            modifier = Modifier.fillMaxWidth().height(5.dp), color = KColor.Orange)
+                    else
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp), color = KColor.Orange)
-                    }
                 }
             }
         }
@@ -774,26 +747,20 @@ fun PatchScreen() {
 
         if (isSuccess && savedVideoUri != null) {
             KPrimaryButton(
-                label      = "Reset",
-                icon       = Icons.Rounded.Refresh,
-                startColor = KColor.Orange,
-                endColor   = Color(0xFFD97706),
-                onClick    = {
-                    inputUriString  = null
-                    isSuccess       = false
-                    statusText      = ""
-                    savedVideoUri   = null
-                    progressPercent = 0f
+                label = "Reset", icon = Icons.Rounded.Refresh,
+                modifier = Modifier.fillMaxWidth(),
+                startColor = KColor.Orange, endColor = Color(0xFFD97706),
+                onClick = {
+                    inputUriString = null; isSuccess = false
+                    statusText = ""; savedVideoUri = null; progressPercent = 0f
                 }
             )
         } else {
             KPrimaryButton(
-                label      = "Patch & Download",
-                icon       = Icons.Rounded.AutoFixHigh,
-                enabled    = inputUri != null && !isProcessing,
-                startColor = KColor.Orange,
-                endColor   = Color(0xFFD97706),
-                onClick    = ::executePatch
+                label = "Patch & Download", icon = Icons.Rounded.AutoFixHigh,
+                enabled = inputUri != null && !isProcessing,
+                startColor = KColor.Orange, endColor = Color(0xFFD97706),
+                onClick = ::executePatch
             )
         }
         Spacer(Modifier.height(24.dp))
