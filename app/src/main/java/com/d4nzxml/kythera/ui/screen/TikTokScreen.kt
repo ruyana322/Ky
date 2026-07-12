@@ -358,13 +358,13 @@ private suspend fun runPipeline(
         }
 
         val cmd = "-y -i \"${inputFile.absolutePath}\" " +
-                  "-vf fps=60,format=yuv420p " +
+                  "-vf fps=60 " +
                   "-c:v libx264 -preset ultrafast " +
                   "-b:v 17M -minrate 17M -maxrate 17M -bufsize 17M " +
-                  "-bf 0 -movflags +faststart " +
                   "-c:a aac -b:a 128k " +
-                  "-metadata copyright=\"By Kythera\" " +
-                  "-metadata artist=\"D4nzxml\" " +
+                  "-af aresample=async=1:first_pts=0 " +
+                  "-shortest " +
+                  "-movflags +faststart " +
                   "\"${encFile.absolutePath}\""
 
         val session = FFmpegKit.execute(cmd)
