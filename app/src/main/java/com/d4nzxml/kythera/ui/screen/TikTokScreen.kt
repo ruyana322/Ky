@@ -45,15 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MODE
-// ═══════════════════════════════════════════════════════════════════════════
-enum class PipelineMode(val label: String, val icon: String, val desc: String) {
-    PATCH_ONLY("Patch Only", "🩹", "Shark HD patch langsung ke video asli"),
-    ENCODE_PATCH("Encode + Patch", "🎬", "Render super kilat (Senzyn Method) lalu Shark patch"),
-    KYTHERA_60("Kythera 60fps", "⚡", "Z-Payload + encoder tag")
-}
+import kotlin.math.max
 
 // ═══════════════════════════════════════════════════════════════════════════
 // NOTIFICATION
@@ -66,7 +58,7 @@ private fun ensureNotifChannel(context: Context) {
         val ch = NotificationChannel(
             NOTIF_CHANNEL_ID, "Kythera Pipeline",
             NotificationManager.IMPORTANCE_LOW
-        ).apply { description = "Encode & Patch progress" }
+        ).apply { description = "Kythera AI Processing" }
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
     }
 }
@@ -86,9 +78,9 @@ private fun postNotif(context: Context, title: String, text: String, progress: I
 private fun dismissNotif(context: Context) = NotificationManagerCompat.from(context).cancel(NOTIF_ID)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PATCHER (NXT_SHARK537 METHOD TRANSLATED)
+// KYTHERA BINARY PATCHER
 // ═══════════════════════════════════════════════════════════════════════════
-private object SharkPatcher {
+private object KytheraPatcher {
 
     private val FAKE_SAMPLE_SIZE = 8L
     private val FAKE_SAMPLE_BYTES = byteArrayOf(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00)
@@ -303,8 +295,7 @@ private object SharkPatcher {
         return makeBox(box.type, concatBytes(parts))
     }
 
-    // ── INTI SHARK SAMPLE TABLE METHOD ──────────────────────────────────────
-    private fun patchSharkSampleTableMethod(data: ByteArray): ByteArray {
+    private fun patchSampleTableMethod(data: ByteArray): ByteArray {
         val topLevel = parseBoxes(data)
         val ftyp = topLevel.find { it.type == "ftyp" } ?: throw Exception("MP4 ftyp box not found")
         val moov = topLevel.find { it.type == "moov" } ?: throw Exception("MP4 moov box not found")
@@ -386,41 +377,19 @@ private object SharkPatcher {
         }
     }
 
-    private fun zPayload(buf: ByteArray) {
-        var mdatOff = -1
-        var pos = 0
-        while (pos + 8 <= buf.size) {
-            val sz = getUint32(buf, pos).toInt()
-            if (sz < 8) break
-            if (getBoxType(buf, pos) == "mdat") { mdatOff = pos; break }
-            pos += sz
-        }
-        if (mdatOff == -1) return
-        val zt = mdatOff + 10
-        for (i in 0 until 128) if (zt + i < buf.size) buf[zt + i] = 0x5A
-    }
-
-    fun patchShark(input: ByteArray): ByteArray {
-        val newBuf = patchSharkSampleTableMethod(input)
+    fun patchVideo(input: ByteArray): ByteArray {
+        val newBuf = patchSampleTableMethod(input)
         patchEncoder(newBuf)
         return newBuf
-    }
-
-    fun patchKythera60(input: ByteArray): ByteArray {
-        val buf = input.copyOf()
-        zPayload(buf)
-        patchEncoder(buf)
-        return buf
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PIPELINE
+// SMART KYTHERA PIPELINE (AUTO-DETECT ENGINE)
 // ═══════════════════════════════════════════════════════════════════════════
-private suspend fun runPipeline(
+private suspend fun runSmartPipeline(
     context:    Context,
     sourceUri:  Uri,
-    mode:       PipelineMode,
     onProgress: (String, Int) -> Unit
 ): Uri? = withContext(Dispatchers.IO) {
 
@@ -430,11 +399,19 @@ private suspend fun runPipeline(
     val encFile    = File(cacheDir, "ky_enc_$ts.mp4")
     val outputFile = File(cacheDir, "ky_out_$ts.mp4")
 
+    // 🔥 1. Ekstrak Metadata untuk Auto-Detect
     var durationMs = 0L
+    var videoWidth = 0
+    var videoHeight = 0
+    var mimeType = ""
+    
     try {
         val retriever = MediaMetadataRetriever()
         retriever.setDataSource(context, sourceUri)
         durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        videoWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+        videoHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+        mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: ""
         retriever.release()
     } catch (e: Exception) {
         durationMs = 0L
@@ -446,61 +423,56 @@ private suspend fun runPipeline(
             inputFile.outputStream().use { ins.copyTo(it) }
         } ?: return@withContext null
 
-        when (mode) {
-            PipelineMode.PATCH_ONLY -> {
-                onProgress("🩹 Membaca video...", 20)
-                val raw = inputFile.readBytes()
-                onProgress("🩹 Rebuilding Shark MP4 Table...", 60)
-                outputFile.writeBytes(SharkPatcher.patchShark(raw))
-            }
+        // 🔥 2. Smart Logic: Tentukan Mode
+        val maxRes = max(videoWidth, videoHeight)
+        val isH264 = mimeType.contains("avc", ignoreCase = true) || mimeType.contains("h264", ignoreCase = true)
+        
+        // Video butuh Re-Encode kalau resolusinya di atas 1080p atau formatnya bukan H.264 standar
+        val needsReencode = maxRes > 1920 || !isH264
 
-            PipelineMode.ENCODE_PATCH -> {
-                onProgress("🎬 Menyiapkan encoder...", 5)
-                
-                FFmpegKitConfig.enableStatisticsCallback { stats ->
-                    if (durationMs > 0) {
-                        val timeMs = stats.time.toFloat()
-                        val ratio = (timeMs / durationMs).coerceIn(0f, 1f)
-                        val p = (5 + (ratio * 80)).toInt() 
-                        onProgress("🎬 Encoding $p%...", p)
-                    } else {
-                        onProgress("🎬 Encoding...", 50)
-                    }
-                }
-
-                // 🔥 COMMAND DIKUNCI TRANSLASI DARI SENZYN (CBR 17M + 60fps)
-                val cmd = "-y -i \"${inputFile.absolutePath}\" " +
-                          "-vf \"fps=60\" " +
-                          "-c:v libx264 -preset ultrafast " +
-                          "-b:v 17M -minrate 17M -maxrate 17M -bufsize 17M " +
-                          "-c:a aac -b:a 128k -af \"aresample=async=1:first_pts=0\" " +
-                          "-shortest -movflags +faststart " +
-                          "-metadata copyright=\"By Kythera\" " +
-                          "-metadata artist=\"D4nzxml\" " +
-                          "\"${encFile.absolutePath}\""
-
-                val session = FFmpegKit.execute(cmd)
-                FFmpegKitConfig.enableStatisticsCallback(null)
-
-                if (!ReturnCode.isSuccess(session.returnCode)) {
-                    onProgress("❌ Encode gagal", -1)
-                    return@withContext null
-                }
-
-                onProgress("🩹 Rebuilding Shark MP4 Table...", 85)
-                outputFile.writeBytes(SharkPatcher.patchShark(encFile.readBytes()))
-                onProgress("✅ Menyelesaikan...", 95)
-            }
-
-            PipelineMode.KYTHERA_60 -> {
-                onProgress("⚡ Membaca video...", 20)
-                val raw = inputFile.readBytes()
-                onProgress("⚡ Menyematkan Z-Payload & encoder tag...", 60)
-                outputFile.writeBytes(SharkPatcher.patchKythera60(raw))
+        FFmpegKitConfig.enableStatisticsCallback { stats ->
+            if (durationMs > 0) {
+                val timeMs = stats.time.toFloat()
+                val ratio = (timeMs / durationMs).coerceIn(0f, 1f)
+                val p = (5 + (ratio * 80)).toInt() 
+                onProgress(if (needsReencode) "🎬 Re-encoding (CRF 20) $p%..." else "🎬 Remuxing $p%...", p)
+            } else {
+                onProgress(if (needsReencode) "🎬 Re-encoding..." else "🎬 Remuxing...", 50)
             }
         }
 
+        // 🔥 3. Eksekusi FFmpeg (Dengan Multi-threading Aktif: -threads 0)
+        val cmd = if (needsReencode) {
+            "-y -i \"${inputFile.absolutePath}\" " +
+            "-threads 0 " + // Aktifkan semua core CPU
+            "-c:v libx264 -preset fast -crf 20 " + // Racikan baru sesuai request
+            "-bf 0 -movflags +faststart " +
+            "-c:a aac -b:a 128k " + 
+            "-shortest " +
+            "-metadata copyright=\"By Kythera\" " +
+            "-metadata artist=\"D4nzxml\" " +
+            "\"${encFile.absolutePath}\""
+        } else {
+            "-y -i \"${inputFile.absolutePath}\" " +
+            "-threads 0 " + // Aktifkan semua core CPU
+            "-c copy " + // Remux super kilat
+            "-movflags +faststart " +
+            "\"${encFile.absolutePath}\""
+        }
+
+        val session = FFmpegKit.execute(cmd)
+        FFmpegKitConfig.enableStatisticsCallback(null)
+
+        if (!ReturnCode.isSuccess(session.returnCode)) {
+            onProgress("❌ Proses video gagal", -1)
+            return@withContext null
+        }
+
+        // 🔥 4. Suntik Biner (Kythera Patcher)
+        onProgress("🩹 Menerapkan Kythera Patch...", 85)
+        outputFile.writeBytes(KytheraPatcher.patchVideo(encFile.readBytes()))
         onProgress("✅ Selesai!", 100)
+        
         Uri.fromFile(outputFile)
 
     } catch (e: Exception) {
@@ -547,51 +519,6 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BOTTOM SHEET (Disederhanakan)
-// ═══════════════════════════════════════════════════════════════════════════
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PipelineSheet(onConfirm: (mode: PipelineMode) -> Unit, onDismiss: () -> Unit) {
-    var selectedMode by remember { mutableStateOf(PipelineMode.ENCODE_PATCH) }
-
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF1A1A2E), contentColor = Color.White) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("⚙️ Kythera Pipeline", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF7C4DFF))
-            Text("Mode Proses", fontSize = 13.sp, color = Color(0xFFAAAAAA))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PipelineMode.entries.forEach { mode ->
-                    val active = selectedMode == mode
-                    Row(
-                        modifier = Modifier.fillMaxWidth()
-                            .background(if (active) Color(0xFF7C4DFF) else Color(0xFF2A2A3E), RoundedCornerShape(12.dp))
-                            .clickable { selectedMode = mode }.padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(mode.icon, fontSize = 20.sp)
-                        Column {
-                            Text(mode.label, fontWeight = FontWeight.SemiBold, color = if (active) Color.White else Color(0xFFCCCCCC))
-                            Text(mode.desc, fontSize = 11.sp, color = if (active) Color(0xFFDDCCFF) else Color(0xFF777777))
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { onConfirm(selectedMode) },
-                modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF)), shape = RoundedCornerShape(12.dp)
-            ) { Text("🚀 Proses & Upload ke TikTok", modifier = Modifier.padding(vertical = 4.dp)) }
-
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Batalkan", color = Color(0xFF888888)) }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // MAIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
@@ -601,39 +528,51 @@ fun TikTokScreen() {
     val scope   = rememberCoroutineScope()
 
     var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
-    var showSheet           by remember { mutableStateOf(false) }
-    var pendingUri          by remember { mutableStateOf<Uri?>(null) }
     var statusMsg           by remember { mutableStateOf("") }
     var progressVal         by remember { mutableStateOf(0) }
     var isProcessing        by remember { mutableStateOf(false) }
+    
+    // 🔥 Referensi WebView untuk Pause/Resume
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) { pendingUri = uri; showSheet = true } else { fileChooserCallback?.onReceiveValue(null); fileChooserCallback = null }
-    }
+        if (uri != null) { 
+            // 🔥 Langsung eksekusi Smart Engine tanpa Bottom Sheet!
+            isProcessing = true
+            statusMsg = "Menyiapkan Kythera Engine..."
+            progressVal = 0
+            
+            // 🛑 Pause WebView selama proses
+            webViewInstance?.onPause()
+            webViewInstance?.pauseTimers()
 
-    if (showSheet) {
-        PipelineSheet(
-            onConfirm = { mode ->
-                showSheet = false
-                val src = pendingUri ?: return@PipelineSheet
-                pendingUri = null
-                isProcessing = true
-                statusMsg = "Menyiapkan..."
-                progressVal = 0
-
-                scope.launch {
-                    val resultUri = runPipeline(context, src, mode) { msg, p ->
-                        statusMsg = msg; progressVal = p.coerceAtLeast(0); postNotif(context, "Kythera Pipeline", msg, p)
-                    }
-                    isProcessing = false
-                    dismissNotif(context)
-                    if (resultUri != null) fileChooserCallback?.onReceiveValue(arrayOf(resultUri)) else fileChooserCallback?.onReceiveValue(null)
-                    fileChooserCallback = null
-                    statusMsg = ""; progressVal = 0
+            scope.launch {
+                val resultUri = runSmartPipeline(context, uri) { msg, p ->
+                    statusMsg = msg
+                    progressVal = p.coerceAtLeast(0)
+                    postNotif(context, "Kythera Pipeline", msg, p)
                 }
-            },
-            onDismiss = { showSheet = false; pendingUri = null; fileChooserCallback?.onReceiveValue(null); fileChooserCallback = null }
-        )
+                
+                isProcessing = false
+                dismissNotif(context)
+                
+                // ▶️ Resume WebView setelah proses selesai
+                webViewInstance?.onResume()
+                webViewInstance?.resumeTimers()
+
+                if (resultUri != null) {
+                    fileChooserCallback?.onReceiveValue(arrayOf(resultUri))
+                } else {
+                    fileChooserCallback?.onReceiveValue(null)
+                }
+                fileChooserCallback = null
+                statusMsg = ""
+                progressVal = 0
+            }
+        } else { 
+            fileChooserCallback?.onReceiveValue(null)
+            fileChooserCallback = null 
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -641,6 +580,8 @@ fun TikTokScreen() {
             modifier = Modifier.fillMaxSize(),
             factory  = { ctx ->
                 WebView(ctx).apply {
+                    webViewInstance = this // Simpan referensi
+                    
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     settings.apply {
                         javaScriptEnabled = true; domStorageEnabled = true; allowFileAccess = true; mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
@@ -673,8 +614,8 @@ fun TikTokScreen() {
                                   function showToast() {
                                     const style = document.createElement('style');
                                     style.textContent = `
-                                      #__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #fe2c55; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(254,44,85,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; }
-                                      .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #fe2c55; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; }
+                                      #__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #7c4dff; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(124,77,255,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; }
+                                      .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #7c4dff; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; }
                                       @keyframes __d4nzFadeIn { from { opacity:0; transform: translateX(-50%) translateY(12px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
                                       @keyframes __d4nzPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.3; transform:scale(0.65); } }
                                     `;
