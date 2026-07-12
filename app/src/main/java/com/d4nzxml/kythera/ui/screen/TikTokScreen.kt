@@ -15,17 +15,23 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -56,7 +62,7 @@ enum class PipelineMode(val label: String, val icon: String, val desc: String) {
     KYTHERA_60(
         label = "Kythera 60fps",
         icon  = "⚡",
-        desc  = "Metadata stamp Z-payload + MTLib + encoder tag"
+        desc  = "Z-Payload + encoder tag"
     )
 }
 
@@ -93,7 +99,10 @@ private fun dismissNotif(context: Context) =
     NotificationManagerCompat.from(context).cancel(NOTIF_ID)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHARK PATCHER (port dari patcher.js)
+// PATCHER
+// Patch Only & Encode+Patch : mdhd + elst + stts + encoder string
+// Kythera 60fps             : zPayload + encoder string
+// MTLib TIDAK dipakai di semua mode
 // ═══════════════════════════════════════════════════════════════════════════
 private object SharkPatcher {
 
@@ -132,15 +141,7 @@ private object SharkPatcher {
         return findPath(buf, found, found + sz, path.drop(1))
     }
 
-    // ── Z-Payload ────────────────────────────────────────────────────────
-    private fun zPayload(buf: ByteArray) {
-        val mdatOff = findBox(buf, 0, buf.size, "mdat")
-        if (mdatOff == -1) return
-        val zt = mdatOff + 10
-        for (i in 0 until 128) if (zt + i < buf.size) buf[zt + i] = 0x5A
-    }
-
-    // ── Encoder string → Lavf59.16.100 ────────────────────────────────────
+    // ── Encoder string → Lavf59.16.100 ───────────────────────────────────
     private fun patchEncoder(buf: ByteArray) {
         val lavf   = "Lavf".toByteArray()
         val target = "Lavf59.16.100".toByteArray()
@@ -159,79 +160,18 @@ private object SharkPatcher {
         }
     }
 
-    // ── MTLib inject (moov/udta/----) ─────────────────────────────────────
-    private fun injectMTLib(input: ByteArray): ByteArray {
-        val enc      = Charsets.US_ASCII
-        val domain   = "com.apple.quicktime".toByteArray(enc)
-        val keyBytes = "MTLib".toByteArray(enc)
-        val valBytes = "PyPVGCodec".toByteArray(enc)
-
-        fun makeAtom(name: String, payload: ByteArray): ByteArray {
-            val total = 8 + payload.size
-            val out = ByteArray(total)
-            out[0] = ((total shr 24) and 0xFF).toByte()
-            out[1] = ((total shr 16) and 0xFF).toByte()
-            out[2] = ((total shr 8)  and 0xFF).toByte()
-            out[3] = (total           and 0xFF).toByte()
-            name.toByteArray(enc).copyInto(out, 4)
-            payload.copyInto(out, 8)
-            return out
-        }
-
-        val meanPayload = ByteArray(4) + domain
-        val namePayload = ByteArray(4) + keyBytes
-        val dataPayload = ByteArray(4).also {
-            it[3] = 1  // type indicator
-        } + valBytes
-
-        val mean = makeAtom("mean", meanPayload)
-        val name = makeAtom("name", namePayload)
-        val data = makeAtom("data", dataPayload)
-        val freeformInner = mean + name + data
-        val freeform = makeAtom("----", freeformInner)
-
-        // Cari moov
-        val buf  = input
-        var pos  = 0
-        var moovOff = -1; var moovSz = 0
-        while (pos + 8 <= buf.size) {
-            val sz = u32(buf, pos).toInt()
-            if (sz < 8) break
-            if (tag(buf, pos) == "moov") { moovOff = pos; moovSz = sz; break }
-            pos += sz
-        }
-        if (moovOff == -1) return input
-
-        val moovEnd = moovOff + moovSz
-        var udtaOff = -1; var udtaSz = 0
-        pos = moovOff + 8
-        while (pos + 8 <= moovEnd) {
-            val sz = u32(buf, pos).toInt()
-            if (sz < 8) break
-            if (tag(buf, pos) == "udta") { udtaOff = pos; udtaSz = sz; break }
-            pos += sz
-        }
-
-        val result: ByteArray
-        if (udtaOff != -1) {
-            val insertAt = udtaOff + udtaSz
-            result = buf.copyOfRange(0, insertAt) + freeform + buf.copyOfRange(insertAt, buf.size)
-            putU32(result, moovOff, (moovSz + freeform.size).toLong())
-            putU32(result, udtaOff, (udtaSz + freeform.size).toLong())
-        } else {
-            val udtaAtom = makeAtom("udta", freeform)
-            result = buf.copyOfRange(0, moovEnd) + udtaAtom + buf.copyOfRange(moovEnd, buf.size)
-            putU32(result, moovOff, (moovSz + udtaAtom.size).toLong())
-        }
-        return result
+    // ── Z-Payload (Kythera 60fps only) ───────────────────────────────────
+    private fun zPayload(buf: ByteArray) {
+        val mdatOff = findBox(buf, 0, buf.size, "mdat")
+        if (mdatOff == -1) return
+        val zt = mdatOff + 10
+        for (i in 0 until 128) if (zt + i < buf.size) buf[zt + i] = 0x5A
     }
 
-    // ── Shark Sample Table patch ──────────────────────────────────────────
-    private fun sharkSampleTable(input: ByteArray): ByteArray {
-        val buf = input.copyOf()
-
+    // ── Shark Sample Table (Patch Only + Encode+Patch) ────────────────────
+    private fun sharkSampleTable(buf: ByteArray) {
         val moovOff = findBox(buf, 0, buf.size, "moov")
-        if (moovOff == -1) return buf
+        if (moovOff == -1) return
         val moovSz  = u32(buf, moovOff).toInt()
         val moovEnd = moovOff + moovSz
 
@@ -249,20 +189,20 @@ private object SharkPatcher {
             }
             pos += sz
         }
-        if (videoTrakOff == -1) return buf
+        if (videoTrakOff == -1) return
 
-        // mdhd
+        // mdhd — timescale & duration
         val mdhdOff = findPath(buf, videoTrakOff, videoTrakEnd, listOf("mdia", "mdhd"))
         if (mdhdOff != -1) {
             putU32(buf, mdhdOff + 8 + 12, 90000L)
             putU32(buf, mdhdOff + 8 + 16, 2269500L)
         }
 
-        // elst
+        // elst — media_time entry pertama
         val elstOff = findPath(buf, videoTrakOff, videoTrakEnd, listOf("edts", "elst"))
         if (elstOff != -1) putU32(buf, elstOff + 8 + 12, 3000L)
 
-        // stts fake entry
+        // stts — fake entry
         val stblOff = findPath(buf, videoTrakOff, videoTrakEnd, listOf("mdia", "minf", "stbl"))
         if (stblOff != -1) {
             val stblSz  = u32(buf, stblOff).toInt()
@@ -278,31 +218,29 @@ private object SharkPatcher {
                 }
             }
         }
-
-        return buf
     }
 
-    // ── PUBLIC: Patch Only ────────────────────────────────────────────────
-    fun patchOnly(input: ByteArray): ByteArray {
-        val buf = sharkSampleTable(input)
-        zPayload(buf)
+    // ── PUBLIC ────────────────────────────────────────────────────────────
+
+    /** Patch Only & Encode+Patch: mdhd + elst + stts + encoder */
+    fun patchShark(input: ByteArray): ByteArray {
+        val buf = input.copyOf()
+        sharkSampleTable(buf)
         patchEncoder(buf)
         return buf
     }
 
-    // ── PUBLIC: Kythera 60fps (metadata stamp only) ───────────────────────
-    fun metadataStamp(input: ByteArray): ByteArray {
+    /** Kythera 60fps: zPayload + encoder */
+    fun patchKythera60(input: ByteArray): ByteArray {
         val buf = input.copyOf()
         zPayload(buf)
-        val mt = injectMTLib(buf)
-        val final = mt.copyOf()
-        patchEncoder(final)
-        return final
+        patchEncoder(buf)
+        return buf
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PIPELINE RUNNER
+// PIPELINE
 // ═══════════════════════════════════════════════════════════════════════════
 private suspend fun runPipeline(
     context:    Context,
@@ -320,7 +258,6 @@ private suspend fun runPipeline(
     val outputFile = File(cacheDir, "ky_out_$ts.mp4")
 
     try {
-        // Salin ke cache
         onProgress("📂 Menyalin video...", 5)
         context.contentResolver.openInputStream(sourceUri)?.use { ins ->
             inputFile.outputStream().use { ins.copyTo(it) }
@@ -328,24 +265,24 @@ private suspend fun runPipeline(
 
         when (mode) {
 
-            // ── PATCH ONLY ────────────────────────────────────────────────
             PipelineMode.PATCH_ONLY -> {
                 onProgress("🩹 Membaca video...", 20)
-                val raw    = inputFile.readBytes()
+                val raw = inputFile.readBytes()
                 onProgress("🩹 Menerapkan Shark Patch...", 60)
-                val patched = SharkPatcher.patchOnly(raw)
-                onProgress("💾 Menyimpan...", 90)
-                outputFile.writeBytes(patched)
+                outputFile.writeBytes(SharkPatcher.patchShark(raw))
             }
 
-            // ── ENCODE + PATCH ────────────────────────────────────────────
             PipelineMode.ENCODE_PATCH -> {
-                onProgress("🎬 Encoding CRF $crf / $preset...", 10)
+                onProgress("🎬 Menyiapkan encoder...", 10)
 
                 var lastP = 10
                 FFmpegKitConfig.enableStatisticsCallback { stats ->
-                    val p = (10 + (stats.time / 1000.0).coerceIn(0.0, 1.0) * 60).toInt()
-                    if (p > lastP) { lastP = p; onProgress("🎬 Encoding ${p - 10}%...", p) }
+                    val ratio = (stats.time / 1000.0).coerceIn(0.0, 1.0)
+                    val p = (10 + ratio * 60).toInt().coerceAtMost(70)
+                    if (p > lastP) {
+                        lastP = p
+                        onProgress("🎬 Encoding ${((ratio) * 100).toInt()}%...", p)
+                    }
                 }
 
                 val cmd = "-y -i \"${inputFile.absolutePath}\" " +
@@ -366,20 +303,14 @@ private suspend fun runPipeline(
                 }
 
                 onProgress("🩹 Menerapkan Shark Patch...", 80)
-                val encBytes = encFile.readBytes()
-                val patched  = SharkPatcher.patchOnly(encBytes)
-                onProgress("💾 Menyimpan...", 95)
-                outputFile.writeBytes(patched)
+                outputFile.writeBytes(SharkPatcher.patchShark(encFile.readBytes()))
             }
 
-            // ── KYTHERA 60FPS ─────────────────────────────────────────────
             PipelineMode.KYTHERA_60 -> {
                 onProgress("⚡ Membaca video...", 20)
                 val raw = inputFile.readBytes()
-                onProgress("⚡ Menyematkan metadata stamp...", 55)
-                val stamped = SharkPatcher.metadataStamp(raw)
-                onProgress("💾 Menyimpan...", 90)
-                outputFile.writeBytes(stamped)
+                onProgress("⚡ Menyematkan Z-Payload & encoder tag...", 60)
+                outputFile.writeBytes(SharkPatcher.patchKythera60(raw))
             }
         }
 
@@ -396,7 +327,131 @@ private suspend fun runPipeline(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BOTTOM SHEET UI
+// ANIMASI AI SCAN
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+private fun AiScanAnimation(statusMsg: String, progress: Int) {
+    val infiniteTransition = rememberInfiniteTransition(label = "scan")
+
+    // Pulse ring
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.85f, targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        ), label = "pulse"
+    )
+
+    // Rotating scanner line
+    val scanY by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(1800, easing = LinearEasing),
+            RepeatMode.Restart
+        ), label = "scanY"
+    )
+
+    // Dot blink
+    val dotAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(600), RepeatMode.Reverse
+        ), label = "dot"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // ── Lingkaran AI ──────────────────────────────────────────────────
+        Box(contentAlignment = Alignment.Center) {
+            // Ring luar pulse
+            Box(
+                modifier = Modifier
+                    .size(90.dp)
+                    .scale(pulse)
+                    .clip(CircleShape)
+                    .background(Color(0x337C4DFF))
+            )
+            // Ring tengah
+            Box(
+                modifier = Modifier
+                    .size(70.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(Color(0xFF7C4DFF), Color(0xFF3D1A78))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✦", fontSize = 28.sp, color = Color.White)
+            }
+        }
+
+        // ── Scan bar area ─────────────────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0xFF2A2A3E))
+        ) {
+            // progress bar
+            if (progress in 0..100) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress / 100f)
+                        .fillMaxHeight()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFF7C4DFF), Color(0xFFB388FF))
+                            )
+                        )
+                )
+            }
+            // scanner glow (bergerak)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(scanY)
+                    .fillMaxHeight()
+                    .background(Color(0x88B388FF))
+            )
+        }
+
+        // ── Status teks ───────────────────────────────────────────────────
+        Text(
+            statusMsg,
+            color      = Color.White,
+            fontSize   = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign  = TextAlign.Center
+        )
+
+        // ── Titik animasi ─────────────────────────────────────────────────
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(3) { i ->
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF7C4DFF).copy(alpha = if (i == 0) dotAlpha else 1f - dotAlpha * 0.3f))
+                )
+            }
+        }
+
+        if (progress in 0..100) {
+            Text(
+                "$progress%",
+                color    = Color(0xFFB388FF),
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOTTOM SHEET
 // ═══════════════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -418,7 +473,7 @@ private fun PipelineSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
                 "⚙️ Kythera Pipeline",
@@ -427,7 +482,7 @@ private fun PipelineSheet(
                 color      = Color(0xFF7C4DFF)
             )
 
-            // ── Pilih Mode ────────────────────────────────────────────────
+            // ── Mode ──────────────────────────────────────────────────────
             Text("Mode Proses", fontSize = 13.sp, color = Color(0xFFAAAAAA))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PipelineMode.entries.forEach { mode ->
@@ -444,7 +499,7 @@ private fun PipelineSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(mode.icon, fontSize = 22.sp)
+                        Text(mode.icon, fontSize = 20.sp)
                         Column {
                             Text(
                                 mode.label,
@@ -461,12 +516,11 @@ private fun PipelineSheet(
                 }
             }
 
-            // ── CRF & Preset — hanya tampil kalau mode Encode+Patch ───────
+            // ── CRF & Preset (Encode+Patch only) ─────────────────────────
             if (selectedMode == PipelineMode.ENCODE_PATCH) {
-
                 Text("Kualitas (CRF)", fontSize = 13.sp, color = Color(0xFFAAAAAA))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    listOf(18, 20).forEach { crf ->
+                    listOf(18 to "Maksimal", 20 to "Seimbang").forEach { (crf, lbl) ->
                         val active = selectedCrf == crf
                         Box(
                             modifier = Modifier
@@ -480,22 +534,16 @@ private fun PipelineSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    "CRF $crf",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (active) Color.White else Color(0xFFCCCCCC)
-                                )
-                                Text(
-                                    if (crf == 18) "Maksimal" else "Seimbang",
-                                    fontSize = 11.sp,
-                                    color    = if (active) Color(0xFFDDCCFF) else Color(0xFF888888)
-                                )
+                                Text("CRF $crf", fontWeight = FontWeight.Bold,
+                                    color = if (active) Color.White else Color(0xFFCCCCCC))
+                                Text(lbl, fontSize = 11.sp,
+                                    color = if (active) Color(0xFFDDCCFF) else Color(0xFF888888))
                             }
                         }
                     }
                 }
 
-                Text("Kecepatan Encode (Preset)", fontSize = 13.sp, color = Color(0xFFAAAAAA))
+                Text("Preset Encode", fontSize = 13.sp, color = Color(0xFFAAAAAA))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("ultrafast" to "⚡ Ultrafast", "fast" to "🚀 Fast", "medium" to "🎯 Medium")
                         .forEach { (preset, label) ->
@@ -511,28 +559,21 @@ private fun PipelineSheet(
                                     .padding(vertical = 12.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    label,
-                                    fontSize   = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color      = if (active) Color.White else Color(0xFFCCCCCC)
-                                )
+                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                                    color = if (active) Color.White else Color(0xFFCCCCCC))
                             }
                         }
                 }
             }
 
-            // ── Tombol Proses ─────────────────────────────────────────────
             Button(
                 onClick = { onConfirm(selectedMode, selectedCrf, selectedPreset) },
                 modifier = Modifier.fillMaxWidth(),
                 colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF)),
                 shape    = RoundedCornerShape(12.dp)
             ) {
-                Text(
-                    "🚀 Proses & Upload ke TikTok",
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
+                Text("🚀 Proses & Upload ke TikTok",
+                    modifier = Modifier.padding(vertical = 4.dp))
             }
 
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
@@ -555,6 +596,7 @@ fun TikTokScreen() {
     var showSheet           by remember { mutableStateOf(false) }
     var pendingUri          by remember { mutableStateOf<Uri?>(null) }
     var statusMsg           by remember { mutableStateOf("") }
+    var progressVal         by remember { mutableStateOf(0) }
     var isProcessing        by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -569,14 +611,15 @@ fun TikTokScreen() {
         }
     }
 
-    // ── Bottom Sheet ──────────────────────────────────────────────────────
     if (showSheet) {
         PipelineSheet(
             onConfirm = { mode, crf, preset ->
                 showSheet = false
                 val src = pendingUri ?: return@PipelineSheet
-                pendingUri = null
+                pendingUri   = null
                 isProcessing = true
+                statusMsg    = "Menyiapkan..."
+                progressVal  = 0
 
                 scope.launch {
                     val resultUri = runPipeline(
@@ -585,9 +628,10 @@ fun TikTokScreen() {
                         mode       = mode,
                         crf        = crf,
                         preset     = preset,
-                        onProgress = { msg, progress ->
-                            statusMsg = msg
-                            postNotif(context, "Kythera Pipeline", msg, progress)
+                        onProgress = { msg, p ->
+                            statusMsg   = msg
+                            progressVal = p.coerceAtLeast(0)
+                            postNotif(context, "Kythera Pipeline", msg, p)
                         }
                     )
 
@@ -600,7 +644,8 @@ fun TikTokScreen() {
                         fileChooserCallback?.onReceiveValue(null)
                     }
                     fileChooserCallback = null
-                    statusMsg = ""
+                    statusMsg   = ""
+                    progressVal = 0
                 }
             },
             onDismiss = {
@@ -612,9 +657,9 @@ fun TikTokScreen() {
         )
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────
     Box(modifier = Modifier.fillMaxSize()) {
 
+        // ── WebView ───────────────────────────────────────────────────────
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory  = { ctx ->
@@ -686,25 +731,40 @@ fun TikTokScreen() {
             }
         )
 
-        // ── Status overlay ────────────────────────────────────────────────
-        if (isProcessing && statusMsg.isNotEmpty()) {
+        // ── Processing Overlay — nutupin area kotak upload TikTok ─────────
+        if (isProcessing) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 16.dp)
-                    .background(Color(0xDD1A1A2E), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 18.dp, vertical = 12.dp)
+                    .align(Alignment.Center)
+                    .padding(horizontal = 24.dp)
+                    .fillMaxWidth()
+                    // Tinggi disesuaikan area kotak upload TikTok
+                    .aspectRatio(1.6f)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xF01A1A2E), Color(0xF0110D2E))
+                        ),
+                        RoundedCornerShape(20.dp)
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(24.dp)
                 ) {
-                    CircularProgressIndicator(
-                        modifier    = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color       = Color(0xFF7C4DFF)
+                    Text(
+                        "KYTHERA AI",
+                        fontSize   = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color      = Color(0xFF7C4DFF),
+                        letterSpacing = 4.sp
                     )
-                    Text(statusMsg, color = Color.White, fontSize = 13.sp)
+                    Spacer(Modifier.height(4.dp))
+                    AiScanAnimation(
+                        statusMsg = statusMsg,
+                        progress  = progressVal
+                    )
                 }
             }
         }
