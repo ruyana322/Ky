@@ -1,9 +1,11 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -22,7 +24,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun TikTokScreen() {
     var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
 
-    // Launcher buat nangkep file dari Galeri pas tombol Upload di web dipencet
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             fileChooserCallback?.onReceiveValue(arrayOf(uri))
@@ -46,12 +47,51 @@ fun TikTokScreen() {
                     domStorageEnabled = true
                     allowFileAccess = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    userAgentString = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36"
+                    
+                    // 🔥 TRIK FORCED DESKTOP MODE
+                    // 1. Ubah User Agent seolah-olah ini adalah Google Chrome di PC Windows
+                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    
+                    // 2. Paksa WebView buat ngerender halaman versi layar lebar (Desktop)
+                    useWideViewPort = true
+                    loadWithOverviewMode = true
+                    
+                    // 3. Biar user bisa nge-zoom out/in layarnya layaknya buka PC di HP
+                    setSupportZoom(true)
+                    builtInZoomControls = true
+                    displayZoomControls = false
                 }
 
-                webViewClient = WebViewClient()
+                // 🔥 KUNCI PERBAIKAN LOGIN (Nangkap lemparan ke aplikasi asli)
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        val url = request?.url?.toString() ?: return false
+                        
+                        // Kalau URL-nya web biasa (http/https), biarin WebView yang muat halamannya
+                        if (url.startsWith("http://") || url.startsWith("https://")) {
+                            return false
+                        }
+                        
+                        // Kalau web minta lompat ke Aplikasi TikTok asli atau aplikasi lain (Custom Intent)
+                        return try {
+                            val intent = if (url.startsWith("intent://")) {
+                                Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                            } else {
+                                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            }
+                            context.startActivity(intent)
+                            true
+                        } catch (e: Exception) {
+                            // Kalau aplikasi aslinya belum ke-install / error, tahan aja biar gak crash
+                            true 
+                        }
+                    }
+                }
                 
-                // Ini nyawa utamanya biar tombol upload di web TikTok bisa dipencet
+                // 🔥 KUNCI BUAT BISA UPLOAD FILE
                 webChromeClient = object : WebChromeClient() {
                     override fun onShowFileChooser(
                         webView: WebView?,
