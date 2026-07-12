@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.view.ViewGroup
@@ -85,7 +86,7 @@ private fun postNotif(context: Context, title: String, text: String, progress: I
 private fun dismissNotif(context: Context) = NotificationManagerCompat.from(context).cancel(NOTIF_ID)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PATCHER (NXT_SHARK537 METHOD TRANSLATED FROM POPUP.JS)
+// PATCHER (NXT_SHARK537 METHOD TRANSLATED)
 // ═══════════════════════════════════════════════════════════════════════════
 private object SharkPatcher {
 
@@ -437,6 +438,17 @@ private suspend fun runPipeline(
     val encFile    = File(cacheDir, "ky_enc_$ts.mp4")
     val outputFile = File(cacheDir, "ky_out_$ts.mp4")
 
+    // 🔥 Trik narik durasi video biar progress barnya akurat (Bukan Dummy)
+    var durationMs = 0L
+    try {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(context, sourceUri)
+        durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        retriever.release()
+    } catch (e: Exception) {
+        durationMs = 0L
+    }
+
     try {
         onProgress("📂 Menyalin video...", 5)
         context.contentResolver.openInputStream(sourceUri)?.use { ins ->
@@ -452,14 +464,20 @@ private suspend fun runPipeline(
             }
 
             PipelineMode.ENCODE_PATCH -> {
-                onProgress("🎬 Menyiapkan encoder...", 10)
-                var lastP = 10
+                onProgress("🎬 Menyiapkan encoder...", 5)
+                
                 FFmpegKitConfig.enableStatisticsCallback { stats ->
-                    val ratio = (stats.time / 1000.0).coerceIn(0.0, 1.0)
-                    val p = (10 + ratio * 60).toInt().coerceAtMost(70)
-                    if (p > lastP) {
-                        lastP = p
-                        onProgress("🎬 Encoding ${((ratio) * 100).toInt()}%...", p)
+                    // 🔥 Progress Bar Real-time
+                    if (durationMs > 0) {
+                        val timeMs = stats.time.toFloat()
+                        // Hitung rasio waktu render FFmpeg dibanding durasi total video
+                        val ratio = (timeMs / durationMs).coerceIn(0f, 1f)
+                        // Alokasikan persentase 5% sampai 85% untuk proses encoding
+                        val p = (5 + (ratio * 80)).toInt() 
+                        onProgress("🎬 Encoding $p%...", p)
+                    } else {
+                        // Kalau durasinya gagal ke-load, kasih statis di tengah jalan
+                        onProgress("🎬 Encoding...", 50)
                     }
                 }
 
@@ -480,8 +498,9 @@ private suspend fun runPipeline(
                     return@withContext null
                 }
 
-                onProgress("🩹 Rebuilding Shark MP4 Table...", 80)
+                onProgress("🩹 Rebuilding Shark MP4 Table...", 85)
                 outputFile.writeBytes(SharkPatcher.patchShark(encFile.readBytes()))
+                onProgress("✅ Menyelesaikan...", 95)
             }
 
             PipelineMode.KYTHERA_60 -> {
@@ -722,9 +741,16 @@ fun TikTokScreen() {
             }
         )
 
+        // ── Processing Overlay ──
         if (isProcessing) {
             Box(
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp).fillMaxWidth().aspectRatio(1.6f)
+                // 🔥 Ini nih posisi terbarunya, ngedorong kotak loading dari tengah ke arah atas layar!
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 140.dp) // Sesuaikan jaraknya dari atas layaknya screenshot ijo lu
+                    .padding(horizontal = 24.dp)
+                    .fillMaxWidth()
+                    .aspectRatio(1.6f)
                     .background(Brush.verticalGradient(listOf(Color(0xF01A1A2E), Color(0xF0110D2E))), RoundedCornerShape(20.dp)),
                 contentAlignment = Alignment.Center
             ) {
