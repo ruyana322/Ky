@@ -373,7 +373,6 @@ private object SharkPatcher {
         return concatBytes(listOf(boxBytes(ftyp), moovNew, preservedBytes, mdatNew))
     }
 
-    // ── Encoder string → Lavf59.16.100 (Masih dipertahankan) ─────────────
     private fun patchEncoder(buf: ByteArray) {
         val lavf = "Lavf".toByteArray()
         val target = "Lavf59.16.100".toByteArray()
@@ -390,7 +389,6 @@ private object SharkPatcher {
         }
     }
 
-    // ── Z-Payload (Kythera 60fps only) ───────────────────────────────────
     private fun zPayload(buf: ByteArray) {
         var mdatOff = -1
         var pos = 0
@@ -405,7 +403,6 @@ private object SharkPatcher {
         for (i in 0 until 128) if (zt + i < buf.size) buf[zt + i] = 0x5A
     }
 
-    // ── PUBLIC ────────────────────────────────────────────────────────────
     fun patchShark(input: ByteArray): ByteArray {
         val newBuf = patchSharkSampleTableMethod(input)
         patchEncoder(newBuf)
@@ -438,7 +435,6 @@ private suspend fun runPipeline(
     val encFile    = File(cacheDir, "ky_enc_$ts.mp4")
     val outputFile = File(cacheDir, "ky_out_$ts.mp4")
 
-    // 🔥 Trik narik durasi video biar progress barnya akurat (Bukan Dummy)
     var durationMs = 0L
     try {
         val retriever = MediaMetadataRetriever()
@@ -467,16 +463,12 @@ private suspend fun runPipeline(
                 onProgress("🎬 Menyiapkan encoder...", 5)
                 
                 FFmpegKitConfig.enableStatisticsCallback { stats ->
-                    // 🔥 Progress Bar Real-time
                     if (durationMs > 0) {
                         val timeMs = stats.time.toFloat()
-                        // Hitung rasio waktu render FFmpeg dibanding durasi total video
                         val ratio = (timeMs / durationMs).coerceIn(0f, 1f)
-                        // Alokasikan persentase 5% sampai 85% untuk proses encoding
                         val p = (5 + (ratio * 80)).toInt() 
                         onProgress("🎬 Encoding $p%...", p)
                     } else {
-                        // Kalau durasinya gagal ke-load, kasih statis di tengah jalan
                         onProgress("🎬 Encoding...", 50)
                     }
                 }
@@ -524,7 +516,7 @@ private suspend fun runPipeline(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ANIMASI AI SCAN
+// UI: HOLOGRAM / FLOATING AI
 // ═══════════════════════════════════════════════════════════════════════════
 @Composable
 private fun AiScanAnimation(statusMsg: String, progress: Int) {
@@ -533,48 +525,28 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
         initialValue = 0.85f, targetValue = 1.15f,
         animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
     )
-    val scanY by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart), label = "scanY"
-    )
-    val dotAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "dot"
-    )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
+        // Lingkaran AI Melayang
         Box(contentAlignment = Alignment.Center) {
-            Box(modifier = Modifier.size(90.dp).scale(pulse).clip(CircleShape).background(Color(0x337C4DFF)))
+            Box(modifier = Modifier.size(110.dp).scale(pulse).clip(CircleShape).background(Color(0x407C4DFF)))
             Box(
-                modifier = Modifier.size(70.dp).clip(CircleShape)
-                    .background(Brush.radialGradient(listOf(Color(0xFF7C4DFF), Color(0xFF3D1A78)))),
+                modifier = Modifier.size(80.dp).clip(CircleShape)
+                    .background(Brush.radialGradient(listOf(Color(0xFF8B5CF6), Color(0xFF4C1D95)))),
                 contentAlignment = Alignment.Center
-            ) { Text("✦", fontSize = 28.sp, color = Color.White) }
+            ) { Text("✦", fontSize = 36.sp, color = Color.White) }
         }
 
-        Box(
-            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF2A2A3E))
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(statusMsg, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            
             if (progress in 0..100) {
-                Box(modifier = Modifier.fillMaxWidth(progress / 100f).fillMaxHeight()
-                        .background(Brush.horizontalGradient(listOf(Color(0xFF7C4DFF), Color(0xFFB388FF)))))
-            }
-            Box(modifier = Modifier.fillMaxWidth(scanY).fillMaxHeight().background(Color(0x88B388FF)))
-        }
-
-        Text(statusMsg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(3) { i ->
-                Box(modifier = Modifier.size(6.dp).clip(CircleShape)
-                    .background(Color(0xFF7C4DFF).copy(alpha = if (i == 0) dotAlpha else 1f - dotAlpha * 0.3f)))
+                Text("$progress%", color = Color(0xFFC4B5FD), fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
-
-        if (progress in 0..100) Text("$progress%", color = Color(0xFFB388FF), fontSize = 12.sp)
     }
 }
 
@@ -720,14 +692,44 @@ fun TikTokScreen() {
                                 ctx.startActivity(intent); true
                             } catch (_: Exception) { true }
                         }
+                        
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            view?.evaluateJavascript("""
+                            
+                            // 🔥 GABUNGAN: Viewport fix + D4NZXML Godmode Toast + API Interceptor
+                            val jsInjection = """
+                                // 1. Viewport Fix (Biar bisa di-scroll & digeser)
                                 var meta = document.querySelector('meta[name="viewport"]');
                                 if (meta) { meta.setAttribute('content','width=1280'); }
                                 else { var m=document.createElement('meta'); m.name='viewport'; m.content='width=1280'; document.head.appendChild(m); }
                                 document.body.style.overflow='auto'; document.documentElement.style.overflow='auto';
-                            """.trimIndent(), null)
+
+                                // 2. D4NZXML GODMODE TOAST
+                                (function () {
+                                  if (window.__d4nzToastDone) return;
+                                  window.__d4nzToastDone = true;
+                                  function showToast() {
+                                    const style = document.createElement('style');
+                                    style.textContent = `
+                                      #__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #fe2c55; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(254,44,85,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; }
+                                      .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #fe2c55; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; }
+                                      @keyframes __d4nzFadeIn { from { opacity:0; transform: translateX(-50%) translateY(12px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
+                                      @keyframes __d4nzPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.3; transform:scale(0.65); } }
+                                    `;
+                                    document.head.appendChild(style);
+                                    const toast = document.createElement('div');
+                                    toast.id = '__d4nz_toast';
+                                    toast.innerHTML = '<span class="__d4nz_dot"></span>D4NZXML GODMODE ACTIVE';
+                                    document.body.appendChild(toast);
+                                  }
+                                  if (document.body) { showToast(); } else { document.addEventListener('DOMContentLoaded', showToast); }
+                                })();
+
+                                // 3. API INTERCEPTOR (Caption Kythera & Original Audio)
+                                (function _c(){setInterval(function(){const t=new Date();try{Function("debugger")()}catch(e){}if(new Date()-t>200)document.body.innerHTML=''},1e3);const _s1=String.fromCharCode(9889,65038,32,85,112,108,111,97,100,32,109,101,116,104,111,100,32,98,121,32,75,121,116,104,101,114,97,32,9889,65038),_s2=String.fromCharCode(75,121,116,104,101,114,97);if(window.__cUInjected)return;window.__cUInjected=!0;const C_SIG=_s1,C_KEYS=new Set(["caption","captiontext","captiontextdraft","captiondraft","markuptext","text","title","desc","description","itemdescription","itemdesc","video_description","videodescription","posttext","posttitle","videodesc","video_title","videotitle"]),TB_RE=/(?:music|audio|cover|url|uri|path|file|id|uid|sec|user|author|hash|token|key|material|effect|sticker|challenge)/i,TV_RE=/^(?:https?:\/\/|\/|blob:|data:|urn:|[a-z]:\\)/i,escRe=t=>t.replace(/[.*+?^${'$'}()|[\]\\]/g,"\\${'$'}&"),CS_RE=new RegExp("\\s*"+escRe(_s1)+"\\s*","g"),CM_RE=new RegExp("(?:"+_s2+"\\s*)+","g");function apSig(t){const e=stSig(t);return e?`${'$'}{e}\n\n${'$'}{C_SIG}`:C_SIG}function escMk(t){return String(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}function stMk(t){return String(t||"").replace(/<\/?[hm][^>]*>/g,"")}function stSig(t){return stMk(t).replace(/&amp;/g,"&").split(C_SIG).join("").replace(CS_RE,"").replace(CM_RE,"").trimEnd()}function apTE(t,e){return Array.isArray(t)?t.filter(t=>{const n=String(t&&t.hashtag_name||"").replace(/^@/,""),r=t&&Number.isFinite(t.start)&&Number.isFinite(t.end)?String(e||"").slice(t.start,t.end):"";return!(t&&0===t.type&&(n.toLowerCase()===_s2.toLowerCase()||r.toLowerCase()==="@"+_s2.toLowerCase()))}):[]}function bdMk(t,e,n){const r=String(t||"").replace(CS_RE,"").replace(CM_RE,"").trimEnd(),c=escMk(C_SIG);return r?`${'$'}{r}\n\n${'$'}{c}`:c}function isPub(t){return"string"==typeof t&&(t.includes("tiktok/web/project/post/v1/")||/(?:post|publish|upload|aweme|item)/i.test(t)&&/tiktok/i.test(t))}function getRU(t){return"string"==typeof t?t:t&&"string"==typeof t.url?t.url:""}function ptBd(t){let e=JSON.parse(t);const n=e.single_post_req_list&&e.single_post_req_list[0]&&e.single_post_req_list[0].single_post_feature_info&&e.single_post_req_list[0].single_post_feature_info.music_info&&e.single_post_req_list[0].single_post_feature_info.music_info.music_id_string;["draft","canvas_config","vedit_segment_info"].forEach(t=>{void 0!==e[t]&&delete e[t]}),void 0!==e.cloud_edit_is_use_video_canvas&&(e.cloud_edit_is_use_video_canvas=!1),void 0!==e.enter_post_page_from&&(e.enter_post_page_from=1),e.post_common_info&&(e.post_common_info.post_type=3,e.post_common_info.enter_post_page_from=1),n&&Array.isArray(e.feature_common_info_list)&&e.feature_common_info_list.forEach(t=>{t&&t.vedit_common_info&&(void 0!==t.vedit_common_info.tiktok_snap_shot_lite_params&&delete t.vedit_common_info.tiktok_snap_shot_lite_params,void 0!==t.vedit_common_info.application&&(t.vedit_common_info.application=1))}),Array.isArray(e.single_post_req_list)&&e.single_post_req_list.forEach(t=>{t&&t.single_post_feature_info&&(void 0!==t.single_post_feature_info.vedit_segment_info&&delete t.single_post_feature_info.vedit_segment_info,t.single_post_feature_info.has_original_audio=1,t.single_post_feature_info.cloud_edit_is_use_video_canvas=!1)});enSig(e);return JSON.stringify(e)}function isCP(t){return!!(t&&"object"==typeof t&&(Array.isArray(t.single_post_req_list)||Array.isArray(t.post_items)||Array.isArray(t.item_list)||t.post_common_info||t.item_common_info||t.publish_info||t.item_info))}function nmK(t){return String(t||"").replace(/[_-]/g,"").toLowerCase()}function isC(t){return C_KEYS.has(nmK(t))}function shS(t){return TB_RE.test(String(t||""))&&!/(?:caption|desc|title|text|post)/i.test(String(t||""))}function isSV(t){return"string"==typeof t&&t.length<=2200&&!TV_RE.test(t.trim())}function enSig(t){if(!isCP(t))return!1;if(enSt(t))return!0;if(Array.isArray(t.single_post_req_list))return!1;const e=new WeakSet;let n=!1;function r(t,c,i){if(!t||"object"!=typeof t||i>8||e.has(t))return;e.add(t),Object.keys(t).forEach(e=>{const c=t[e];if("markuptext"===nmK(e)&&isSV(c)){const i=apSig(stSig(c)),o=bdMk(c,apTE([],i),i);c!==o&&(t[e]=o,n=!0);return}if(isC(e)&&isSV(c)){const i=apSig(c);c!==i&&(t[e]=i,n=!0);return}c&&"object"==typeof c&&!shS(e)&&r(c,e,i+1)})}return r(t,"",0),n||(n=enKn(t)),n}function enP(t,e){let n=t;for(let t=0;t<e.length-1;t++){if(n=n&&n[e[t]],!n||"object"!=typeof n)return!1}const r=e[e.length-1];if(!isSV(n[r]))return!1;const c=apSig(n[r]);return n[r]!==c&&(n[r]=c,!0)}function enKn(t){let e=!1;return Array.isArray(t.single_post_req_list)&&t.single_post_req_list.forEach(t=>{t&&"object"==typeof t&&[["caption"],["desc"],["title"],["text"],["description"],["single_post_feature_info","caption"],["single_post_feature_info","desc"],["single_post_feature_info","markup_text"],["single_post_feature_info","title"],["single_post_feature_info","text"],["single_post_feature_info","description"]].forEach(n=>{enP(t,n)&&(e=!0)})}),t.post_common_info&&"object"==typeof t.post_common_info&&["caption","desc","title","text","description"].forEach(n=>{enP(t.post_common_info,[n])&&(e=!0)}),e}function enSt(t){if(!Array.isArray(t.single_post_req_list))return!1;let e=!1;return t.single_post_req_list.forEach(t=>{const n=t&&t.single_post_feature_info;if(!n||"object"!=typeof n)return;const r=stSig(n.text||n.markup_text||""),c=apSig(r),i=apTE(n.text_extra,c),o=bdMk(n.markup_text||escMk(r),i,c);n.text!==c&&(n.text=c,e=!0),n.markup_text!==o&&(n.markup_text=o,e=!0),JSON.stringify(n.text_extra||[])!==JSON.stringify(i)&&(n.text_extra=i,e=!0)}),e}const oS=JSON.stringify;JSON.stringify=function(t,e,n){if(t&&"object"==typeof t){const e=t.single_post_req_list&&t.single_post_req_list[0]&&t.single_post_req_list[0].single_post_feature_info&&t.single_post_req_list[0].single_post_feature_info.music_info&&t.single_post_req_list[0].single_post_feature_info.music_info.music_id_string;["draft","canvas_config","vedit_segment_info"].forEach(e=>{void 0!==t[e]&&delete t[e]}),void 0!==t.cloud_edit_is_use_video_canvas&&(t.cloud_edit_is_use_video_canvas=!1),void 0!==t.enter_post_page_from&&(t.enter_post_page_from=1),t.post_common_info&&(void 0!==t.post_common_info.post_type&&(t.post_common_info.post_type=3),void 0!==t.post_common_info.enter_post_page_from&&(t.post_common_info.enter_post_page_from=1)),e&&Array.isArray(t.feature_common_info_list)&&t.feature_common_info_list.forEach(t=>{t&&t.vedit_common_info&&(void 0!==t.vedit_common_info.tiktok_snap_shot_lite_params&&delete t.vedit_common_info.tiktok_snap_shot_lite_params,void 0!==t.vedit_common_info.application&&(t.vedit_common_info.application=1))}),Array.isArray(t.single_post_req_list)&&t.single_post_req_list.forEach(t=>{t&&t.single_post_feature_info&&(void 0!==t.single_post_feature_info.vedit_segment_info&&delete t.single_post_feature_info.vedit_segment_info,t.single_post_feature_info.has_original_audio=1,t.single_post_feature_info.cloud_edit_is_use_video_canvas=!1)})}return oS.call(this,t,e,n)};const oF=window.fetch;window.fetch=async function(t,e={}){if(isPub(getRU(t)))if(e.body&&"string"==typeof e.body)try{e.body=ptBd(e.body)}catch(t){}else if("undefined"!=typeof Request&&t instanceof Request)try{const n=await t.clone().text();n&&(t=new Request(t,{body:ptBd(n)}))}catch(t){}return oF.call(this,t,e)};const X=XMLHttpRequest.prototype,oO=X.open,oSe=X.send;X.open=function(t,e){return this._u=e,oO.apply(this,arguments)},X.send=function(t){if(isPub(this._u))if("string"==typeof t)try{let e=JSON.parse(t);const n=e.single_post_req_list&&e.single_post_req_list[0]&&e.single_post_req_list[0].single_post_feature_info&&e.single_post_req_list[0].single_post_feature_info.music_info&&e.single_post_req_list[0].single_post_feature_info.music_info.music_id_string;["draft","canvas_config","vedit_segment_info"].forEach(t=>{void 0!==e[t]&&delete e[t]}),void 0!==e.cloud_edit_is_use_video_canvas&&(e.cloud_edit_is_use_video_canvas=!1),void 0!==e.enter_post_page_from&&(e.enter_post_page_from=1),e.post_common_info&&(e.post_common_info.post_type=3,e.post_common_info.enter_post_page_from=1),n&&Array.isArray(e.feature_common_info_list)&&e.feature_common_info_list.forEach(t=>{t&&t.vedit_common_info&&(void 0!==t.vedit_common_info.tiktok_snap_shot_lite_params&&delete t.vedit_common_info.tiktok_snap_shot_lite_params,void 0!==t.vedit_common_info.application&&(t.vedit_common_info.application=1))}),Array.isArray(e.single_post_req_list)&&e.single_post_req_list.forEach(t=>{t&&t.single_post_feature_info&&(void 0!==t.single_post_feature_info.vedit_segment_info&&delete t.single_post_feature_info.vedit_segment_info,t.single_post_feature_info.has_original_audio=1,t.single_post_feature_info.cloud_edit_is_use_video_canvas=!1)}),enSig(e),t=JSON.stringify(e)}catch(t){}return oSe.call(this,t)}})();
+                            """.trimIndent()
+                            
+                            view?.evaluateJavascript(jsInjection, null)
                         }
                     }
 
@@ -741,22 +743,21 @@ fun TikTokScreen() {
             }
         )
 
-        // ── Processing Overlay ──
+        // ── Processing Overlay (Hologram Full Block) ──
         if (isProcessing) {
             Box(
-                // 🔥 Ini nih posisi terbarunya, ngedorong kotak loading dari tengah ke arah atas layar!
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 140.dp) // Sesuaikan jaraknya dari atas layaknya screenshot ijo lu
-                    .padding(horizontal = 24.dp)
-                    .fillMaxWidth()
-                    .aspectRatio(1.6f)
-                    .background(Brush.verticalGradient(listOf(Color(0xF01A1A2E), Color(0xF0110D2E))), RoundedCornerShape(20.dp)),
+                    .fillMaxSize() 
+                    .background(Color(0xCC000000)) // 🔥 Background Hitam Full Layar (80% transparan)
+                    .clickable(enabled = false) {}, // 🔥 Mencegah user klik apapun di belakangnya
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(24.dp)) {
-                    Text("KYTHERA AI", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C4DFF), letterSpacing = 4.sp)
-                    Spacer(Modifier.height(4.dp))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text("KYTHERA AI", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C4DFF), letterSpacing = 4.sp)
+                    Spacer(Modifier.height(8.dp))
                     AiScanAnimation(statusMsg = statusMsg, progress = progressVal)
                 }
             }
