@@ -2,6 +2,7 @@ package com.d4nzxml.kythera.ui.screen
 
 import android.content.ContentValues
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -79,6 +80,10 @@ fun PatchScreen() {
     var isSuccess by rememberSaveable { mutableStateOf(false) }
     var savedVideoUri by remember { mutableStateOf<Uri?>(null) }
     
+    // 🔥 State tambahan untuk Progress Bar
+    var progressPercent by remember { mutableFloatStateOf(0f) }
+    var videoDurationMs by remember { mutableLongStateOf(0L) }
+    
     var selectedLogic by remember { mutableStateOf(PatchLogic.PATCH_ONLY) }
     var selectedQuality by remember { mutableStateOf(EncodeQuality.CPU_CRF20) }
 
@@ -87,10 +92,23 @@ fun PatchScreen() {
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             inputUriString = it.toString()
-            statusText = "✅ Siap: ${it.lastPathSegment}"
             errorLog = null
             isSuccess = false
             savedVideoUri = null
+            progressPercent = 0f
+            
+            // 🔥 Mengambil durasi asli video buat ngitung %
+            try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(context, it)
+                val timeString = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                videoDurationMs = timeString?.toLongOrNull() ?: 0L
+                retriever.release()
+                statusText = "✅ Siap: ${it.lastPathSegment}"
+            } catch (e: Exception) {
+                videoDurationMs = 0L
+                statusText = "✅ Siap: ${it.lastPathSegment} (Durasi tidak terbaca)"
+            }
         }
     }
 
@@ -125,6 +143,7 @@ fun PatchScreen() {
             isSuccess = false
             errorLog = null
             savedVideoUri = null
+            progressPercent = 0f
 
             val fileName = "Kythera_Patched_${System.currentTimeMillis()}.mp4"
             val outPath = File(context.getExternalFilesDir(null), fileName).absolutePath
@@ -132,6 +151,18 @@ fun PatchScreen() {
             
             val logic = selectedLogic
             val quality = selectedQuality
+
+            // 🔥 Mengaktifkan pemantau progress persentase FFmpeg
+            FFmpegKitConfig.enableStatisticsCallback { statistics ->
+                if (videoDurationMs > 0) {
+                    val timeInMs = statistics.time.toFloat()
+                    if (timeInMs > 0) {
+                        val percent = (timeInMs / videoDurationMs).coerceIn(0f, 1f)
+                        progressPercent = percent
+                        statusText = "⚙️ Memproses Video: ${(percent * 100).toInt()}%"
+                    }
+                }
+            }
 
             withContext(Dispatchers.IO) {
                 try {
@@ -143,6 +174,7 @@ fun PatchScreen() {
                             val cmd = "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"$outPath\""
                             val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
+                                progressPercent = 0.9f
                                 statusText = "⚙️ Menyuntikkan Kythera Patch..."
                                 injectKytheraPatch(finalFile)
                             } else {
@@ -151,8 +183,7 @@ fun PatchScreen() {
                         }
                         
                         PatchLogic.ENCODE_PATCH -> {
-                            statusText = "⚙️ Encoding Video (${quality.name})..."
-                            // Membangun perintah FFmpeg dengan opsi Kualitas yang dipilih
+                            statusText = "⚙️ Menyiapkan Mesin (${quality.name})..."
                             val baseCmd = "-hide_banner -i \"$safUrl\" -threads 0 -vf \"format=yuv420p\""
                             val encodeParams = quality.cmdParams
                             val audioParams = "-c:a aac -b:a 128k -shortest -metadata copyright=\"By kythera\" -metadata artist=\"By kythera\" -movflags +faststart"
@@ -160,6 +191,7 @@ fun PatchScreen() {
                             
                             val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
+                                progressPercent = 0.95f
                                 statusText = "⚙️ Menyuntikkan Kythera Patch..."
                                 injectKytheraPatch(finalFile)
                             } else {
@@ -168,10 +200,12 @@ fun PatchScreen() {
                         }
 
                         PatchLogic.KYTHERA_60FPS -> {
-                            statusText = "⚙️ Menyematkan metadata stamp Kythera..."
+                            statusText = "⚙️ Menyiapkan file dasar..."
                             val cmd = "-hide_banner -i \"$safUrl\" -c copy \"$outPath\""
                             val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
+                                progressPercent = 0.9f
+                                statusText = "⚙️ Menyematkan metadata stamp Kythera..."
                                 applyKythera60fpsStamp(finalFile)
                             } else {
                                 throw Exception(session.allLogsAsString)
@@ -179,7 +213,8 @@ fun PatchScreen() {
                         }
                     }
 
-                    statusText = "Menyiapkan unduhan..."
+                    progressPercent = 1f
+                    statusText = "Menyiapkan penyimpanan..."
                     val values = ContentValues().apply {
                         put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
                         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -199,6 +234,9 @@ fun PatchScreen() {
                 } catch (e: Exception) {
                     statusText = "❌ Error: Proses Gagal"
                     errorLog = e.message ?: "Unknown Error"
+                } finally {
+                    // 🔥 Matikan pemantau progress pas udah kelar/error biar nggak memori bocor
+                    FFmpegKitConfig.enableStatisticsCallback(null)
                 }
             }
             isProcessing = false
@@ -344,9 +382,29 @@ fun PatchScreen() {
                     .padding(16.dp)
             ) {
                 Column {
-                    Text("⏳ $statusText", color = KColor.Orange, fontSize = 13.sp)
+                    // Header Status
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("⏳ $statusText", color = KColor.Orange, fontSize = 13.sp)
+                        if (progressPercent > 0f) {
+                            Text("${(progressPercent * 100).toInt()}%", color = KColor.Orange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
                     Spacer(Modifier.height(10.dp))
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp), color = KColor.Orange)
+                    
+                    // 🔥 Progress Bar yang dinamis
+                    if (progressPercent > 0f && progressPercent < 1f) {
+                        LinearProgressIndicator(
+                            progress = { progressPercent },
+                            modifier = Modifier.fillMaxWidth().height(5.dp),
+                            color = KColor.Orange,
+                        )
+                    } else {
+                        // Kalau belum ada persenan / lagi proses injeksi yang cepet, pake loading muter
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp), color = KColor.Orange)
+                    }
                 }
             }
         }
@@ -366,6 +424,7 @@ fun PatchScreen() {
                     isSuccess = false
                     statusText = ""
                     savedVideoUri = null
+                    progressPercent = 0f
                 }
             )
         } else {
