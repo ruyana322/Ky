@@ -441,18 +441,18 @@ private suspend fun runSmartPipeline(
             }
         }
 
-        // 🔥 3. Eksekusi FFmpeg (Dengan Multi-threading Aktif: -threads 0)
+        // 🔥 MESIN KUALITAS DEWA (CRF 20) TAPI WAKTU LEBIH WARAS
         val cmd = if (needsReencode) {
             "-y -i \"${inputFile.absolutePath}\" " +
-            "-threads 0 " + // Aktifkan semua core CPU
-            "-c:v libx264 -preset fast -crf 20 " + // Racikan baru sesuai request
+            "-threads 0 " + // 🔥 Gaspol semua core CPU
+            "-c:v libx264 -preset veryfast -crf 20 " + // 🔥 Titik tengah: Kualitas tetep tajam ala CRF 20, tapi speed jauh lebih ngebut dari 'fast'
             "-bf 0 -movflags +faststart " +
-            "-c:a aac -b:a 128k " + 
-            "-shortest " +
+            "-c:a copy " + // 🔥 Audio numpang lewat aja (wajib!)
             "-metadata copyright=\"By Kythera\" " +
             "-metadata artist=\"D4nzxml\" " +
             "\"${encFile.absolutePath}\""
         } else {
+
             "-y -i \"${inputFile.absolutePath}\" " +
             "-threads 0 " + // Aktifkan semua core CPU
             "-c copy " + // Remux super kilat
