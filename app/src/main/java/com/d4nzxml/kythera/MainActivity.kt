@@ -52,23 +52,23 @@ class MainActivity : ComponentActivity() {
 // ─── Navigation items ─────────────────────────────────────────────────────────
 data class NavItem(val icon: ImageVector, val label: String)
 
+// 🔥 Patch dihapus, sisa 4 menu utama
 val bottomNavItems = listOf(
     NavItem(Icons.Rounded.GridView,    "Dashboard"),
     NavItem(Icons.Rounded.SwapHoriz,   "Convert"),
     NavItem(Icons.Rounded.Compress,    "Compress"),
-    NavItem(Icons.Rounded.Edit,        "Patch"),
     NavItem(Icons.Rounded.History,     "History"),
 )
 
+// 🔥 Index digeser dan dirapikan
 val drawerItems = listOf(
     Triple(Icons.Rounded.GridView,      "Dashboard",     0),
     Triple(Icons.Rounded.SwapHoriz,     "Converter",     1),
     Triple(Icons.Rounded.Compress,      "Compress",      2),
-    Triple(Icons.Rounded.Edit,          "Patch Video",   3),
-    Triple(Icons.Rounded.History,       "History",       4),
-    Triple(Icons.Rounded.Image,         "Photo Enhance", 5),
-    Triple(Icons.Rounded.Movie,         "Video Enhance", 6),
-    Triple(Icons.Rounded.CloudUpload,   "Upload TikTok", 8), // 🔥 TAMBAHAN BARU
+    Triple(Icons.Rounded.History,       "History",       3),
+    Triple(Icons.Rounded.Image,         "Photo Enhance", 4),
+    Triple(Icons.Rounded.Movie,         "Video Enhance", 5),
+    Triple(Icons.Rounded.CloudUpload,   "Upload TikTok", 6),
     Triple(Icons.Rounded.Settings,      "Pengaturan",    7),
 )
 
@@ -102,13 +102,13 @@ fun KytheraShell() {
                 )
             },
             bottomBar = {
+                // 🔥 Bottom Nav disembunyikan kalau buka index di atas 3
                 KytheraBottomNav(
-                    currentIndex = if (currentIndex > 4) -1 else currentIndex,
+                    currentIndex = if (currentIndex > 3) -1 else currentIndex,
                     onTap = { currentIndex = it }
                 )
             },
             floatingActionButton = {
-                // 🔥 FAB "Upload TikTok" muncul khusus di halaman Dashboard aja
                 AnimatedVisibility(
                     visible = currentIndex == 0,
                     enter = scaleIn(tween(200)) + fadeIn(tween(200)),
@@ -116,8 +116,8 @@ fun KytheraShell() {
                 ) {
                     FloatingActionButton(
                         onClick = {
-                            // 🔥 CUKUP PINDAH INDEX, BUKAN BUKA BROWSER LAGI
-                            currentIndex = 8 
+                            // 🔥 Lompat ke index 6 (TikTok Screen yang baru)
+                            currentIndex = 6 
                         },
                         containerColor = KColor.Accent,
                         contentColor = Color.Black,
@@ -141,12 +141,11 @@ fun KytheraShell() {
                         0    -> DashboardScreen(onNavigate = { currentIndex = it })
                         1    -> ConverterScreen()
                         2    -> CompressScreen()
-                        3    -> PatchScreen()
-                        4    -> HistoryScreen()
-                        5    -> EnhanceScreen()
-                        6    -> VideoEnhanceScreen()
+                        3    -> HistoryScreen()
+                        4    -> EnhanceScreen()
+                        5    -> VideoEnhanceScreen()
+                        6    -> TikTokScreen()
                         7    -> SettingsScreen()
-                        8    -> TikTokScreen() // 🔥 DAFTARIN SCREEN-NYA DI SINI
                         else -> DashboardScreen(onNavigate = { currentIndex = it })
                     }
                 }
@@ -158,8 +157,8 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    // 🔥 Tambahin "TikTok Upload" di ujung (Index 8)
-    val titles = listOf("Dashboard", "Converter", "Compress", "Patch", "History", "Photo Enhance", "Video Enhance", "Pengaturan", "TikTok Upload")
+    // 🔥 Susunan title disesuaikan dengan index baru
+    val titles = listOf("Dashboard", "Converter", "Compress", "History", "Photo Enhance", "Video Enhance", "TikTok Upload", "Pengaturan")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -207,7 +206,7 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
             .background(KColor.Surface)
             .border(1.dp, KColor.Border, androidx.compose.ui.graphics.RectangleShape)
             .navigationBarsPadding()
-            .padding(vertical = 10.dp), // Spacing dirapikan
+            .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceAround,
     ) {
         bottomNavItems.forEachIndexed { i, item ->
@@ -219,12 +218,11 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
                     .weight(1f)
                     .clickable(
                         interactionSource = interactionSource,
-                        indication = null, // 🔥 Hilangkan efek ripple abu-abu yang kaku
+                        indication = null,
                         onClick = { onTap(i) }
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 🔥 Icon wrapper (Ikon membesar saat aktif)
                 Box(
                     modifier = Modifier.height(32.dp).padding(bottom = 4.dp),
                     contentAlignment = Alignment.Center
@@ -244,7 +242,6 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
                     fontWeight = if (isActive) FontWeight.W600 else FontWeight.W400
                 )
                 
-                // 🔥 Indikator garis glowing ala Material You
                 Spacer(Modifier.height(4.dp))
                 Box(
                     modifier = Modifier
