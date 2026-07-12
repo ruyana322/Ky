@@ -104,7 +104,7 @@ private data class ToolInfo(val title: String, val desc: String, val icon: Image
 @Composable
 private fun ToolGrid(onNavigate: (Int) -> Unit) {
     val tools = listOf(
-        ToolInfo("Photo Enhance / HD", "Upscale foto hingga 4x.", Icons.Rounded.Image, KColor.Accent, 5),
+        ToolInfo("Photo Enhance / HD", "Upscale foto hingga 4x.", Icons.Rounded.Image, KColor.Accent, 4),
         ToolInfo("Converter Video", "MP4, AVI, MKV, MOV...", Icons.Rounded.SwapHoriz, KColor.Accent2, 1),
         ToolInfo("Compress Video", "Kurangi ukuran hingga 90%.", Icons.Rounded.Compress, KColor.Accent3, 2),
         ToolInfo("Patch Video", "Metadata & watermark.", Icons.Rounded.Edit, KColor.Orange, 3),
