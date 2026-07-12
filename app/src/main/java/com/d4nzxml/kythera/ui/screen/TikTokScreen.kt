@@ -1,26 +1,28 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.content.ContentValues
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
-import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.provider.MediaStore
+import android.os.Build
+import android.view.ViewGroup
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,339 +34,408 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
-import com.d4nzxml.kythera.ui.components.*
-import com.d4nzxml.kythera.ui.theme.KColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileInputStream
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ENUMS
-// ─────────────────────────────────────────────────────────────────────────────
-enum class PatchMode(val label: String, val icon: String, val desc: String) {
-    SHARK_ONLY(
-        "Patch Only", "🩹",
-        "NXT_SHARK537: Rebuild tabel MP4 + inject fake samples. Tanpa re-encode."
-    ),
-    ENCODE_SHARK(
-        "Encode + Patch", "🎬",
-        "Re-encode dulu lalu terapkan NXT_SHARK537 Method. Kualitas optimal."
-    ),
-    ENCODE_ONLY(
-        "Encode Only", "🔧",
-        "Hanya re-encode tanpa patch. Untuk perbaikan video rusak."
-    ),
-    KYTHERA_60(
-        "Kythera 60fps", "⚡",
-        "Sematkan Z-Payload + encoder tag eksklusif Kythera."
-    )
+// ═══════════════════════════════════════════════════════════════════════════
+// MODE
+// ═══════════════════════════════════════════════════════════════════════════
+enum class PipelineMode(val label: String, val icon: String, val desc: String) {
+    PATCH_ONLY("Patch Only", "🩹", "Shark HD patch langsung ke video asli"),
+    ENCODE_PATCH("Encode + Patch", "🎬", "Re-encode dulu lalu Shark patch"),
+    KYTHERA_60("Kythera 60fps", "⚡", "Z-Payload + encoder tag")
 }
 
-enum class EncodePreset(val label: String, val crf: Int, val preset: String) {
-    BALANCED("⚖️ Seimbang (CRF 20)", 20, "fast"),
-    QUALITY("✨ Kualitas (CRF 18)", 18, "fast"),
-    SPEED("⚡ Ultrafast (CRF 22)", 22, "ultrafast"),
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+private const val NOTIF_CHANNEL_ID = "kythera_pipeline"
+private const val NOTIF_ID = 7777
+
+private fun ensureNotifChannel(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val ch = NotificationChannel(
+            NOTIF_CHANNEL_ID, "Kythera Pipeline",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Encode & Patch progress" }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+    }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NXT_SHARK537 — Port FULL dari popup.js (rebuild tabel, bukan in-place patch)
-// ─────────────────────────────────────────────────────────────────────────────
+private fun postNotif(context: Context, title: String, text: String, progress: Int = -1) {
+    ensureNotifChannel(context)
+    val b = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.ic_media_play)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setOngoing(progress in 0..99)
+        .setSilent(true)
+    if (progress in 0..100) b.setProgress(100, progress, false)
+    try { NotificationManagerCompat.from(context).notify(NOTIF_ID, b.build()) } catch (_: SecurityException) {}
+}
+
+private fun dismissNotif(context: Context) = NotificationManagerCompat.from(context).cancel(NOTIF_ID)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCHER (NXT_SHARK537 METHOD TRANSLATED FROM POPUP.JS)
+// ═══════════════════════════════════════════════════════════════════════════
 private object SharkPatcher {
 
-    // ── Konstanta (sama persis popup.js) ─────────────────────────────────────
-    private val   FAKE_SAMPLE_BYTES  = byteArrayOf(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00)
-    private const val FAKE_SAMPLE_SIZE   = 8L
-    private const val VIDEO_TIMESCALE    = 90000L
-    private const val VIDEO_DURATION     = 2269500L
-    private const val VIDEO_EDIT_MEDIA_TIME = 0L
-    private const val VIDEO_SAMPLE_DELTA = 1500L
-    private val CONTAINER_BOXES = setOf("moov","trak","mdia","minf","stbl","edts","dinf","udta","meta","ilst")
+    private val FAKE_SAMPLE_SIZE = 8L
+    private val FAKE_SAMPLE_BYTES = byteArrayOf(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00)
+    private val VIDEO_TIMESCALE = 90000L
+    private val VIDEO_DURATION = 2269500L
+    private val VIDEO_EDIT_MEDIA_TIME = 0L
+    private val VIDEO_SAMPLE_DELTA = 1500L
+    private val CONTAINER_BOXES = setOf("moov", "trak", "mdia", "minf", "stbl", "edts", "dinf", "udta", "meta", "ilst")
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    private data class Box(
-        val type: String, val offset: Int, val size: Int, val headerSize: Int,
-        val data: ByteArray,
-        val children: MutableList<Box> = mutableListOf(),
-        var prefixStart: Int = 0, var prefixEnd: Int = 0
-    ) {
-        val contentStart get() = offset + headerSize
-        val end          get() = offset + size
+    private class Mp4Box(
+        val type: String, val offset: Int, val size: Long, val headerSize: Int,
+        val contentStart: Int, val end: Int, val path: String, val data: ByteArray,
+        var children: List<Mp4Box> = emptyList(), var prefixStart: Int = 0, var prefixEnd: Int = 0
+    )
+
+    private fun getUint32(buf: ByteArray, offset: Int): Long {
+        return ((buf[offset].toLong() and 0xFF) shl 24) or
+               ((buf[offset + 1].toLong() and 0xFF) shl 16) or
+               ((buf[offset + 2].toLong() and 0xFF) shl 8) or
+               (buf[offset + 3].toLong() and 0xFF)
     }
 
-    private fun u32(d: ByteArray, o: Int): Long =
-        ((d[o].toLong() and 0xFF) shl 24) or ((d[o+1].toLong() and 0xFF) shl 16) or
-        ((d[o+2].toLong() and 0xFF) shl 8)  or (d[o+3].toLong() and 0xFF)
-
-    private fun pu32(b: ByteArray, o: Int, v: Long) {
-        b[o]=(( v shr 24) and 0xFF).toByte(); b[o+1]=((v shr 16) and 0xFF).toByte()
-        b[o+2]=((v shr 8) and 0xFF).toByte(); b[o+3]=(v and 0xFF).toByte()
+    private fun setUint32(buf: ByteArray, offset: Int, value: Long) {
+        buf[offset] = ((value shr 24) and 0xFF).toByte()
+        buf[offset + 1] = ((value shr 16) and 0xFF).toByte()
+        buf[offset + 2] = ((value shr 8) and 0xFF).toByte()
+        buf[offset + 3] = (value and 0xFF).toByte()
     }
 
-    private fun boxType(d: ByteArray, o: Int) = String(byteArrayOf(d[o],d[o+1],d[o+2],d[o+3]))
+    private fun getBoxType(buf: ByteArray, offset: Int) = String(buf, offset, 4)
 
-    private fun parseBoxes(data: ByteArray, start: Int = 0, end: Int = data.size): List<Box> {
-        val boxes = mutableListOf<Box>()
+    private fun setBoxType(buf: ByteArray, offset: Int, type: String) {
+        val bytes = type.toByteArray()
+        for (i in 0..3) buf[offset + i] = bytes[i]
+    }
+
+    private fun readBox(data: ByteArray, offset: Int, end: Int, parentPath: String = ""): Mp4Box {
+        if (offset + 8 > end) throw Exception("MP4 invalido: caixa incompleta.")
+        val smallSize = getUint32(data, offset)
+        val type = getBoxType(data, offset + 4)
+        var size = smallSize
+        var headerSize = 8
+
+        if (smallSize == 1L) {
+            if (offset + 16 > end) throw Exception("MP4 invalido: caixa $type incompleta.")
+            val high = getUint32(data, offset + 8)
+            val low = getUint32(data, offset + 12)
+            size = (high shl 32) or low
+            headerSize = 16
+        } else if (smallSize == 0L) {
+            size = (end - offset).toLong()
+        }
+        if (size < headerSize || offset + size > end) throw Exception("MP4 invalido: tamanho incorreto na caixa $type.")
+
+        return Mp4Box(type, offset, size, headerSize, offset + headerSize, offset + size.toInt(),
+            if (parentPath.isNotEmpty()) "$parentPath/$type" else type, data, prefixStart = offset + headerSize, prefixEnd = offset + headerSize)
+    }
+
+    private fun childStartForBox(box: Mp4Box) = if (box.type == "meta") box.contentStart + 4 else box.contentStart
+
+    private fun parseBoxes(data: ByteArray, start: Int = 0, end: Int = data.size, parentPath: String = ""): List<Mp4Box> {
+        val boxes = mutableListOf<Mp4Box>()
         var offset = start
         while (offset + 8 <= end) {
-            val small = u32(data, offset)
-            val type  = boxType(data, offset + 4)
-            val (size, hdr) = when {
-                small == 1L  -> {
-                    val h = u32(data, offset+8); val l = u32(data, offset+12)
-                    Pair(h * 4294967296L + l, 16)
-                }
-                small == 0L  -> Pair((end - offset).toLong(), 8)
-                else         -> Pair(small, 8)
-            }
-            val box = Box(type, offset, size.toInt(), hdr, data,
-                prefixStart = offset + hdr, prefixEnd = offset + hdr)
-            if (CONTAINER_BOXES.contains(type)) {
-                val cs = if (type == "meta") box.contentStart + 4 else box.contentStart
-                box.prefixEnd = cs
-                box.children.addAll(parseBoxes(data, cs, box.end))
+            val box = readBox(data, offset, end, parentPath)
+            if (CONTAINER_BOXES.contains(box.type)) {
+                val childStart = childStartForBox(box)
+                if (childStart > box.end) throw Exception("MP4 invalido: container ${box.type} curto demais.")
+                box.prefixStart = box.contentStart
+                box.prefixEnd = childStart
+                box.children = parseBoxes(data, childStart, box.end, box.path)
             }
             boxes.add(box)
-            offset += size.toInt()
+            offset = box.end
         }
         return boxes
     }
 
-    private fun findChild(box: Box, type: String) = box.children.find { it.type == type }
-    private fun findDesc(box: Box, path: List<String>): Box? {
-        var c: Box? = box
-        for (t in path) { c = c?.let { findChild(it, t) } ?: return null }
-        return c
-    }
-    private fun findTop(boxes: List<Box>, type: String) = boxes.find { it.type == type }
-    private fun handlerType(trak: Box): String? {
-        val hdlr = findDesc(trak, listOf("mdia","hdlr")) ?: return null
-        return if (hdlr.offset + 20 <= hdlr.end) boxType(hdlr.data, hdlr.offset + 16) else null
-    }
-
-    private fun parseStsz(stsz: Box): List<Long> {
-        val sampleSize = u32(stsz.data, stsz.offset + 12)
-        val count      = u32(stsz.data, stsz.offset + 16).toInt()
-        if (sampleSize != 0L) return List(count) { sampleSize }
-        val ts = stsz.offset + 20
-        return List(count) { i -> u32(stsz.data, ts + i * 4) }
-    }
-
-    private fun parseStco(stco: Box): List<Long> {
-        val count = u32(stco.data, stco.offset + 12).toInt()
-        val ts    = stco.offset + 16
-        return List(count) { i -> u32(stco.data, ts + i * 4) }
-    }
-
-    private fun parseStsc(stsc: Box): List<Triple<Long,Long,Long>> {
-        val count = u32(stsc.data, stsc.offset + 12).toInt()
-        val ts    = stsc.offset + 16
-        return List(count) { i ->
-            val b = ts + i * 12
-            Triple(u32(stsc.data,b), u32(stsc.data,b+4), u32(stsc.data,b+8))
+    private fun findChild(box: Mp4Box, type: String) = box.children.find { it.type == type }
+    
+    private fun findDescendant(box: Mp4Box, path: List<String>): Mp4Box? {
+        var current: Mp4Box? = box
+        for (type in path) {
+            current = current?.let { findChild(it, type) } ?: return null
         }
+        return current
+    }
+
+    private fun handlerTypeForTrak(trak: Mp4Box): String? {
+        val hdlr = findDescendant(trak, listOf("mdia", "hdlr")) ?: return null
+        if (hdlr.offset + 20 > hdlr.end) return null
+        return getBoxType(hdlr.data, hdlr.offset + 16)
+    }
+
+    private fun parseStsz(stsz: Mp4Box): List<Long> {
+        val sampleSize = getUint32(stsz.data, stsz.offset + 12)
+        val count = getUint32(stsz.data, stsz.offset + 16).toInt()
+        if (sampleSize != 0L) return List(count) { sampleSize }
+        val tableStart = stsz.offset + 20
+        val sizes = mutableListOf<Long>()
+        for (i in 0 until count) sizes.add(getUint32(stsz.data, tableStart + i * 4))
+        return sizes
+    }
+
+    private fun parseStco(stco: Mp4Box): List<Long> {
+        val count = getUint32(stco.data, stco.offset + 12).toInt()
+        val tableStart = stco.offset + 16
+        val offsets = mutableListOf<Long>()
+        for (i in 0 until count) offsets.add(getUint32(stco.data, tableStart + i * 4))
+        return offsets
+    }
+
+    private fun parseStsc(stsc: Mp4Box): List<LongArray> {
+        val count = getUint32(stsc.data, stsc.offset + 12).toInt()
+        val tableStart = stsc.offset + 16
+        val rows = mutableListOf<LongArray>()
+        for (i in 0 until count) {
+            val offset = tableStart + i * 12
+            rows.add(longArrayOf(getUint32(stsc.data, offset), getUint32(stsc.data, offset + 4), getUint32(stsc.data, offset + 8)))
+        }
+        return rows
     }
 
     private fun makeBox(type: String, payload: ByteArray): ByteArray {
-        val buf = ByteArray(8 + payload.size)
-        pu32(buf, 0, (8 + payload.size).toLong())
-        type.forEachIndexed { i, c -> buf[4+i] = c.code.toByte() }
-        System.arraycopy(payload, 0, buf, 8, payload.size)
-        return buf
+        val size = 8 + payload.size
+        val box = ByteArray(size)
+        setUint32(box, 0, size.toLong())
+        setBoxType(box, 4, type)
+        System.arraycopy(payload, 0, box, 8, payload.size)
+        return box
     }
 
-    private fun boxBytes(box: Box) = box.data.copyOfRange(box.offset, box.end)
-
-    private fun concat(parts: List<ByteArray>): ByteArray {
-        val total = parts.sumOf { it.size }
-        val out   = ByteArray(total); var pos = 0
-        parts.forEach { System.arraycopy(it, 0, out, pos, it.size); pos += it.size }
-        return out
-    }
-
-    // ── Box builders (persis popup.js) ───────────────────────────────────────
-    private fun buildMdhd(mdhd: Box): ByteArray {
-        val p = mdhd.data.copyOfRange(mdhd.contentStart, mdhd.end).copyOf()
-        if (p[0].toInt() == 1) { pu32(p,24,0L); pu32(p,28,VIDEO_TIMESCALE); pu32(p,32,0L); pu32(p,36,VIDEO_DURATION) }
-        else                   { pu32(p,12,VIDEO_TIMESCALE); pu32(p,16,VIDEO_DURATION) }
-        return makeBox("mdhd", p)
-    }
-
-    private fun buildElst(elst: Box): ByteArray {
-        val p   = elst.data.copyOfRange(elst.contentStart, elst.end).copyOf()
-        val ver = p[0].toInt()
-        val cnt = u32(p, 4).toInt()
-        if (cnt >= 1) {
-            if (ver == 1) { pu32(p,8,0L);pu32(p,12,VIDEO_DURATION);pu32(p,16,0L);pu32(p,20,VIDEO_EDIT_MEDIA_TIME) }
-            else          { pu32(p,8,VIDEO_DURATION);pu32(p,12,VIDEO_EDIT_MEDIA_TIME) }
+    private fun concatBytes(parts: List<ByteArray>): ByteArray {
+        var total = 0
+        for (p in parts) total += p.size
+        val output = ByteArray(total)
+        var offset = 0
+        for (p in parts) {
+            System.arraycopy(p, 0, output, offset, p.size)
+            offset += p.size
         }
-        return makeBox("elst", p)
+        return output
     }
 
-    private fun buildStts(real: Int, fake: Int): ByteArray {
-        val p = ByteArray(4 + 4 + 2*8)
-        pu32(p,4,2L); pu32(p,8,real.toLong()); pu32(p,12,VIDEO_SAMPLE_DELTA)
-        pu32(p,16,fake.toLong()); pu32(p,20,VIDEO_SAMPLE_DELTA)
-        return makeBox("stts", p)
+    private fun boxBytes(box: Mp4Box) = box.data.copyOfRange(box.offset, box.end)
+    private fun boxPayload(box: Mp4Box) = box.data.copyOfRange(box.contentStart, box.end)
+
+    private fun buildMdhd(box: Mp4Box): ByteArray {
+        val payload = boxPayload(box)
+        setUint32(payload, 12, VIDEO_TIMESCALE)
+        setUint32(payload, 16, VIDEO_DURATION)
+        return makeBox("mdhd", payload)
     }
 
-    private fun buildStsz(orig: List<Long>, fake: Int): ByteArray {
-        val total = orig.size + fake
-        val p = ByteArray(4 + 4 + total*4); pu32(p,4,total.toLong())
-        var off = 8; orig.forEach { pu32(p,off,it); off+=4 }
-        repeat(fake) { pu32(p,off,FAKE_SAMPLE_SIZE); off+=4 }
-        return makeBox("stsz", p)
+    private fun buildElst(box: Mp4Box): ByteArray {
+        val payload = boxPayload(box)
+        setUint32(payload, 12, VIDEO_EDIT_MEDIA_TIME)
+        return makeBox("elst", payload)
     }
 
-    private fun buildStsc(orig: List<Triple<Long,Long,Long>>, chunkCount: Int): ByteArray {
-        val rows = orig.toMutableList()
-        if (rows.lastOrNull()?.second != 1L) rows.add(Triple((chunkCount+1).toLong(),1L,1L))
-        val p = ByteArray(4 + 4 + rows.size*12); pu32(p,4,rows.size.toLong())
-        var off = 8; rows.forEach { (f,spc,sdi) -> pu32(p,off,f);pu32(p,off+4,spc);pu32(p,off+8,sdi);off+=12 }
-        return makeBox("stsc", p)
+    private fun buildStts(realSampleCount: Long, fakeSampleCount: Long): ByteArray {
+        val payload = ByteArray(4 + 4 + 8 + 8)
+        setUint32(payload, 4, 2L)
+        setUint32(payload, 8, realSampleCount)
+        setUint32(payload, 12, VIDEO_SAMPLE_DELTA)
+        setUint32(payload, 16, fakeSampleCount)
+        setUint32(payload, 20, VIDEO_SAMPLE_DELTA)
+        return makeBox("stts", payload)
     }
 
-    private fun buildStco(orig: List<Long>, delta: Long, fakeOff: Long? = null, fake: Int = 0): ByteArray {
-        val count = orig.size + (if (fakeOff != null) fake else 0)
-        val p = ByteArray(4 + 4 + count*4); pu32(p,4,count.toLong())
-        var off = 8
-        orig.forEach { pu32(p,off,it+delta); off+=4 }
-        if (fakeOff != null) repeat(fake) { pu32(p,off,fakeOff); off+=4 }
-        return makeBox("stco", p)
+    private fun buildStsz(originalSizes: List<Long>, fakeSampleCount: Long): ByteArray {
+        val totalSamples = originalSizes.size + fakeSampleCount.toInt()
+        val payload = ByteArray(4 + 4 + 4 + totalSamples * 4)
+        setUint32(payload, 8, totalSamples.toLong())
+        var offset = 12
+        for (s in originalSizes) { setUint32(payload, offset, s); offset += 4 }
+        for (i in 0 until fakeSampleCount.toInt()) { setUint32(payload, offset, FAKE_SAMPLE_SIZE); offset += 4 }
+        return makeBox("stsz", payload)
     }
 
-    private fun rebuildBox(box: Box, rep: Map<Box,ByteArray>): ByteArray {
-        rep[box]?.let { return it }
+    private fun buildStsc(originalRows: List<LongArray>, originalChunkCount: Long): ByteArray {
+        val rows = originalRows.map { it.copyOf() }.toMutableList()
+        if (rows.isEmpty() || rows.last()[1] != 1L) rows.add(longArrayOf(originalChunkCount + 1, 1L, 1L))
+        val payload = ByteArray(4 + 4 + rows.size * 12)
+        setUint32(payload, 4, rows.size.toLong())
+        var offset = 8
+        for (row in rows) {
+            setUint32(payload, offset, row[0]); setUint32(payload, offset + 4, row[1]); setUint32(payload, offset + 8, row[2])
+            offset += 12
+        }
+        return makeBox("stsc", payload)
+    }
+
+    private fun buildStco(originalOffsets: List<Long>, delta: Long, fakeOffset: Long?, fakeSampleCount: Long): ByteArray {
+        val count = originalOffsets.size + (if (fakeOffset == null) 0 else fakeSampleCount.toInt())
+        val payload = ByteArray(4 + 4 + count * 4)
+        setUint32(payload, 4, count.toLong())
+        var tableOffset = 8
+        for (off in originalOffsets) { setUint32(payload, tableOffset, off + delta); tableOffset += 4 }
+        if (fakeOffset != null) {
+            for (i in 0 until fakeSampleCount.toInt()) { setUint32(payload, tableOffset, fakeOffset); tableOffset += 4 }
+        }
+        return makeBox("stco", payload)
+    }
+
+    private fun rebuildBox(box: Mp4Box, replacements: Map<Mp4Box, ByteArray>): ByteArray {
+        if (replacements.containsKey(box)) return replacements[box]!!
         if (box.children.isEmpty()) return boxBytes(box)
-        val parts = mutableListOf(box.data.copyOfRange(box.prefixStart, box.prefixEnd))
-        box.children.forEach { parts.add(rebuildBox(it, rep)) }
-        return makeBox(box.type, concat(parts))
+        val parts = mutableListOf<ByteArray>()
+        parts.add(box.data.copyOfRange(box.prefixStart, box.prefixEnd))
+        for (child in box.children) parts.add(rebuildBox(child, replacements))
+        return makeBox(box.type, concatBytes(parts))
     }
 
-    private fun collectStcos(moov: Box): List<Box> {
-        val result = mutableListOf<Box>()
-        moov.children.filter { it.type == "trak" }.forEach { trak ->
-            val stbl = findDesc(trak, listOf("mdia","minf","stbl")) ?: return@forEach
-            // reject co64
-            if (findChild(stbl, "co64") != null) throw Exception("File pakai co64, tidak didukung.")
-            findChild(stbl, "stco")?.let { result.add(it) }
-        }
-        return result
-    }
+    // ── INTI SHARK SAMPLE TABLE METHOD ──────────────────────────────────────
+    private fun patchSharkSampleTableMethod(data: ByteArray): ByteArray {
+        val topLevel = parseBoxes(data)
+        val ftyp = topLevel.find { it.type == "ftyp" } ?: throw Exception("MP4 ftyp box not found")
+        val moov = topLevel.find { it.type == "moov" } ?: throw Exception("MP4 moov box not found")
+        val mdat = topLevel.find { it.type == "mdat" } ?: throw Exception("MP4 mdat box not found")
 
-    // ── MAIN: full rebuild seperti popup.js ───────────────────────────────────
-    fun patch(input: ByteArray): ByteArray {
-        val top  = parseBoxes(input)
-        val ftyp = findTop(top, "ftyp") ?: throw Exception("Box ftyp tidak ditemukan.")
-        val moov = findTop(top, "moov") ?: throw Exception("Box moov tidak ditemukan.")
-        val mdat = findTop(top, "mdat") ?: throw Exception("Box mdat tidak ditemukan.")
+        val videoTrak = moov.children.find { it.type == "trak" && handlerTypeForTrak(it) == "vide" } ?: throw Exception("Video track not found")
+        val stbl = findDescendant(videoTrak, listOf("mdia", "minf", "stbl")) ?: throw Exception("stbl missing")
+        val mdhd = findDescendant(videoTrak, listOf("mdia", "mdhd")) ?: throw Exception("mdhd missing")
+        val elst = findDescendant(videoTrak, listOf("edts", "elst")) ?: throw Exception("elst missing")
+        val stts = findChild(stbl, "stts") ?: throw Exception("stts missing")
+        val stsc = findChild(stbl, "stsc") ?: throw Exception("stsc missing")
+        val stsz = findChild(stbl, "stsz") ?: throw Exception("stsz missing")
+        val stco = findChild(stbl, "stco") ?: throw Exception("stco missing")
 
-        val videoTrak = moov.children.find { it.type == "trak" && handlerType(it) == "vide" }
-            ?: throw Exception("Track video tidak ditemukan.")
+        val originalSizes = parseStsz(stsz)
+        val realSampleCount = originalSizes.size.toLong()
+        val fakeSampleCount = realSampleCount * 9L
 
-        val stbl = findDesc(videoTrak, listOf("mdia","minf","stbl"))
-            ?: throw Exception("Box stbl tidak ditemukan.")
-        val mdhd = findDesc(videoTrak, listOf("mdia","mdhd"))
-            ?: throw Exception("Box mdhd tidak ditemukan.")
-        val elst = findDesc(videoTrak, listOf("edts","elst")) // nullable — opsional
-        val stts = findChild(stbl,"stts") ?: throw Exception("Box stts tidak ditemukan.")
-        val stsc = findChild(stbl,"stsc") ?: throw Exception("Box stsc tidak ditemukan.")
-        val stsz = findChild(stbl,"stsz") ?: throw Exception("Box stsz tidak ditemukan.")
-        val stco = findChild(stbl,"stco") ?: throw Exception("Box stco tidak ditemukan.")
-
-        val origSizes  = parseStsz(stsz)
-        val realCount  = origSizes.size
-        val fakeCount  = realCount * 9   // sama persis popup.js
-        val origStscR  = parseStsc(stsc)
-        val origStcoO  = parseStco(stco)
-        val stcoBoxes  = collectStcos(moov)
-        val preserved  = top.filter { it.type !in listOf("ftyp","moov","mdat") }.map { boxBytes(it) }
-
-        val fixed = mutableMapOf<Box,ByteArray>(
-            mdhd to buildMdhd(mdhd),
-            stts to buildStts(realCount, fakeCount),
-            stsc to buildStsc(origStscR, origStcoO.size),
-            stsz to buildStsz(origSizes, fakeCount)
-        )
-        if (elst != null) fixed[elst] = buildElst(elst)
-
-        // Pass 1 — placeholder delta=0
-        val ph = HashMap(fixed)
-        stcoBoxes.forEach { s -> ph[s] = buildStco(parseStco(s), 0L, if (s===stco) 0L else null, fakeCount) }
-        val moovPh    = rebuildBox(moov, ph)
-        val preservedB= concat(preserved)
-        val oldMdatPay= input.copyOfRange(mdat.contentStart, mdat.end)
-        val newMdatStart0 = ftyp.size + moovPh.size + preservedB.size + 8L
-        var delta     = newMdatStart0 - mdat.contentStart
-        var fakeOff   = newMdatStart0 + oldMdatPay.size
-
-        // Pass 2
-        var fr = HashMap(fixed)
-        stcoBoxes.forEach { s -> fr[s] = buildStco(parseStco(s), delta, if (s===stco) fakeOff else null, fakeCount) }
-        var moovNew   = rebuildBox(moov, fr)
-        val newMdatStart1 = ftyp.size + moovNew.size + preservedB.size + 8L
-        delta   = newMdatStart1 - mdat.contentStart
-        fakeOff = newMdatStart1 + oldMdatPay.size
-
-        // Pass 3 — final
-        fr = HashMap(fixed)
-        stcoBoxes.forEach { s -> fr[s] = buildStco(parseStco(s), delta, if (s===stco) fakeOff else null, fakeCount) }
-        moovNew = rebuildBox(moov, fr)
-
-        return concat(listOf(boxBytes(ftyp), moovNew, preservedB, makeBox("mdat", concat(listOf(oldMdatPay, FAKE_SAMPLE_BYTES)))))
-    }
-
-    // ── Z-Payload + encoder (Kythera 60fps) ──────────────────────────────────
-    fun patchKythera60(input: ByteArray): ByteArray {
-        val buf = input.copyOf()
-        // Z-Payload
-        var mdatPos = 0
-        while (mdatPos + 8 <= buf.size) {
-            val sz = ((buf[mdatPos].toLong() and 0xFF) shl 24) or ((buf[mdatPos+1].toLong() and 0xFF) shl 16) or
-                     ((buf[mdatPos+2].toLong() and 0xFF) shl 8)  or (buf[mdatPos+3].toLong() and 0xFF)
-            if (String(byteArrayOf(buf[mdatPos+4],buf[mdatPos+5],buf[mdatPos+6],buf[mdatPos+7])) == "mdat") {
-                val zt = mdatPos + 10
-                for (i in 0 until 128) if (zt+i < buf.size) buf[zt+i] = 0x5A
-                break
+        val originalStscRows = parseStsc(stsc)
+        val originalChunkOffsets = parseStco(stco)
+        val stcoBoxes = mutableListOf<Mp4Box>()
+        moov.children.filter { it.type == "trak" }.forEach { t ->
+            findDescendant(t, listOf("mdia", "minf", "stbl"))?.let { s ->
+                if (findChild(s, "co64") != null) throw Exception("co64 not supported yet")
+                findChild(s, "stco")?.let { stcoBoxes.add(it) }
             }
-            if (sz < 8) break
-            mdatPos += sz.toInt()
         }
-        // Encoder tag
-        val lavf   = "Lavf".toByteArray()
+
+        val preservedTopLevel = topLevel.filter { it.type !in listOf("ftyp", "moov", "mdat") }.map { boxBytes(it) }
+        val fixedReplacements = mapOf(
+            mdhd to buildMdhd(mdhd),
+            elst to buildElst(elst),
+            stts to buildStts(realSampleCount, fakeSampleCount),
+            stsc to buildStsc(originalStscRows, originalChunkOffsets.size.toLong()),
+            stsz to buildStsz(originalSizes, fakeSampleCount)
+        )
+
+        // Pass 1: Kalkulasi Moov size & delta
+        val placeholderReplacements = HashMap(fixedReplacements)
+        stcoBoxes.forEach { b -> placeholderReplacements[b] = buildStco(parseStco(b), 0L, if (b == stco) 0L else null, fakeSampleCount) }
+        val moovPlaceholder = rebuildBox(moov, placeholderReplacements)
+
+        val preservedBytes = concatBytes(preservedTopLevel)
+        val oldMdatPayload = boxPayload(mdat)
+        val newMdatPayloadStart = ftyp.size + moovPlaceholder.size + preservedBytes.size + 8
+        var delta = (newMdatPayloadStart - mdat.contentStart).toLong()
+        var fakeOffset = (newMdatPayloadStart + oldMdatPayload.size).toLong()
+
+        // Pass 2: Rebuild stco dengan delta pergeseran
+        var finalReplacements = HashMap(fixedReplacements)
+        stcoBoxes.forEach { b -> finalReplacements[b] = buildStco(parseStco(b), delta, if (b == stco) fakeOffset else null, fakeSampleCount) }
+        var moovNew = rebuildBox(moov, finalReplacements)
+
+        // Pass 3: Koreksi offset mdat setelah rebuild
+        val recalculatedMdatPayloadStart = ftyp.size + moovNew.size + preservedBytes.size + 8
+        delta = (recalculatedMdatPayloadStart - mdat.contentStart).toLong()
+        fakeOffset = (recalculatedMdatPayloadStart + oldMdatPayload.size).toLong()
+
+        finalReplacements = HashMap(fixedReplacements)
+        stcoBoxes.forEach { b -> finalReplacements[b] = buildStco(parseStco(b), delta, if (b == stco) fakeOffset else null, fakeSampleCount) }
+        moovNew = rebuildBox(moov, finalReplacements)
+
+        val mdatPayloadNew = concatBytes(listOf(oldMdatPayload, FAKE_SAMPLE_BYTES))
+        val mdatNew = makeBox("mdat", mdatPayloadNew)
+
+        return concatBytes(listOf(boxBytes(ftyp), moovNew, preservedBytes, mdatNew))
+    }
+
+    // ── Encoder string → Lavf59.16.100 (Masih dipertahankan) ─────────────
+    private fun patchEncoder(buf: ByteArray) {
+        val lavf = "Lavf".toByteArray()
         val target = "Lavf59.16.100".toByteArray()
         var i = 0
         while (i <= buf.size - 16) {
-            if (buf[i]==lavf[0]&&buf[i+1]==lavf[1]&&buf[i+2]==lavf[2]&&buf[i+3]==lavf[3]&&buf[i+4] in 0x30..0x39) {
-                var end = i+4; while (end<buf.size&&buf[end]>=0x20&&buf[end]<0x7F) end++
-                val ol = end - i; for (j in 0 until ol) buf[i+j] = if (j<target.size) target[j] else 0x00
+            if (buf[i] == lavf[0] && buf[i+1] == lavf[1] && buf[i+2] == lavf[2] && buf[i+3] == lavf[3] && buf[i+4] in 0x30..0x39) {
+                var end = i + 4
+                while (end < buf.size && buf[end] >= 0x20 && buf[end] < 0x7F) end++
+                val ol = end - i
+                for (j in 0 until ol) buf[i+j] = if (j < target.size) target[j] else 0x00
                 break
             }
             i++
         }
+    }
+
+    // ── Z-Payload (Kythera 60fps only) ───────────────────────────────────
+    private fun zPayload(buf: ByteArray) {
+        var mdatOff = -1
+        var pos = 0
+        while (pos + 8 <= buf.size) {
+            val sz = getUint32(buf, pos).toInt()
+            if (sz < 8) break
+            if (getBoxType(buf, pos) == "mdat") { mdatOff = pos; break }
+            pos += sz
+        }
+        if (mdatOff == -1) return
+        val zt = mdatOff + 10
+        for (i in 0 until 128) if (zt + i < buf.size) buf[zt + i] = 0x5A
+    }
+
+    // ── PUBLIC ────────────────────────────────────────────────────────────
+    fun patchShark(input: ByteArray): ByteArray {
+        val newBuf = patchSharkSampleTableMethod(input)
+        patchEncoder(newBuf)
+        return newBuf
+    }
+
+    fun patchKythera60(input: ByteArray): ByteArray {
+        val buf = input.copyOf()
+        zPayload(buf)
+        patchEncoder(buf)
         return buf
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 // PIPELINE
-// ─────────────────────────────────────────────────────────────────────────────
-private suspend fun runPatchPipeline(
-    context:    android.content.Context,
+// ═══════════════════════════════════════════════════════════════════════════
+private suspend fun runPipeline(
+    context:    Context,
     sourceUri:  Uri,
-    mode:       PatchMode,
-    preset:     EncodePreset,
+    mode:       PipelineMode,
+    crf:        Int,
+    preset:     String,
     onProgress: (String, Int) -> Unit
-): File? = withContext(Dispatchers.IO) {
-    val ts        = System.currentTimeMillis()
-    val cacheDir  = context.cacheDir
-    val inputFile = File(cacheDir, "ky_in_$ts.mp4")
-    val encFile   = File(cacheDir, "ky_enc_$ts.mp4")
-    val outFile   = File(cacheDir, "ky_out_$ts.mp4")
+): Uri? = withContext(Dispatchers.IO) {
+
+    val ts         = System.currentTimeMillis()
+    val cacheDir   = context.cacheDir
+    val inputFile  = File(cacheDir, "ky_in_$ts.mp4")
+    val encFile    = File(cacheDir, "ky_enc_$ts.mp4")
+    val outputFile = File(cacheDir, "ky_out_$ts.mp4")
 
     try {
         onProgress("📂 Menyalin video...", 5)
@@ -373,74 +444,59 @@ private suspend fun runPatchPipeline(
         } ?: return@withContext null
 
         when (mode) {
-            PatchMode.SHARK_ONLY -> {
+            PipelineMode.PATCH_ONLY -> {
                 onProgress("🩹 Membaca video...", 20)
                 val raw = inputFile.readBytes()
-                onProgress("🩹 Rebuilding MP4 sample tables...", 50)
-                val patched = SharkPatcher.patch(raw)
-                onProgress("🩹 Menulis output...", 90)
-                outFile.writeBytes(patched)
+                onProgress("🩹 Rebuilding Shark MP4 Table...", 60)
+                outputFile.writeBytes(SharkPatcher.patchShark(raw))
             }
 
-            PatchMode.ENCODE_SHARK -> {
+            PipelineMode.ENCODE_PATCH -> {
                 onProgress("🎬 Menyiapkan encoder...", 10)
                 var lastP = 10
                 FFmpegKitConfig.enableStatisticsCallback { stats ->
                     val ratio = (stats.time / 1000.0).coerceIn(0.0, 1.0)
-                    val p = (10 + ratio * 65).toInt().coerceAtMost(75)
-                    if (p > lastP) { lastP = p; onProgress("🎬 Encoding ${(ratio*100).toInt()}%...", p) }
+                    val p = (10 + ratio * 60).toInt().coerceAtMost(70)
+                    if (p > lastP) {
+                        lastP = p
+                        onProgress("🎬 Encoding ${((ratio) * 100).toInt()}%...", p)
+                    }
                 }
+
                 val cmd = "-y -i \"${inputFile.absolutePath}\" " +
                           "-vf format=yuv420p " +
-                          "-c:v libx264 -preset ${preset.preset} -crf ${preset.crf} " +
+                          "-c:v libx264 -preset $preset -crf $crf " +
                           "-bf 0 -movflags +faststart " +
-                          "-c:a aac -b:a 128k " +
+                          "-c:a aac -b:a 128k -shortest " +
                           "-metadata copyright=\"By Kythera\" " +
                           "-metadata artist=\"D4nzxml\" " +
                           "\"${encFile.absolutePath}\""
+
                 val session = FFmpegKit.execute(cmd)
                 FFmpegKitConfig.enableStatisticsCallback(null)
-                if (!ReturnCode.isSuccess(session.returnCode))
-                    throw Exception("Encode gagal:\n${session.allLogsAsString?.takeLast(500)}")
 
-                onProgress("🩹 Rebuilding MP4 sample tables...", 80)
-                val raw     = encFile.readBytes()
-                val patched = SharkPatcher.patch(raw)
-                onProgress("🩹 Menulis output...", 95)
-                outFile.writeBytes(patched)
-            }
-
-            PatchMode.ENCODE_ONLY -> {
-                onProgress("🔧 Encoding...", 10)
-                var lastP = 10
-                FFmpegKitConfig.enableStatisticsCallback { stats ->
-                    val ratio = (stats.time / 1000.0).coerceIn(0.0, 1.0)
-                    val p = (10 + ratio * 85).toInt().coerceAtMost(95)
-                    if (p > lastP) { lastP = p; onProgress("🔧 Encoding ${(ratio*100).toInt()}%...", p) }
+                if (!ReturnCode.isSuccess(session.returnCode)) {
+                    onProgress("❌ Encode gagal", -1)
+                    return@withContext null
                 }
-                val cmd = "-y -i \"${inputFile.absolutePath}\" " +
-                          "-c:v libx264 -preset ${preset.preset} -crf ${preset.crf} " +
-                          "-movflags +faststart -c:a aac -b:a 128k " +
-                          "\"${outFile.absolutePath}\""
-                val session = FFmpegKit.execute(cmd)
-                FFmpegKitConfig.enableStatisticsCallback(null)
-                if (!ReturnCode.isSuccess(session.returnCode))
-                    throw Exception("Encode gagal:\n${session.allLogsAsString?.takeLast(500)}")
+
+                onProgress("🩹 Rebuilding Shark MP4 Table...", 80)
+                outputFile.writeBytes(SharkPatcher.patchShark(encFile.readBytes()))
             }
 
-            PatchMode.KYTHERA_60 -> {
+            PipelineMode.KYTHERA_60 -> {
                 onProgress("⚡ Membaca video...", 20)
                 val raw = inputFile.readBytes()
-                onProgress("⚡ Menyematkan Z-Payload + encoder tag...", 60)
-                outFile.writeBytes(SharkPatcher.patchKythera60(raw))
+                onProgress("⚡ Menyematkan Z-Payload & encoder tag...", 60)
+                outputFile.writeBytes(SharkPatcher.patchKythera60(raw))
             }
         }
 
         onProgress("✅ Selesai!", 100)
-        outFile
+        Uri.fromFile(outputFile)
 
     } catch (e: Exception) {
-        onProgress("❌ ${e.message?.take(120)}", -1)
+        onProgress("❌ ${e.message}", -1)
         null
     } finally {
         inputFile.delete()
@@ -448,272 +504,234 @@ private suspend fun runPatchPipeline(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ANIMASI (sama dengan TikTokScreen)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// ANIMASI AI SCAN
+// ═══════════════════════════════════════════════════════════════════════════
 @Composable
-private fun PatchAnimation(statusMsg: String, progress: Int) {
-    val inf = rememberInfiniteTransition(label = "patch")
-    val pulse by inf.animateFloat(0.85f, 1.15f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
-    val scanY by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart), label = "scan")
-    val dot   by inf.animateFloat(0.3f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "dot")
+private fun AiScanAnimation(statusMsg: String, progress: Int) {
+    val infiniteTransition = rememberInfiniteTransition(label = "scan")
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.85f, targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
+    )
+    val scanY by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart), label = "scanY"
+    )
+    val dotAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "dot"
+    )
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
         Box(contentAlignment = Alignment.Center) {
-            Box(Modifier.size(90.dp).scale(pulse).clip(CircleShape).background(Color(0x33FFA040)))
+            Box(modifier = Modifier.size(90.dp).scale(pulse).clip(CircleShape).background(Color(0x337C4DFF)))
             Box(
-                Modifier.size(70.dp).clip(CircleShape).background(
-                    Brush.radialGradient(listOf(Color(0xFFFF8C00), Color(0xFF7B3800)))
-                ), contentAlignment = Alignment.Center
-            ) { Text("⚡", fontSize = 28.sp) }
+                modifier = Modifier.size(70.dp).clip(CircleShape)
+                    .background(Brush.radialGradient(listOf(Color(0xFF7C4DFF), Color(0xFF3D1A78)))),
+                contentAlignment = Alignment.Center
+            ) { Text("✦", fontSize = 28.sp, color = Color.White) }
         }
 
-        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF2A2A1E))) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF2A2A3E))
+        ) {
             if (progress in 0..100) {
-                Box(Modifier.fillMaxWidth(progress/100f).fillMaxHeight().background(
-                    Brush.horizontalGradient(listOf(Color(0xFFFF8C00), Color(0xFFFFCC44)))
-                ))
+                Box(modifier = Modifier.fillMaxWidth(progress / 100f).fillMaxHeight()
+                        .background(Brush.horizontalGradient(listOf(Color(0xFF7C4DFF), Color(0xFFB388FF)))))
             }
-            Box(Modifier.fillMaxWidth(scanY).fillMaxHeight().background(Color(0x88FFCC44)))
+            Box(modifier = Modifier.fillMaxWidth(scanY).fillMaxHeight().background(Color(0x88B388FF)))
         }
 
         Text(statusMsg, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(3) { i ->
-                Box(Modifier.size(6.dp).clip(CircleShape).background(
-                    Color(0xFFFF8C00).copy(alpha = if (i==0) dot else 1f - dot*0.3f)
-                ))
+                Box(modifier = Modifier.size(6.dp).clip(CircleShape)
+                    .background(Color(0xFF7C4DFF).copy(alpha = if (i == 0) dotAlpha else 1f - dotAlpha * 0.3f)))
             }
         }
-        if (progress in 0..100) Text("$progress%", color = Color(0xFFFFCC44), fontSize = 12.sp)
+
+        if (progress in 0..100) Text("$progress%", color = Color(0xFFB388FF), fontSize = 12.sp)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// BOTTOM SHEET
+// ═══════════════════════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PatchScreen() {
-    val context = LocalContext.current
-    val scope   = rememberCoroutineScope()
+private fun PipelineSheet(onConfirm: (mode: PipelineMode, crf: Int, preset: String) -> Unit, onDismiss: () -> Unit) {
+    var selectedMode by remember { mutableStateOf(PipelineMode.ENCODE_PATCH) }
+    var selectedCrf by remember { mutableStateOf(18) }
+    var selectedPreset by remember { mutableStateOf("fast") }
 
-    var inputUriString  by rememberSaveable { mutableStateOf<String?>(null) }
-    var isProcessing    by remember { mutableStateOf(false) }
-    var statusMsg       by remember { mutableStateOf("") }
-    var progressVal     by remember { mutableStateOf(0) }
-    var errorLog        by remember { mutableStateOf<String?>(null) }
-    var isSuccess       by remember { mutableStateOf(false) }
-    var savedVideoUri   by remember { mutableStateOf<Uri?>(null) }
-    var selectedMode    by remember { mutableStateOf(PatchMode.SHARK_ONLY) }
-    var selectedPreset  by remember { mutableStateOf(EncodePreset.BALANCED) }
-
-    val inputUri = inputUriString?.let { Uri.parse(it) }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            inputUriString = it.toString()
-            errorLog       = null
-            isSuccess      = false
-            savedVideoUri  = null
-            statusMsg      = "✅ Siap: ${it.lastPathSegment}"
-        }
-    }
-
-    fun process() {
-        if (inputUri == null) return
-        scope.launch {
-            isProcessing = true; isSuccess = false; errorLog = null
-            savedVideoUri = null; progressVal = 0
-
-            val outFile = runPatchPipeline(context, inputUri, selectedMode, selectedPreset) { msg, p ->
-                statusMsg   = msg
-                progressVal = p.coerceAtLeast(0)
-            }
-
-            if (outFile != null && outFile.exists()) {
-                // Simpan ke galeri
-                val fileName = "Kythera_Patched_${System.currentTimeMillis()}.mp4"
-                val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
-                }
-                val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-                uri?.let { dest ->
-                    context.contentResolver.openOutputStream(dest)?.use { out ->
-                        FileInputStream(outFile).use { it.copyTo(out) }
-                    }
-                    outFile.delete()
-                    savedVideoUri = dest
-                }
-                isSuccess  = true
-                statusMsg  = "✅ Tersimpan di Galeri/Kythera"
-            } else {
-                errorLog = statusMsg.removePrefix("❌ ")
-                statusMsg = "❌ Gagal!"
-            }
-            isProcessing = false
-        }
-    }
-
-    Box(Modifier.fillMaxSize()) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF1A1A2E), contentColor = Color.White) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Patch Video", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-            Text("NXT_SHARK537 Method — MP4 Table Rebuild", color = KColor.Orange, fontSize = 13.sp)
-            Spacer(Modifier.height(16.dp))
-
-            // Input
-            GlassCard {
-                KDropZone(
-                    onTap       = { picker.launch("video/*") },
-                    title       = if (inputUri != null) "Ganti Video" else "Pilih Video",
-                    subtitle    = "MP4 — Patch, Encode, atau Keduanya",
-                    icon        = Icons.Rounded.CloudUpload,
-                    accentColor = KColor.Orange
-                )
-                if (statusMsg.isNotEmpty() && !isProcessing && errorLog == null) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(statusMsg, color = if (isSuccess) KColor.Orange else KColor.Text2, fontSize = 13.sp)
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            // Mode selector
-            GlassCard {
-                Text("Mode Proses", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
-                Spacer(Modifier.height(10.dp))
-                PatchMode.entries.forEach { mode ->
+            Text("⚙️ Kythera Pipeline", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF7C4DFF))
+            Text("Mode Proses", fontSize = 13.sp, color = Color(0xFFAAAAAA))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PipelineMode.entries.forEach { mode ->
                     val active = selectedMode == mode
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .background(
-                                if (active) Color(0xFFFF8C00) else Color(0xFF2A2A1E),
-                                RoundedCornerShape(12.dp)
-                            )
-                            .clickable { selectedMode = mode }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment     = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .background(if (active) Color(0xFF7C4DFF) else Color(0xFF2A2A3E), RoundedCornerShape(12.dp))
+                            .clickable { selectedMode = mode }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(mode.icon, fontSize = 20.sp)
-                        Column(Modifier.weight(1f)) {
-                            Text(mode.label, fontWeight = FontWeight.SemiBold,
-                                color = if (active) Color.White else KColor.Text, fontSize = 14.sp)
-                            Text(mode.desc, fontSize = 11.sp,
-                                color = if (active) Color(0xFFFFEECC) else KColor.Text2, lineHeight = 16.sp)
+                        Column {
+                            Text(mode.label, fontWeight = FontWeight.SemiBold, color = if (active) Color.White else Color(0xFFCCCCCC))
+                            Text(mode.desc, fontSize = 11.sp, color = if (active) Color(0xFFDDCCFF) else Color(0xFF777777))
                         }
                     }
                 }
             }
 
-            // Preset (muncul kalau encode)
-            if (selectedMode == PatchMode.ENCODE_SHARK || selectedMode == PatchMode.ENCODE_ONLY) {
-                Spacer(Modifier.height(14.dp))
-                GlassCard {
-                    Text("Kualitas Encode", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        EncodePreset.entries.forEach { p ->
-                            val active = selectedPreset == p
-                            Box(
-                                Modifier.weight(1f)
-                                    .background(
-                                        if (active) Color(0xFFFF8C00) else Color(0xFF2A2A1E),
-                                        RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { selectedPreset = p }
-                                    .padding(vertical = 12.dp, horizontal = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(p.label, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                                    textAlign = TextAlign.Center,
-                                    color = if (active) Color.White else KColor.Text2)
+            if (selectedMode == PipelineMode.ENCODE_PATCH) {
+                Text("Kualitas (CRF)", fontSize = 13.sp, color = Color(0xFFAAAAAA))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf(18 to "Maksimal", 20 to "Seimbang").forEach { (crf, lbl) ->
+                        val active = selectedCrf == crf
+                        Box(
+                            modifier = Modifier.weight(1f).background(if (active) Color(0xFF7C4DFF) else Color(0xFF2A2A3E), RoundedCornerShape(10.dp))
+                                .clickable { selectedCrf = crf }.padding(vertical = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("CRF $crf", fontWeight = FontWeight.Bold, color = if (active) Color.White else Color(0xFFCCCCCC))
+                                Text(lbl, fontSize = 11.sp, color = if (active) Color(0xFFDDCCFF) else Color(0xFF888888))
                             }
                         }
                     }
                 }
-            }
-
-            // Error
-            if (errorLog != null) {
-                Spacer(Modifier.height(14.dp))
-                Column(
-                    Modifier.fillMaxWidth()
-                        .heightIn(max = 200.dp)
-                        .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
-                        .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
-                        .padding(14.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text("⚠️ ERROR", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text(errorLog!!, color = Color(0xFFFFAAAA), fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                Text("Preset Encode", fontSize = 13.sp, color = Color(0xFFAAAAAA))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("ultrafast" to "⚡ Ultrafast", "fast" to "🚀 Fast", "medium" to "🎯 Medium").forEach { (preset, label) ->
+                        val active = selectedPreset == preset
+                        Box(
+                            modifier = Modifier.weight(1f).background(if (active) Color(0xFF7C4DFF) else Color(0xFF2A2A3E), RoundedCornerShape(10.dp))
+                                .clickable { selectedPreset = preset }.padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else Color(0xFFCCCCCC)) }
+                    }
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = { onConfirm(selectedMode, selectedCrf, selectedPreset) },
+                modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF)), shape = RoundedCornerShape(12.dp)
+            ) { Text("🚀 Proses & Upload ke TikTok", modifier = Modifier.padding(vertical = 4.dp)) }
 
-            if (isSuccess && savedVideoUri != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    KPrimaryButton(
-                        label = "Tonton", icon = Icons.Rounded.PlayArrow,
-                        modifier = Modifier.weight(1f), startColor = KColor.Orange, endColor = Color(0xFFD97706),
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(savedVideoUri, "video/mp4")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(intent)
-                        }
-                    )
-                    KPrimaryButton(
-                        label = "Reset", icon = Icons.Rounded.Refresh,
-                        modifier = Modifier.weight(1f), startColor = KColor.Orange, endColor = Color(0xFFD97706),
-                        onClick = {
-                            inputUriString = null; isSuccess = false
-                            statusMsg = ""; savedVideoUri = null; errorLog = null
-                        }
-                    )
-                }
-            } else {
-                KPrimaryButton(
-                    label = "Patch & Download", icon = Icons.Rounded.AutoFixHigh,
-                    enabled = inputUri != null && !isProcessing,
-                    startColor = KColor.Orange, endColor = Color(0xFFD97706),
-                    onClick = ::process
-                )
-            }
-            Spacer(Modifier.height(24.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Batalkan", color = Color(0xFF888888)) }
         }
+    }
+}
 
-        // Overlay processing — style TikTok screen
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN SCREEN
+// ═══════════════════════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TikTokScreen() {
+    val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
+
+    var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var showSheet           by remember { mutableStateOf(false) }
+    var pendingUri          by remember { mutableStateOf<Uri?>(null) }
+    var statusMsg           by remember { mutableStateOf("") }
+    var progressVal         by remember { mutableStateOf(0) }
+    var isProcessing        by remember { mutableStateOf(false) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) { pendingUri = uri; showSheet = true } else { fileChooserCallback?.onReceiveValue(null); fileChooserCallback = null }
+    }
+
+    if (showSheet) {
+        PipelineSheet(
+            onConfirm = { mode, crf, preset ->
+                showSheet = false
+                val src = pendingUri ?: return@PipelineSheet
+                pendingUri = null
+                isProcessing = true
+                statusMsg = "Menyiapkan..."
+                progressVal = 0
+
+                scope.launch {
+                    val resultUri = runPipeline(context, src, mode, crf, preset) { msg, p ->
+                        statusMsg = msg; progressVal = p.coerceAtLeast(0); postNotif(context, "Kythera Pipeline", msg, p)
+                    }
+                    isProcessing = false
+                    dismissNotif(context)
+                    if (resultUri != null) fileChooserCallback?.onReceiveValue(arrayOf(resultUri)) else fileChooserCallback?.onReceiveValue(null)
+                    fileChooserCallback = null
+                    statusMsg = ""; progressVal = 0
+                }
+            },
+            onDismiss = { showSheet = false; pendingUri = null; fileChooserCallback?.onReceiveValue(null); fileChooserCallback = null }
+        )
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory  = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    settings.apply {
+                        javaScriptEnabled = true; domStorageEnabled = true; allowFileAccess = true; mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        useWideViewPort = true; loadWithOverviewMode = true; setSupportZoom(true); builtInZoomControls = true; displayZoomControls = false
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val url = request?.url?.toString() ?: return false
+                            if (url.startsWith("http://") || url.startsWith("https://")) return false
+                            return try {
+                                val intent = if (url.startsWith("intent://")) Intent.parseUri(url, Intent.URI_INTENT_SCHEME) else Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                ctx.startActivity(intent); true
+                            } catch (_: Exception) { true }
+                        }
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            view?.evaluateJavascript("""
+                                var meta = document.querySelector('meta[name="viewport"]');
+                                if (meta) { meta.setAttribute('content','width=1280'); }
+                                else { var m=document.createElement('meta'); m.name='viewport'; m.content='width=1280'; document.head.appendChild(m); }
+                                document.body.style.overflow='auto'; document.documentElement.style.overflow='auto';
+                            """.trimIndent(), null)
+                        }
+                    }
+
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onShowFileChooser(webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?): Boolean {
+                            fileChooserCallback?.onReceiveValue(null); fileChooserCallback = filePathCallback; filePickerLauncher.launch("video/*"); return true
+                        }
+                    }
+                    loadUrl("https://www.tiktok.com/upload")
+                }
+            }
+        )
+
         if (isProcessing) {
             Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 24.dp)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(listOf(Color(0xF01A1400), Color(0xF0200A00))),
-                        RoundedCornerShape(20.dp)
-                    ),
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp).fillMaxWidth().aspectRatio(1.6f)
+                    .background(Brush.verticalGradient(listOf(Color(0xF01A1A2E), Color(0xF0110D2E))), RoundedCornerShape(20.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(28.dp)
-                ) {
-                    Text("KYTHERA PATCHER", fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF8C00), letterSpacing = 4.sp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(24.dp)) {
+                    Text("KYTHERA AI", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C4DFF), letterSpacing = 4.sp)
                     Spacer(Modifier.height(4.dp))
-                    PatchAnimation(statusMsg = statusMsg, progress = progressVal)
+                    AiScanAnimation(statusMsg = statusMsg, progress = progressVal)
                 }
             }
         }
