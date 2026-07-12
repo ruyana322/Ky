@@ -50,7 +50,7 @@ import java.io.FileOutputStream
 enum class PatchLogic(val label: String, val desc: String) {
     PATCH_ONLY(
         "Kythera Patch Only",
-        "Merapikan struktur MP4 & inject Shark Sample Table + MTLib stamp (Tanpa Re-encode)."
+        "Merapikan struktur MP4 & inject Shark Sample Table (Tanpa Re-encode)."
     ),
     ENCODE_PATCH(
         "Encode + Patch",
@@ -58,7 +58,7 @@ enum class PatchLogic(val label: String, val desc: String) {
     ),
     KYTHERA_60FPS(
         "Kythera 60fps",
-        "Menyematkan Z-Payload + MTLib + Encoder String stamp eksklusif Kythera."
+        "Inject Shark Sample Table dengan metadata timescale 60fps."
     )
 }
 
@@ -163,104 +163,6 @@ private object Mp4Engine {
         val hdlr = descend(buf, trak, listOf("mdia", "hdlr")) ?: return ""
         val off = hdlr.contentStart + 8
         return if (off + 4 <= buf.size) cc(buf, off) else ""
-    }
-
-    // ─────────────────────────────────────────────────────────
-    //  PATCH 1 — Z-PAYLOAD
-    //  Isi 128 byte setelah offset mdat+10 dengan 0x5A
-    // ─────────────────────────────────────────────────────────
-
-    private fun patchZPayload(buf: ByteArray) {
-        val mdat = topLevel(buf, "mdat")
-            ?: throw Exception("Struktur video tidak valid. Pastikan file MP4 tidak corrupt.")
-        val zt = mdat.off + 10
-        for (i in 0 until 128) { if (zt + i < buf.size) buf[zt + i] = 0x5A }
-    }
-
-    // ─────────────────────────────────────────────────────────
-    //  PATCH 2 — ENCODER STRING
-    //  Rewrite "Lavf..." → "Lavf59.16.100"
-    // ─────────────────────────────────────────────────────────
-
-    private fun patchEncoderStr(buf: ByteArray) {
-        val lavf   = "Lavf".toByteArray(Charsets.ISO_8859_1)
-        val target = "Lavf59.16.100".toByteArray(Charsets.ISO_8859_1)
-        var i = 0
-        while (i <= buf.size - 16) {
-            if (buf[i] == lavf[0] && buf[i+1] == lavf[1] &&
-                buf[i+2] == lavf[2] && buf[i+3] == lavf[3]) {
-                val nb = buf[i+4].toInt() and 0xFF
-                if (nb in 0x30..0x39) {
-                    var end = i + 4
-                    while (end < buf.size) {
-                        val b = buf[end].toInt() and 0xFF
-                        if (b >= 0x20 && b < 0x7F) end++ else break
-                    }
-                    val ol = end - i
-                    for (j in 0 until ol) buf[i+j] = if (j < target.size) target[j] else 0x00
-                    return
-                }
-            }
-            i++
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────
-    //  PATCH 3 — MTLib freeform atom
-    //  Inject ---- box (mean/name/data) ke moov/udta
-    // ─────────────────────────────────────────────────────────
-
-    private fun injectMTLib(buf: ByteArray): ByteArray {
-        fun meanBox(): ByteArray {
-            val d = "com.apple.quicktime".toByteArray(Charsets.ISO_8859_1)
-            return box("mean", ByteArray(4) + d)
-        }
-        fun nameBox(): ByteArray {
-            val k = "MTLib".toByteArray(Charsets.ISO_8859_1)
-            return box("name", ByteArray(4) + k)
-        }
-        fun dataBox(): ByteArray {
-            val v = "PyPVGCodec".toByteArray(Charsets.ISO_8859_1)
-            val p = ByteArray(4 + v.size)
-            w32(p, 0, 1); v.copyInto(p, 4)
-            return box("data", p)
-        }
-        val freeform = box("----", cat(meanBox(), nameBox(), dataBox()))
-        val moov = topLevel(buf, "moov") ?: return buf
-        val udta = child(buf, moov, "udta")
-
-        return if (udta != null) {
-            val ins = udta.end
-            val out = ByteArray(buf.size + freeform.size)
-            buf.copyInto(out, 0, 0, ins)
-            freeform.copyInto(out, ins)
-            buf.copyInto(out, ins + freeform.size, ins)
-            w32(out, moov.off, moov.size + freeform.size)
-            w32(out, udta.off, udta.size + freeform.size)
-            out
-        } else {
-            val udtaBox = box("udta", freeform)
-            val ins = moov.end
-            val out = ByteArray(buf.size + udtaBox.size)
-            buf.copyInto(out, 0, 0, ins)
-            udtaBox.copyInto(out, ins)
-            buf.copyInto(out, ins + udtaBox.size, ins)
-            w32(out, moov.off, moov.size + udtaBox.size)
-            out
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────
-    //  applyMetadataStamp — Z-Payload + MTLib + EncoderStr
-    //  Setara applyMetadataStamp() di JS → dipakai KYTHERA_60FPS
-    // ─────────────────────────────────────────────────────────
-
-    fun applyMetadataStamp(input: ByteArray): ByteArray {
-        val buf1 = input.copyOf()
-        patchZPayload(buf1)
-        val buf2 = injectMTLib(buf1)
-        patchEncoderStr(buf2)
-        return buf2
     }
 
     // ─────────────────────────────────────────────────────────
@@ -568,14 +470,14 @@ fun PatchScreen() {
                         PatchLogic.KYTHERA_60FPS -> {
                             statusText = "⚙️ Menyiapkan file dasar..."
                             val session = FFmpegKit.execute(
-                                "-hide_banner -i \"$safUrl\" -c copy \"$outPath\""
+                                "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"$outPath\""
                             )
                             if (!ReturnCode.isSuccess(session.returnCode))
                                 throw Exception(session.allLogsAsString)
                             progressPercent = 0.9f
-                            statusText = "⚙️ Menyematkan Kythera Metadata Stamp..."
-                            val stamped = Mp4Engine.applyMetadataStamp(finalFile.readBytes())
-                            FileOutputStream(finalFile).use { it.write(stamped) }
+                            statusText = "⚙️ Menerapkan Shark Sample Table (60fps)..."
+                            val patched = Mp4Engine.patchSharkSampleTable(finalFile.readBytes())
+                            FileOutputStream(finalFile).use { it.write(patched) }
                         }
                     }
 
