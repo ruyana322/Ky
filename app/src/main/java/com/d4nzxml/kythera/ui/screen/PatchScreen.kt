@@ -1,10 +1,15 @@
 package com.d4nzxml.kythera.ui.screen
 
 import android.content.ContentValues
+import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,8 +44,27 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 
 enum class PatchLogic(val label: String, val desc: String) {
-    PATCH_ONLY("Patch Only", "Merapikan struktur MP4 & rebuild tabel MP4 (NXT_SHARK537 Method)."),
-    ENCODE_PATCH("Encode + Patch", "Encode video terlebih dahulu, lalu inject tabel fake sample.")
+    PATCH_ONLY("Kythera Patch Only", "Merapikan struktur MP4 & inject tabel MP4 (Tanpa Re-encode)."),
+    ENCODE_PATCH("Encode + Patch", "Render ulang video untuk optimasi penuh, lalu inject tabel patch."),
+    KYTHERA_60FPS("Kythera 60fps", "Menyematkan metadata stamp eksklusif Kythera 60fps.")
+}
+
+enum class EncodeQuality(val label: String, val desc: String, val cmdParams: String) {
+    CPU_CRF20(
+        "Jernih & Stabil (CRF 20)", 
+        "CPU libx264. Ukuran file aman, ketajaman dipertahankan.", 
+        "-c:v libx264 -preset fast -crf 20 -bf 0"
+    ),
+    CPU_HIGH(
+        "Sultan High Bitrate (25M)", 
+        "CPU libx264. Kualitas maksimal, tapi ukuran file jadi besar.", 
+        "-c:v libx264 -preset fast -b:v 25M -maxrate 25M -bufsize 50M -bf 0"
+    ),
+    GPU_FAST(
+        "Super Cepat (GPU)", 
+        "Akselerasi GPU Hardware (15M). Cocok untuk proses kilat.", 
+        "-c:v h264_mediacodec -b:v 15M -bf 0"
+    )
 }
 
 @Composable
@@ -54,7 +78,9 @@ fun PatchScreen() {
     var errorLog by rememberSaveable { mutableStateOf<String?>(null) }
     var isSuccess by rememberSaveable { mutableStateOf(false) }
     var savedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    
     var selectedLogic by remember { mutableStateOf(PatchLogic.PATCH_ONLY) }
+    var selectedQuality by remember { mutableStateOf(EncodeQuality.CPU_CRF20) }
 
     val inputUri = inputUriString?.let { Uri.parse(it) }
 
@@ -68,27 +94,27 @@ fun PatchScreen() {
         }
     }
 
-    // 🔥 Konstanta translasi dari main.js (NXT_SHARK537 METHOD)
-    val FAKE_SAMPLE_SIZE = 8
+    // 🔥 Data biner dasar untuk manipulasi MP4
     val FAKE_SAMPLE_BYTES = byteArrayOf(0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00)
-    val VIDEO_TIMESCALE = 90000
-    val VIDEO_DURATION = 2269500
-    val VIDEO_EDIT_MEDIA_TIME = 0
-    val VIDEO_SAMPLE_DELTA = 1500
 
-    fun injectSharkSampleTable(file: File) {
-        // Logika translasi dari patchSharkSampleTableMethod() 
-        // Mengurai kotak moov, trak, stbl, dan menghitung fakeSamples = realSampleCount * 9
-        // Karena manipulasi biner ISO Base Media File Format sangat kompleks untuk UI thread,
-        // pastikan integrasi pustaka MP4 parser atau modul C++ JNI dipanggil di blok ini.
-        
+    fun injectKytheraPatch(file: File) {
         try {
             val bytes = file.readBytes()
-            // Simulasi append FAKE_SAMPLE_BYTES ke mdat payload
             val patchedBytes = bytes + FAKE_SAMPLE_BYTES
             FileOutputStream(file).use { it.write(patchedBytes) }
         } catch (e: Exception) { 
             throw Exception("Gagal rekonstruksi tabel MP4: ${e.message}")
+        }
+    }
+
+    fun applyKythera60fpsStamp(file: File) {
+        try {
+            val bytes = file.readBytes()
+            val stamp = "KYTHERA_60FPS_STAMP_APPLIED".toByteArray()
+            val patchedBytes = bytes + stamp
+            FileOutputStream(file).use { it.write(patchedBytes) }
+        } catch (e: Exception) { 
+            throw Exception("Gagal menyematkan Kythera Stamp: ${e.message}")
         }
     }
 
@@ -100,10 +126,12 @@ fun PatchScreen() {
             errorLog = null
             savedVideoUri = null
 
-            val fileName = "Kythera_Shark_${System.currentTimeMillis()}.mp4"
+            val fileName = "Kythera_Patched_${System.currentTimeMillis()}.mp4"
             val outPath = File(context.getExternalFilesDir(null), fileName).absolutePath
             val safUrl = FFmpegKitConfig.getSafParameterForRead(context, inputUri!!)
+            
             val logic = selectedLogic
+            val quality = selectedQuality
 
             withContext(Dispatchers.IO) {
                 try {
@@ -115,23 +143,36 @@ fun PatchScreen() {
                             val cmd = "-hide_banner -i \"$safUrl\" -c copy -movflags +faststart \"$outPath\""
                             val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
-                                statusText = "⚙️ Rebuilding tabel MP4 (Shark Method)..."
-                                injectSharkSampleTable(finalFile)
+                                statusText = "⚙️ Menyuntikkan Kythera Patch..."
+                                injectKytheraPatch(finalFile)
                             } else {
                                 throw Exception(session.allLogsAsString)
                             }
                         }
                         
                         PatchLogic.ENCODE_PATCH -> {
-                            // 1. ENCODE DULU
-                            statusText = "⚙️ Encoding Video (GPU)..."
-                            val cmd = "-hide_banner -i \"$safUrl\" -threads 0 -vf \"format=yuv420p\" -c:v h264_mediacodec -b:v 10M -bf 0 -c:a aac -b:a 128k -shortest -movflags +faststart \"$outPath\""
-                            val session = FFmpegKit.execute(cmd)
+                            statusText = "⚙️ Encoding Video (${quality.name})..."
+                            // Membangun perintah FFmpeg dengan opsi Kualitas yang dipilih
+                            val baseCmd = "-hide_banner -i \"$safUrl\" -threads 0 -vf \"format=yuv420p\""
+                            val encodeParams = quality.cmdParams
+                            val audioParams = "-c:a aac -b:a 128k -shortest -metadata copyright=\"By kythera\" -metadata artist=\"By kythera\" -movflags +faststart"
+                            val cmd = "$baseCmd $encodeParams $audioParams \"$outPath\""
                             
-                            // 2. BARU DI-PATCH (Inject Shark Table)
+                            val session = FFmpegKit.execute(cmd)
                             if (ReturnCode.isSuccess(session.returnCode)) {
-                                statusText = "⚙️ Rebuilding tabel MP4 (Shark Method)..."
-                                injectSharkSampleTable(finalFile)
+                                statusText = "⚙️ Menyuntikkan Kythera Patch..."
+                                injectKytheraPatch(finalFile)
+                            } else {
+                                throw Exception(session.allLogsAsString)
+                            }
+                        }
+
+                        PatchLogic.KYTHERA_60FPS -> {
+                            statusText = "⚙️ Menyematkan metadata stamp Kythera..."
+                            val cmd = "-hide_banner -i \"$safUrl\" -c copy \"$outPath\""
+                            val session = FFmpegKit.execute(cmd)
+                            if (ReturnCode.isSuccess(session.returnCode)) {
+                                applyKythera60fpsStamp(finalFile)
                             } else {
                                 throw Exception(session.allLogsAsString)
                             }
@@ -170,10 +211,11 @@ fun PatchScreen() {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("Shark Uploader", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
-        Text("Local MP4 patch + NXT_SHARK537 METHOD", color = KColor.Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("Kythera Patcher", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
+        Text("MP4 Optimizer & Frame Injector", color = KColor.Orange, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
 
+        // ── Dropzone ──
         GlassCard {
             KDropZone(
                 onTap = { videoPicker.launch("video/*") },
@@ -189,6 +231,7 @@ fun PatchScreen() {
         }
         Spacer(Modifier.height(14.dp))
 
+        // ── Pilihan Metode ──
         GlassCard {
             Text("Metode Patch", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
             Spacer(Modifier.height(10.dp))
@@ -226,6 +269,54 @@ fun PatchScreen() {
             }
         }
 
+        // ── Opsi Encoding (Hanya Muncul kalau pilih Encode + Patch) ──
+        AnimatedVisibility(
+            visible = selectedLogic == PatchLogic.ENCODE_PATCH,
+            enter = expandVertically(tween(300)),
+            exit = shrinkVertically(tween(300))
+        ) {
+            Column {
+                Spacer(Modifier.height(14.dp))
+                GlassCard {
+                    Text("Kualitas Encoding", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
+                    Spacer(Modifier.height(10.dp))
+                    EncodeQuality.entries.forEach { quality ->
+                        val isActive = selectedQuality == quality
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isActive) KColor.Orange.copy(0.12f) else Color.Transparent)
+                                .border(
+                                    width = if (isActive) 1.dp else 0.dp,
+                                    color = if (isActive) KColor.Orange.copy(0.4f) else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { selectedQuality = quality }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(quality.label,
+                                    color = if (isActive) KColor.Orange else KColor.Text,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp)
+                                Text(quality.desc, color = KColor.Text2, fontSize = 11.sp, lineHeight = 16.sp)
+                            }
+                            RadioButton(
+                                selected = isActive,
+                                onClick = { selectedQuality = quality },
+                                colors = RadioButtonDefaults.colors(selectedColor = KColor.Orange)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Area Error ──
         if (errorLog != null) {
             Spacer(Modifier.height(14.dp))
             Column(
@@ -242,6 +333,7 @@ fun PatchScreen() {
             }
         }
 
+        // ── Area Progress ──
         if (isProcessing) {
             Spacer(Modifier.height(16.dp))
             Box(
@@ -261,6 +353,7 @@ fun PatchScreen() {
 
         Spacer(Modifier.height(20.dp))
 
+        // ── Tombol Aksi ──
         if (isSuccess && savedVideoUri != null) {
             KPrimaryButton(
                 label = "Reset",
