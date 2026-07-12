@@ -360,6 +360,7 @@ private suspend fun runPipeline(
         val cmd = "-y -i \"${inputFile.absolutePath}\" " +
                   "-vf fps=60 " +
                   "-c:v libx264 -preset ultrafast " +
+                  "-x264opts nal-hrd=cbr:force-cfr=1 " +
                   "-b:v 17M -minrate 17M -maxrate 17M -bufsize 17M " +
                   "-c:a aac -b:a 128k " +
                   "-af aresample=async=1:first_pts=0 " +
@@ -444,6 +445,7 @@ fun TikTokScreen() {
     var statusMsg           by remember { mutableStateOf("") }
     var progressVal         by remember { mutableStateOf(0) }
     var isProcessing        by remember { mutableStateOf(false) }
+    val webViewRef          = remember { mutableStateOf<WebView?>(null) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -455,6 +457,10 @@ fun TikTokScreen() {
             statusMsg = "Menyiapkan..."
             progressVal = 0
 
+            // Pause WebView → semua resource ke FFmpeg
+            webViewRef.value?.pauseTimers()
+            webViewRef.value?.onPause()
+
             scope.launch {
                 val resultUri = runPipeline(context, src) { msg, p ->
                     statusMsg = msg
@@ -463,6 +469,11 @@ fun TikTokScreen() {
                 }
                 isProcessing = false
                 dismissNotif(context)
+
+                // Resume WebView setelah encode selesai
+                webViewRef.value?.resumeTimers()
+                webViewRef.value?.onResume()
+
                 if (resultUri != null) fileChooserCallback?.onReceiveValue(arrayOf(resultUri))
                 else fileChooserCallback?.onReceiveValue(null)
                 fileChooserCallback = null
@@ -601,7 +612,7 @@ fun TikTokScreen() {
                         }
                     }
                     loadUrl("https://www.tiktok.com/upload")
-                }
+                }.also { webViewRef.value = it }
             }
         )
 
