@@ -424,11 +424,16 @@ private suspend fun runSmartPipeline(
         } ?: return@withContext null
 
         // 🔥 2. Smart Logic: Tentukan Mode
+                // 🔥 2. Smart Logic: Tentukan Mode (Disesuaikan persis dengan Web)
         val maxRes = max(videoWidth, videoHeight)
-        val isH264 = mimeType.contains("avc", ignoreCase = true) || mimeType.contains("h264", ignoreCase = true)
         
-        // Video butuh Re-Encode kalau resolusinya di atas 1080p atau formatnya bukan H.264 standar
-        val needsReencode = maxRes > 1920 || !isH264
+        // Cukup cek apakah dia MP4, persis kayak di main_2.js
+        val isMp4 = mimeType.contains("mp4", ignoreCase = true) || 
+                    sourceUri.toString().endsWith(".mp4", ignoreCase = true)
+        
+        // Jika lebih besar dari 1080p atau bukan MP4, baru Re-encode!
+        val needsReencode = maxRes > 1920 || !isMp4
+
 
         FFmpegKitConfig.enableStatisticsCallback { stats ->
             if (durationMs > 0) {
