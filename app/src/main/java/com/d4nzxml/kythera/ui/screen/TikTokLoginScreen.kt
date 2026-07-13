@@ -1,9 +1,11 @@
 package com.d4nzxml.kythera.ui.screen
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -90,12 +92,12 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                         // Biar render Javascript lebih sempurna
                         webChromeClient = WebChromeClient()
 
-                                                webViewClient = object : WebViewClient() {
+                        webViewClient = object : WebViewClient() {
                             
-                            // 🔥 LOGIKA BARU: Cegah TikTok kabur ke aplikasi asli
-                            override fun                             override fun shouldOverrideUrlLoading(
+                            // 🔥 LOGIKA BARU: Buka aplikasi TikTok asli kalau diminta!
+                            override fun shouldOverrideUrlLoading(
                                 view: WebView?,
-                                request: android.webkit.WebResourceRequest?
+                                request: WebResourceRequest?
                             ): Boolean {
                                 val url = request?.url?.toString() ?: ""
                                 
@@ -106,7 +108,7 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
 
                                 // Kalau link khusus (intent:// atau tiktok://), lempar ke HP!
                                 try {
-                                    val intent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME)
+                                    val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                                     if (intent.resolveActivity(context.packageManager) != null) {
                                         context.startActivity(intent)
                                     } else {
@@ -122,7 +124,6 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                                 }
                             }
 
-
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
@@ -134,7 +135,6 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                                 cekCookieDanLanjut(onCookieScraped)
                             }
                         }
-
                         
                         loadUrl("https://www.tiktok.com/login")
                     }
