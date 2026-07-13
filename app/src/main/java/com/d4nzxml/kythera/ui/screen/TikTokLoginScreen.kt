@@ -1,7 +1,9 @@
 package com.d4nzxml.kythera.ui.screen
 
 import android.annotation.SuppressLint
+import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -9,7 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -22,7 +23,6 @@ import androidx.compose.ui.unit.sp
 fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
 
-    // Warna Tema Kythera
     val colorBg = Color(0xFF121212)
     val colorSurface = Color(0xFF1E1E1E)
     val colorCyan = Color(0xFF00E5FF)
@@ -32,7 +32,6 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
             .fillMaxSize()
             .background(colorBg)
     ) {
-        // 🔥 Header Bar
         Surface(
             color = colorSurface,
             modifier = Modifier.fillMaxWidth(),
@@ -53,7 +52,6 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
             }
         }
 
-        // 🔥 Loading Bar Animasi (Muncul pas web lagi loading)
         if (isLoading) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
@@ -62,35 +60,49 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
             )
         }
 
-        // 🔥 WebView TikTok (Jantung Utamanya)
+        // 🔥 WebView yang udah di-Upgrade
         Box(modifier = Modifier.weight(1f)) {
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
-                        // Aktifin JS & Storage biar TikTok bisa jalan normal
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        
-                        // Sedikit trik User-Agent biar gak gampang dicurigai bot sama TikTok
-                        settings.userAgentString = settings.userAgentString.replace("; wv", "")
+                        // Paksa ukuran WebView ngisi full layar
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            // 🔥 Obat biar layarnya nggak melorot (Fix Viewport)
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            
+                            // 🔥 Nyamar jadi Chrome Mobile asli biar gak di-block TikTok
+                            userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+                        }
+
+                        // 🔥 Wajib buat login: Izinkan penyimpanan cookie dari TikTok
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true)
+                        cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                        // Biar render Javascript lebih sempurna
+                        webChromeClient = WebChromeClient()
 
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
-                                
-                                // Cek cookie tiap kali page beres loading
                                 cekCookieDanLanjut(onCookieScraped)
                             }
 
-                            // Karena TikTok itu SPA (Single Page Application), kadang URL ganti tanpa loading ulang
                             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                                 super.doUpdateVisitedHistory(view, url, isReload)
                                 cekCookieDanLanjut(onCookieScraped)
                             }
                         }
                         
-                        // Langsung tembak ke halaman login
                         loadUrl("https://www.tiktok.com/login")
                     }
                 },
@@ -98,7 +110,6 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
             )
         }
 
-        // 🔥 Tombol Manual (Buat jaga-jaga kalau auto-detect gagal)
         Surface(
             color = colorSurface,
             modifier = Modifier.fillMaxWidth()
@@ -118,10 +129,8 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
     }
 }
 
-// Fungsi buat nyedot cookie dari browser
 private fun cekCookieDanLanjut(onCookieScraped: (String) -> Unit) {
     val cookies = CookieManager.getInstance().getCookie("https://www.tiktok.com")
-    // Kalau cookie udah dapet dan ada 'sessionid' (tanda udah login)
     if (cookies != null && cookies.contains("sessionid=")) {
         onCookieScraped(cookies)
     }
