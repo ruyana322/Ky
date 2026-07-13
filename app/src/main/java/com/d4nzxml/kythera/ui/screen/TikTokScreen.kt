@@ -490,7 +490,7 @@ private suspend fun runSmartPipeline(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// UI: HOLOGRAM / FLOATING AI
+// UI: HOLOGRAM ANIMATION
 // ═══════════════════════════════════════════════════════════════════════════
 @Composable
 private fun AiScanAnimation(statusMsg: String, progress: Int) {
@@ -524,6 +524,87 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// JS SNIPPETS (pisah biar onPageFinished ringan)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 🔥 Critical JS: hook fetch/XHR + viewport fix — inject segera setelah page finish
+private val JS_CRITICAL = """
+    (function() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (meta) { meta.setAttribute('content','width=1280'); }
+        else { var m=document.createElement('meta'); m.name='viewport'; m.content='width=1280'; document.head.appendChild(m); }
+        document.body.style.overflow='auto';
+        document.documentElement.style.overflow='auto';
+    })();
+
+    (function() {
+        if (window.__cUInjected) return;
+        window.__cUInjected = true;
+        const SIGNATURE = "\n\n⚡ Upload method by Kythera ⚡";
+        function modifyPayload(bodyStr) {
+            try {
+                let data = JSON.parse(bodyStr);
+                let modified = false;
+                if (data.single_post_req_list && data.single_post_req_list[0]) {
+                    let featureInfo = data.single_post_req_list[0].single_post_feature_info;
+                    if (featureInfo) {
+                        featureInfo.has_original_audio = 1;
+                        if (featureInfo.music_info) delete featureInfo.music_info;
+                        modified = true;
+                    }
+                }
+                const injectText = (obj) => {
+                    if (!obj || typeof obj !== 'object') return;
+                    ['text', 'markup_text', 'desc', 'title', 'caption'].forEach(key => {
+                        if (typeof obj[key] === 'string' && !obj[key].includes('Kythera')) {
+                            obj[key] += SIGNATURE; modified = true;
+                        }
+                    });
+                    Object.values(obj).forEach(val => injectText(val));
+                };
+                injectText(data);
+                return modified ? JSON.stringify(data) : bodyStr;
+            } catch(e) { return bodyStr; }
+        }
+        const origFetch = window.fetch;
+        window.fetch = async function(resource, config) {
+            let url = typeof resource === 'string' ? resource : resource?.url;
+            if (url && (url.includes('/upload') || url.includes('/publish') || url.includes('/post')) && config && typeof config.body === 'string') {
+                config.body = modifyPayload(config.body);
+            }
+            return origFetch.apply(this, arguments);
+        };
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url) { this._url = url; return origOpen.apply(this, arguments); };
+        XMLHttpRequest.prototype.send = function(body) {
+            if (this._url && (this._url.includes('/upload') || this._url.includes('/publish') || this._url.includes('/post')) && typeof body === 'string') {
+                body = modifyPayload(body);
+            }
+            return origSend.call(this, body);
+        };
+    })();
+""".trimIndent()
+
+// 🎨 Toast JS: kosmetik, delay 600ms biar gak block render awal
+private val JS_TOAST = """
+    (function () {
+        if (window.__d4nzToastDone) return;
+        window.__d4nzToastDone = true;
+        function showToast() {
+            const style = document.createElement('style');
+            style.textContent = '#__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #7c4dff; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(124,77,255,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; } .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #7c4dff; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; } @keyframes __d4nzFadeIn { from { opacity:0; transform: translateX(-50%) translateY(12px); } to { opacity:1; transform: translateX(-50%) translateY(0); } } @keyframes __d4nzPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.3; transform:scale(0.65); } }';
+            document.head.appendChild(style);
+            const toast = document.createElement('div');
+            toast.id = '__d4nz_toast';
+            toast.innerHTML = '<span class="__d4nz_dot"></span>D4NZXML GODMODE ACTIVE';
+            document.body.appendChild(toast);
+        }
+        if (document.body) { showToast(); } else { document.addEventListener('DOMContentLoaded', showToast); }
+    })();
+""".trimIndent()
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MAIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
@@ -536,34 +617,65 @@ fun TikTokScreen() {
     var statusMsg           by remember { mutableStateOf("") }
     var progressVal         by remember { mutableStateOf(0) }
     var isProcessing        by remember { mutableStateOf(false) }
-    
-    // 🔥 Referensi WebView untuk Pause/Resume
-    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+
+    // 🔥 WebView dibikin lebih awal (preload) — bukan di dalam factory AndroidView
+    val webView = remember {
+        WebView(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            // 🔥 Hardware acceleration eksplisit
+            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+            settings.apply {
+                javaScriptEnabled          = true
+                domStorageEnabled          = true
+                databaseEnabled            = true
+                allowFileAccess            = true
+                mixedContentMode           = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                userAgentString            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                useWideViewPort            = true
+                loadWithOverviewMode       = true
+                setSupportZoom(true)
+                builtInZoomControls        = true
+                displayZoomControls        = false
+                // 🔥 Cache: pakai cache disk bawaan browser
+                cacheMode                  = WebSettings.LOAD_DEFAULT
+                // 🔥 Prioritas render tinggi
+                setRenderPriority(WebSettings.RenderPriority.HIGH)
+                mediaPlaybackRequiresUserGesture = false
+            }
+        }
+    }
+
+    // 🔥 Preload URL segera saat composable masuk — WebView udah siap sebelum keliatan
+    LaunchedEffect(Unit) {
+        webView.loadUrl("https://www.tiktok.com/upload")
+    }
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) { 
-            // 🔥 Langsung eksekusi Smart Engine tanpa Bottom Sheet!
+        if (uri != null) {
             isProcessing = true
-            statusMsg = "Menyiapkan Kythera Engine..."
-            progressVal = 0
-            
-            // 🛑 Pause WebView selama proses
-            webViewInstance?.onPause()
-            webViewInstance?.pauseTimers()
+            statusMsg    = "Menyiapkan Kythera Engine..."
+            progressVal  = 0
+
+            // 🛑 Pause WebView selama proses encoding
+            webView.onPause()
+            webView.pauseTimers()
 
             scope.launch {
                 val resultUri = runSmartPipeline(context, uri) { msg, p ->
-                    statusMsg = msg
+                    statusMsg   = msg
                     progressVal = p.coerceAtLeast(0)
                     postNotif(context, "Kythera Pipeline", msg, p)
                 }
-                
+
                 isProcessing = false
                 dismissNotif(context)
-                
-                // ▶️ Resume WebView setelah proses selesai
-                webViewInstance?.onResume()
-                webViewInstance?.resumeTimers()
+
+                // ▶️ Resume WebView setelah selesai
+                webView.onResume()
+                webView.resumeTimers()
 
                 if (resultUri != null) {
                     fileChooserCallback?.onReceiveValue(arrayOf(resultUri))
@@ -571,142 +683,70 @@ fun TikTokScreen() {
                     fileChooserCallback?.onReceiveValue(null)
                 }
                 fileChooserCallback = null
-                statusMsg = ""
+                statusMsg   = ""
                 progressVal = 0
             }
-        } else { 
+        } else {
             fileChooserCallback?.onReceiveValue(null)
-            fileChooserCallback = null 
+            fileChooserCallback = null
+        }
+    }
+
+    // 🔥 Setup client sekali — pisah dari factory biar gak bikin WebView baru tiap recompose
+    DisposableEffect(webView) {
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val url = request?.url?.toString() ?: return false
+                if (url.startsWith("http://") || url.startsWith("https://")) return false
+                return try {
+                    val intent = if (url.startsWith("intent://"))
+                        Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                    else
+                        Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    context.startActivity(intent); true
+                } catch (_: Exception) { true }
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // 🔥 Inject critical hook SEGERA
+                view?.evaluateJavascript(JS_CRITICAL, null)
+                // 🎨 Toast delay 600ms — kosmetik, gak rush
+                view?.postDelayed({ view.evaluateJavascript(JS_TOAST, null) }, 600)
+            }
+        }
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+                filePickerLauncher.launch("video/*")
+                return true
+            }
+        }
+
+        onDispose {
+            webView.webViewClient  = WebViewClient()
+            webView.webChromeClient = null
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // 🔥 AndroidView pakai instance preload — factory cuma attach, bukan init ulang
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory  = { ctx ->
-                WebView(ctx).apply {
-                    webViewInstance = this // Simpan referensi
-                    
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    settings.apply {
-                        javaScriptEnabled = true; domStorageEnabled = true; allowFileAccess = true; mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        useWideViewPort = true; loadWithOverviewMode = true; setSupportZoom(true); builtInZoomControls = true; displayZoomControls = false
-                    }
-
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val url = request?.url?.toString() ?: return false
-                            if (url.startsWith("http://") || url.startsWith("https://")) return false
-                            return try {
-                                val intent = if (url.startsWith("intent://")) Intent.parseUri(url, Intent.URI_INTENT_SCHEME) else Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                ctx.startActivity(intent); true
-                            } catch (_: Exception) { true }
-                        }
-                        
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            
-                            val jsInjection = """
-                                var meta = document.querySelector('meta[name="viewport"]');
-                                if (meta) { meta.setAttribute('content','width=1280'); }
-                                else { var m=document.createElement('meta'); m.name='viewport'; m.content='width=1280'; document.head.appendChild(m); }
-                                document.body.style.overflow='auto'; document.documentElement.style.overflow='auto';
-
-                                (function () {
-                                  if (window.__d4nzToastDone) return;
-                                  window.__d4nzToastDone = true;
-                                  function showToast() {
-                                    const style = document.createElement('style');
-                                    style.textContent = `
-                                      #__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #7c4dff; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(124,77,255,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; }
-                                      .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #7c4dff; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; }
-                                      @keyframes __d4nzFadeIn { from { opacity:0; transform: translateX(-50%) translateY(12px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
-                                      @keyframes __d4nzPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.3; transform:scale(0.65); } }
-                                    `;
-                                    document.head.appendChild(style);
-                                    const toast = document.createElement('div');
-                                    toast.id = '__d4nz_toast';
-                                    toast.innerHTML = '<span class="__d4nz_dot"></span>D4NZXML GODMODE ACTIVE';
-                                    document.body.appendChild(toast);
-                                  }
-                                  if (document.body) { showToast(); } else { document.addEventListener('DOMContentLoaded', showToast); }
-                                })();
-
-                                (function() {
-                                    if (window.__cUInjected) return;
-                                    window.__cUInjected = true;
-                                    const SIGNATURE = "\n\n⚡ Upload method by Kythera ⚡";
-                                    function modifyPayload(bodyStr) {
-                                        try {
-                                            let data = JSON.parse(bodyStr);
-                                            let modified = false;
-                                            if (data.single_post_req_list && data.single_post_req_list[0]) {
-                                                let featureInfo = data.single_post_req_list[0].single_post_feature_info;
-                                                if (featureInfo) {
-                                                    featureInfo.has_original_audio = 1;
-                                                    if (featureInfo.music_info) delete featureInfo.music_info;
-                                                    modified = true;
-                                                }
-                                            }
-                                            const injectText = (obj) => {
-                                                if (!obj || typeof obj !== 'object') return;
-                                                ['text', 'markup_text', 'desc', 'title', 'caption'].forEach(key => {
-                                                    if (typeof obj[key] === 'string' && !obj[key].includes('Kythera')) {
-                                                        obj[key] += SIGNATURE;
-                                                        modified = true;
-                                                    }
-                                                });
-                                                Object.values(obj).forEach(val => injectText(val));
-                                            };
-                                            injectText(data);
-                                            return modified ? JSON.stringify(data) : bodyStr;
-                                        } catch(e) { 
-                                            return bodyStr; 
-                                        }
-                                    }
-                                    const origFetch = window.fetch;
-                                    window.fetch = async function(resource, config) {
-                                        let url = typeof resource === 'string' ? resource : resource?.url;
-                                        if (url && (url.includes('/upload') || url.includes('/publish') || url.includes('/post')) && config && typeof config.body === 'string') {
-                                            config.body = modifyPayload(config.body);
-                                        }
-                                        return origFetch.apply(this, arguments);
-                                    };
-                                    const origOpen = XMLHttpRequest.prototype.open;
-                                    const origSend = XMLHttpRequest.prototype.send;
-                                    XMLHttpRequest.prototype.open = function(method, url) {
-                                        this._url = url;
-                                        return origOpen.apply(this, arguments);
-                                    };
-                                    XMLHttpRequest.prototype.send = function(body) {
-                                        if (this._url && (this._url.includes('/upload') || this._url.includes('/publish') || this._url.includes('/post')) && typeof body === 'string') {
-                                            body = modifyPayload(body);
-                                        }
-                                        return origSend.call(this, body);
-                                    };
-                                })();
-                            """.trimIndent()
-                            
-                            view?.evaluateJavascript(jsInjection, null)
-                        }
-                    }
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onShowFileChooser(webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?): Boolean {
-                            fileChooserCallback?.onReceiveValue(null); fileChooserCallback = filePathCallback; filePickerLauncher.launch("video/*"); return true
-                        }
-                    }
-                    loadUrl("https://www.tiktok.com/upload")
-                }
-            }
+            factory  = { webView }
         )
 
         // ── Processing Overlay (Hologram Full Block) ──
         if (isProcessing) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize() 
+                    .fillMaxSize()
                     .background(Color(0xCC000000))
                     .clickable(enabled = false) {},
                 contentAlignment = Alignment.Center
