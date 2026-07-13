@@ -72,7 +72,7 @@ object RealSrEngine {
         }
     }
 
-    suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
+        suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
         withContext(Dispatchers.IO) {
             try {
                 val baseDir    = getBaseDir(context)
@@ -89,32 +89,34 @@ object RealSrEngine {
 
                 val modelsDir = File(baseDir, "models")
 
-                // 🔥 COMMAND ASLI TUMUYAN: Polos tanpa -t, -j, atau -g (Biar auto-detect)
-                val commandRun = "./realsr-ncnn -i '${inputFile.absolutePath}' -o '${outputFile.absolutePath}' -m '${modelsDir.absolutePath}' -s 4"
-                
+                // 🔥 1. BUKA BRANKAS APLIKASI BUAT NGAMBIL RACIKAN AI DARI GIST
+                val sharedPref = context.getSharedPreferences("KytheraPrefs", Context.MODE_PRIVATE)
+                val aiScale = sharedPref.getString("ai_scale", "4") ?: "4"
+                val cpuArgs = sharedPref.getString("ai_cpu_args", "-g -1") ?: "-g -1"
+
+                // 🔥 2. RACIK PERINTAH UTAMA (GPU)
+                // Angka 4 sekarang diganti pakai variabel aiScale dari internet
+                val commandRun = "./realsr-ncnn -i '${inputFile.absolutePath}' -o '${outputFile.absolutePath}' -m '${modelsDir.absolutePath}' -s $aiScale"
+
                 Log.d(TAG, "CMD: $commandRun")
 
                 // 🔥 METODE EKSEKUSI TUMUYAN: Pakai ProcessBuilder dan Stdin
                 val pb = ProcessBuilder("sh")
                 pb.directory(baseDir)
-                pb.redirectErrorStream(true) // Tumuyan menggabungkan ErrorStream ke InputStream
+                pb.redirectErrorStream(true) 
 
                 val process = pb.start()
                 val stdin = process.outputStream
 
                 try {
-                    // Inject setup command
                     stdin.write(("cd ${baseDir.absolutePath}; chmod +x *ncnn 2>/dev/null; export LD_LIBRARY_PATH=${baseDir.absolutePath};\n").toByteArray())
-                    // Inject perintah utama
                     stdin.write(("$commandRun\n").toByteArray())
-                    // Selesai
                     stdin.write("exit\n".toByteArray())
                     stdin.flush()
                 } finally {
                     stdin.close()
                 }
 
-                // Ambil log outputnya
                 val stdout = process.inputStream.bufferedReader().readText()
                 val exitCode = process.waitFor()
 
@@ -126,19 +128,20 @@ object RealSrEngine {
                     outputFile.delete()
                     Pair(result, null)
                 } else {
-                    // Fallback CPU kalau GPU gagal (tetap pakai ProcessBuilder)
+                    // 🔥 3. RACIK PERINTAH FALLBACK (CPU)
                     Log.d(TAG, "GPU gagal, coba CPU...")
                     outputFile.delete()
-                    
-                    val cpuCommand = "$commandRun -g -1" // Force CPU
-                    
+
+                    // Parameter -g -1 sekarang diganti pakai variabel cpuArgs dari internet
+                    val cpuCommand = "$commandRun $cpuArgs" 
+
                     val pbCpu = ProcessBuilder("sh")
                     pbCpu.directory(baseDir)
                     pbCpu.redirectErrorStream(true)
-                    
+
                     val processCpu = pbCpu.start()
                     val stdinCpu = processCpu.outputStream
-                    
+
                     try {
                         stdinCpu.write(("cd ${baseDir.absolutePath}; chmod +x *ncnn 2>/dev/null; export LD_LIBRARY_PATH=${baseDir.absolutePath};\n").toByteArray())
                         stdinCpu.write(("$cpuCommand\n").toByteArray())
@@ -147,7 +150,7 @@ object RealSrEngine {
                     } finally {
                         stdinCpu.close()
                     }
-                    
+
                     val out2 = processCpu.inputStream.bufferedReader().readText()
                     val exit2 = processCpu.waitFor()
 
@@ -170,4 +173,3 @@ object RealSrEngine {
                 Pair(null, "EXCEPTION: ${e.javaClass.simpleName}\n${e.message}\n${e.stackTraceToString().take(500)}")
             }
         }
-}
