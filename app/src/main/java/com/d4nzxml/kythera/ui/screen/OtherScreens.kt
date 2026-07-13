@@ -1,4 +1,5 @@
 package com.d4nzxml.kythera.ui.screen
+
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
 
-// 🔥 Ganti fungsi HistoryScreen lama dengan ini:
+// ─── History Screen (Berubah jadi Profile) ────────────────────────────────────
 @Composable
 fun HistoryScreen() {
     Column(
@@ -54,12 +55,12 @@ fun HistoryScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally, 
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Avatar Bulat
+                // Avatar Bulat (Bebas error Brush)
                 Box(
                     modifier = Modifier
                         .size(88.dp)
                         .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(KColor.Accent, KColor.Accent2))),
+                        .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(KColor.Accent, KColor.Accent2))),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.Black, modifier = Modifier.size(48.dp))
@@ -98,7 +99,7 @@ fun HistoryScreen() {
     }
 }
 
-// 🔥 Komponen pendukung 1 (Taruh di bawah HistoryScreen)
+// 🔥 Komponen pendukung 1 (Profil)
 @Composable
 fun ProfileStat(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -108,7 +109,7 @@ fun ProfileStat(label: String, value: String) {
     }
 }
 
-// 🔥 Komponen pendukung 2 (Taruh di bawah ProfileStat)
+// 🔥 Komponen pendukung 2 (Profil)
 @Composable
 fun ProfileMenuItem(icon: ImageVector, title: String, trailingText: String, isDestructive: Boolean = false) {
     val contentColor = if (isDestructive) KColor.Orange else Color.White
@@ -138,7 +139,6 @@ fun ProfileMenuItem(icon: ImageVector, title: String, trailingText: String, isDe
         }
     }
 }
-
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 @Composable
@@ -235,7 +235,6 @@ fun SettingsScreen() {
 }
 
 // ─── Komponen Pendukung Khusus Settings (Taruh di bawah SettingsScreen) ───
-
 @Composable
 fun SettingActionRow(
     icon: ImageVector,
