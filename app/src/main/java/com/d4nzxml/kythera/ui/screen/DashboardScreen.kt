@@ -30,12 +30,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
 
 @Composable
 fun DashboardScreen(onNavigate: (Int) -> Unit) {
     var isVisible by remember { mutableStateOf(false) }
+    // 🔥 Memori untuk menampilkan Pop-up Panduan
+    var showGuideDialog by remember { mutableStateOf(false) }
+    
     LaunchedEffect(Unit) { isVisible = true }
 
     AnimatedVisibility(
@@ -51,7 +56,8 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            HeroCard(onNavigate)
+            // 🔥 Lempar perintah untuk membuka dialog ke HeroCard
+            HeroCard(onNavigate = onNavigate, onOpenGuide = { showGuideDialog = true })
             Spacer(Modifier.height(24.dp))
 
             SystemStatusCard()
@@ -59,17 +65,21 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
 
             KSectionHeader("Tools Cepat", Icons.Rounded.Bolt, KColor.Accent)
             Spacer(Modifier.height(16.dp))
-            
+
             ToolGrid(onNavigate = onNavigate)
-            
-            // Jarak ekstra di bawah biar nggak mentok dengan Bottom Navigation
+
             Spacer(Modifier.height(100.dp))
         }
+    }
+
+    // 🔥 Panggil Desain Pop-up Panduan di Sini
+    if (showGuideDialog) {
+        GuideDialog(onDismiss = { showGuideDialog = false })
     }
 }
 
 @Composable
-private fun HeroCard(onNavigate: (Int) -> Unit) {
+private fun HeroCard(onNavigate: (Int) -> Unit, onOpenGuide: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -92,7 +102,7 @@ private fun HeroCard(onNavigate: (Int) -> Unit) {
                 }
                 Text("v2.0.1", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
-            
+
             Spacer(Modifier.height(20.dp))
             Text("Kythera Tools", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.W900)
             Spacer(Modifier.height(8.dp))
@@ -101,10 +111,10 @@ private fun HeroCard(onNavigate: (Int) -> Unit) {
                 color = KColor.Text2, fontSize = 13.sp, lineHeight = 20.sp
             )
             Spacer(Modifier.height(24.dp))
-            
-            // 🔥 TOMBOL PANDUAN PENGGUNA
+
+            // 🔥 TOMBOL PANDUAN PENGGUNA (Sekarang berfungsi)
             Button(
-                onClick = { /* Buka Halaman Panduan */ },
+                onClick = onOpenGuide,
                 colors = ButtonDefaults.buttonColors(containerColor = KColor.Accent),
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
@@ -151,30 +161,41 @@ private data class ToolInfo(val title: String, val desc: String, val icon: Image
 
 @Composable
 private fun ToolGrid(onNavigate: (Int) -> Unit) {
-    // 🔥 DATA DIESUAIKAN: HANYA 3 TOOLS
     val tools = listOf(
         ToolInfo("Photo Enhance", "Upscale foto hingga 4x.", Icons.Rounded.AutoAwesome, KColor.Accent, 4, "AI"),
         ToolInfo("Video Converter", "MP4, AVI, MKV, MOV...", Icons.Rounded.Transform, KColor.Accent2, 1),
         ToolInfo("Video Compress", "Kurangi ukuran hingga 90%.", Icons.Rounded.Compress, KColor.Accent3, 2, "PRO")
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        // Kiri: Ada 2 Card
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            ToolCard(tools[0]) { onNavigate(tools[0].navIndex) }
-            ToolCard(tools[2]) { onNavigate(tools[2].navIndex) }
-        }
-        // Kanan: Hanya 1 Card. Area bawahnya otomatis kosong untuk tempat FAB!
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            ToolCard(tools[1]) { onNavigate(tools[1].navIndex) }
+    
+    // 🔥 Kita bungkus semuanya pakai Column biar berjejer ke bawah
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        
+        // 1. Photo Enhance (Index 0) dibuat FULL WIDTH di atas
+        ToolCard(tools[0]) { onNavigate(tools[0].navIndex) }
+
+        // 2. Baris kedua untuk Video Converter & Compress (Dibagi 2 sama rata)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Kolom Kiri
+            Box(modifier = Modifier.weight(1f)) {
+                ToolCard(tools[1]) { onNavigate(tools[1].navIndex) }
+            }
+            // Kolom Kanan
+            Box(modifier = Modifier.weight(1f)) {
+                ToolCard(tools[2]) { onNavigate(tools[2].navIndex) }
+            }
         }
     }
 }
+
 
 @Composable
 private fun ToolCard(tool: ToolInfo, onTap: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    
+
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.94f else 1f, animationSpec = tween(durationMillis = 150), label = "")
 
     Box(
@@ -199,7 +220,7 @@ private fun ToolCard(tool: ToolInfo, onTap: () -> Unit) {
                         .background(Brush.linearGradient(listOf(tool.color.copy(0.25f), tool.color.copy(0.05f)))), 
                     contentAlignment = Alignment.Center
                 ) { Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(22.dp)) }
-                
+
                 if (tool.badge != null) {
                     Box(
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(tool.color.copy(alpha = 0.2f))
@@ -208,16 +229,130 @@ private fun ToolCard(tool: ToolInfo, onTap: () -> Unit) {
                     ) { Text(text = tool.badge, color = tool.color, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold) }
                 }
             }
-            
+
             Spacer(Modifier.height(16.dp))
             Text(tool.title, color = KColor.Text, fontWeight = FontWeight.W700, fontSize = 14.sp)
             Spacer(Modifier.height(6.dp))
             Text(tool.desc, color = KColor.Text3, fontSize = 11.sp, lineHeight = 16.sp, maxLines = 2)
             Spacer(Modifier.height(16.dp))
-            
+
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.2f), modifier = Modifier.size(20.dp))
             }
         }
+    }
+}
+
+// ─── Desain Pop-up Panduan Pengguna ──────────────────────────────────────────
+
+@Composable
+fun GuideDialog(onDismiss: () -> Unit) {
+    val colorSurface = Color(0xFF1E1E1E)
+    val colorCyan = Color(0xFF00E5FF)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.8f), 
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = colorSurface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Panduan Kythera",
+                        color = colorCyan,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Tutup", tint = Color.White)
+                    }
+                }
+
+                Divider(color = Color.DarkGray, modifier = Modifier.padding(vertical = 12.dp))
+
+                // Isi Panduan yang bisa di-scroll
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    GuideSection(
+                        title = "✨ 1. Cara Meng-HD-kan Foto",
+                        desc = "• Masuk ke menu 'Photo Enhance'.\n• Upload foto yang buram atau pecah.\n• Biarkan AI Kythera bekerja melakukan Upscale hingga 4x lipat.\n• Klik tombol 'Simpan' untuk mendownload hasil."
+                    )
+                    
+                    GuideSection(
+                        title = "🎬 2. Cara Meng-HD-kan Video",
+                        desc = "• Masuk ke menu 'Video Enhance' (Jika tersedia).\n• Pilih video target dari galeri.\n• Engine akan merender ulang frame-by-frame untuk resolusi maksimal. Mendukung output mulus hingga 60fps untuk animasi atau gameplay.\n• Tunggu proses rendering selesai."
+                    )
+                    
+                    GuideSection(
+                        title = "🔀 3. Cara Mengubah Format",
+                        desc = "• Masuk ke menu 'Video Converter'.\n• Masukkan file video asli lu.\n• Pilih format tujuan di pengaturan (contoh: dari MKV ke MP4).\n• Klik 'Convert' dan tunggu Engine FFmpeg memproses file tersebut."
+                    )
+                    
+                    GuideSection(
+                        title = "🗜️ 4. Cara Kompres Video",
+                        desc = "• Masuk ke menu 'Video Compress'.\n• Pilih file video yang ukurannya terlalu besar.\n• Geser slider untuk mengatur seberapa kecil lu mau memadatkan ukurannya.\n• Tekan 'Compress' dan biarkan sistem merampingkan file tanpa merusak kualitas utama."
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = "Jonggol Game Center - Engine Active",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Tombol Paham
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = colorCyan),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Gua Paham!", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GuideSection(title: String, desc: String) {
+    Column(modifier = Modifier.padding(bottom = 20.dp)) {
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Text(
+            text = desc,
+            color = Color(0xFFB0B0B0), 
+            fontSize = 14.sp,
+            lineHeight = 22.sp
+        )
     }
 }
