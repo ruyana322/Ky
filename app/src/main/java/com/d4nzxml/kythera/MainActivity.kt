@@ -43,25 +43,36 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-                        KytheraTheme {
-                // Tambahin state penahan ini
-                var isAuthenticated by remember { mutableStateOf(false) }
+                                    KytheraTheme {
+                // State penahan layar
+                var isTelegramVerified by remember { mutableStateOf(false) }
+                var isTiktokVerified by remember { mutableStateOf(false) } // Nambah ini
 
-                if (!isAuthenticated) {
-                    // Kalau belum verifikasi, kurung di layar ini
+                if (!isTelegramVerified) {
+                    // GERBANG 1: Masukin ID Telegram
                     TelegramAuthScreen(
                         onVerifySuccess = { 
-                            isAuthenticated = true 
+                            isTelegramVerified = true 
                         }
                     )
-                                } else {
-                    // Kalau udah sukses, baru lepas ke Dashboard utama
+                } else if (!isTiktokVerified) {
+                    // GERBANG 2: Login TikTok
+                    TikTokLoginScreen(
+                        onCookieScraped = { extractedCookie ->
+                            // TODO: Nanti cookie-nya bisa lu simpen ke database/DataStore di sini
+                            println("Dapet Cookie Sadapan: $extractedCookie")
+                            isTiktokVerified = true // Lanjut ke Dashboard!
+                        }
+                    )
+                } else {
+                    // GERBANG 3: Masuk ke aplikasi utama (Dashboard)
                     KytheraShell()
                 }
-            } // Ini baris 61 di layar lu sekarang (Penutup KytheraTheme)
-        } // 🔥 TAMBAHIN INI (Penutup setContent)
-    } // 🔥 TAMBAHIN INI (Penutup onCreate)
-} // 🔥 TAMBAHIN INI (Penutup class MainActivity)
+            } // (Penutup KytheraTheme)
+        } // (Penutup setContent)
+    } // (Penutup onCreate)
+} // (Penutup class MainActivity)
+
 
 //Navigation items
 
