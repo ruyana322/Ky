@@ -90,7 +90,22 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                         // Biar render Javascript lebih sempurna
                         webChromeClient = WebChromeClient()
 
-                        webViewClient = object : WebViewClient() {
+                                                webViewClient = object : WebViewClient() {
+                            
+                            // 🔥 LOGIKA BARU: Cegah TikTok kabur ke aplikasi asli
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): Boolean {
+                                val url = request?.url?.toString() ?: ""
+                                
+                                // Kalau URL-nya BUKAN http/https (misal tiktok://), BLOCK!
+                                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                                    return true // True = WebView batalin proses loading
+                                }
+                                return false // False = Lanjut load halaman normal
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
@@ -102,6 +117,7 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                                 cekCookieDanLanjut(onCookieScraped)
                             }
                         }
+
                         
                         loadUrl("https://www.tiktok.com/login")
                     }
