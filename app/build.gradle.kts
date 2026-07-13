@@ -36,14 +36,26 @@ android {
         compose = true
     }
 
+    // 🔥 BRANKAS KEYSTORE: Ngebaca file hasil decode dan password rahasia GitHub Actions
+    signingConfigs {
+        create("release") {
+            storeFile = file("dadan_ruyana_release.keystore")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+            storePassword = System.getenv("STORE_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true // 🔥 Biar file APK makin langsing
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // 🔥 ARAHKAN KE BRANKAS RELEASE (Bukan debug lagi)
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -56,7 +68,7 @@ android {
 }
 
 dependencies {
-implementation("androidx.browser:browser:1.8.0")
+    implementation("androidx.browser:browser:1.8.0")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
