@@ -31,12 +31,55 @@ import com.d4nzxml.kythera.ui.theme.KColor
 // ─── History Screen (Berubah jadi Profile) ────────────────────────────────────
 @Composable
 fun HistoryScreen() {
-    // 🔥 1. Panggil brankas memori buat ngecek status TikTok
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
     
     val isTiktokLinked = sharedPref.getBoolean("is_tiktok_verified", false)
-    val tiktokCookie = sharedPref.getString("tiktok_cookie", "Belum ada cookie") ?: ""
+    val tiktokCookie = sharedPref.getString("tiktok_cookie", "") ?: ""
+
+    // 🔥 STATE UNTUK MENAMPUNG DATA DARI API
+    var usernameTikTok by remember { mutableStateOf("Dadan Ruyana") }
+    var nicknameTikTok by remember { mutableStateOf("@jonggolgamecenter") }
+    var isLoadingData by remember { mutableStateOf(false) }
+
+    // 🔥 MESIN PENYEDOT API (Berjalan otomatis di background pas layar dibuka)
+    LaunchedEffect(isTiktokLinked) {
+        if (isTiktokLinked && tiktokCookie.isNotEmpty()) {
+            isLoadingData = true
+            kotlinx.coroutines.Dispatchers.IO.invoke {
+                try {
+                    // Nembak API internal web TikTok
+                    val url = java.net.URL("https://www.tiktok.com/passport/web/account/info/")
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.requestMethod = "GET"
+                    
+                    // Nyamar jadi browser + masukin Cookie curian kita
+                    connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    connection.setRequestProperty("Cookie", tiktokCookie)
+
+                    if (connection.responseCode == 200) {
+                        val response = connection.inputStream.bufferedReader().use { it.readText() }
+                        // Parsing JSON manual biar gak butuh library tambahan
+                        val jsonObject = org.json.JSONObject(response)
+                        val dataObj = jsonObject.optJSONObject("data")
+                        
+                        if (dataObj != null) {
+                            val userObj = dataObj.optString("username", "")
+                            if (userObj.isNotEmpty()) {
+                                // Update UI dengan data asli dari TikTok
+                                usernameTikTok = userObj
+                                nicknameTikTok = "@$userObj"
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    isLoadingData = false
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -44,7 +87,6 @@ fun HistoryScreen() {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        // Header
         Text("Profile", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Text("Akun TikTok yang terhubung.", color = KColor.Text3, fontSize = 14.sp)
         Spacer(Modifier.height(24.dp))
@@ -63,7 +105,6 @@ fun HistoryScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally, 
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Avatar Bulat (Bebas error Brush)
                 Box(
                     modifier = Modifier
                         .size(88.dp)
@@ -75,13 +116,16 @@ fun HistoryScreen() {
                 }
                 Spacer(Modifier.height(16.dp))
                 
-                // Nama & Username (Nanti ini bisa kita ganti narik API kalau mau)
-                Text("Dadan Ruyana", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("@jonggolgamecenter", color = KColor.Text2, fontSize = 14.sp)
+                // 🔥 NAMA & USERNAME SEKARANG DINAMIS!
+                if (isLoadingData) {
+                    CircularProgressIndicator(color = KColor.Accent, modifier = Modifier.size(24.dp))
+                } else {
+                    Text(usernameTikTok, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(nicknameTikTok, color = KColor.Text2, fontSize = 14.sp)
+                }
                 
                 Spacer(Modifier.height(24.dp))
                 
-                // Statistik Akun
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
@@ -95,18 +139,15 @@ fun HistoryScreen() {
         
         Spacer(Modifier.height(28.dp))
         
-        // 🔥 Menu Opsi Akun
         Text("Pengaturan Akun", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         
-        // Data Status TikTok Otomatis
         ProfileMenuItem(
             icon = Icons.Rounded.CloudSync, 
             title = "Sinkronisasi TikTok", 
             trailingText = if (isTiktokLinked) "Terhubung 🟢" else "Belum 🔴"
         )
         
-        // Menampilkan Session ID
         ProfileMenuItem(
             icon = Icons.Rounded.Cookie, 
             title = "Sesi TikTok", 
@@ -115,14 +156,12 @@ fun HistoryScreen() {
         
         ProfileMenuItem(icon = Icons.Rounded.Storage, title = "Bersihkan Cache", trailingText = "124 MB")
         
-        // Tombol Keluar yang beneran berfungsi
         ProfileMenuItem(
             icon = Icons.Rounded.Logout, 
             title = "Keluar & Hapus Data", 
             trailingText = "", 
             isDestructive = true,
             onClick = {
-                // Bersihkan brankas dan reset paksa!
                 sharedPref.edit().clear().apply()
                 kotlin.system.exitProcess(0)
             }
@@ -132,53 +171,6 @@ fun HistoryScreen() {
     }
 }
 
-// 🔥 Komponen pendukung 1 (Profil) - TETAP SAMA
-@Composable
-fun ProfileStat(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = KColor.Text3, fontSize = 12.sp)
-    }
-}
-
-// 🔥 Komponen pendukung 2 (Profil) - DIUPGRADE
-@Composable
-fun ProfileMenuItem(
-    icon: ImageVector, 
-    title: String, 
-    trailingText: String, 
-    isDestructive: Boolean = false,
-    onClick: () -> Unit = {} // 🔥 Tambahan fungsi klik
-) {
-    val contentColor = if (isDestructive) KColor.Orange else Color.White
-    val iconColor = if (isDestructive) KColor.Orange else KColor.Accent
-    
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(KColor.Surface2)
-            .clickable(onClick = onClick) // 🔥 Biar barisnya bisa dipencet
-            .border(1.dp, KColor.Border, RoundedCornerShape(12.dp))
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.size(36.dp).clip(CircleShape).background(iconColor.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.width(16.dp))
-        Text(title, color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        
-        if (trailingText.isNotEmpty()) {
-            Text(trailingText, color = KColor.Text3, fontSize = 12.sp)
-        }
-    }
-}
 
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
