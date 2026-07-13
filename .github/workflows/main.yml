@@ -1,4 +1,4 @@
-name: Build Kythera Native APK
+Name: Build Kythera Native APK
 
 on:
   push:
@@ -69,7 +69,19 @@ jobs:
           fi
           echo "FFmpeg AAR size: $(du -sh app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar)"
 
+      # 🔥 INI KODINGAN BARU BUAT BONGKAR BRANKAS KEYSTORE
+      - name: Decode Keystore
+        env:
+          ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo $ENCODED_STRING | base64 -d > app/dadan_ruyana_release.keystore
+
+      # 🔥 INI KODINGAN BARU BUAT BUILD SAMBIL MASUKIN PASSWORD
       - name: Rakit APK Release
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK
