@@ -505,3 +505,67 @@ fun InitialLoadingScreen() {
         Text("Menghubungkan ke Server Kythera...", color = Color.Gray, fontSize = 14.sp)
     }
 }
+// ─── Komponen Tambahan Khusus Pengaturan ──────────────────────────────────────
+
+@Composable
+fun SettingToggleRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.W600)
+            Text(subtitle, color = Color.Gray, fontSize = 12.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF00E5FF), // Warna Cyan Kythera
+                uncheckedThumbColor = Color.Gray,
+                uncheckedTrackColor = Color.DarkGray
+            )
+        )
+    }
+}
+
+@Composable
+fun SettingActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    iconTint: Color = Color.Gray,
+    isDestructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    val textColor = if (isDestructive) Color(0xFFFF4B4B) else Color.White // Warna merah kalau tombol bahaya
+    val finalIconTint = if (isDestructive) Color(0xFFFF4B4B) else iconTint
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(finalIconTint, contentDescription = null, tint = finalIconTint, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = textColor, fontSize = 14.sp, fontWeight = FontWeight.W600)
+            Text(subtitle, color = Color.Gray, fontSize = 12.sp)
+        }
+        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.size(20.dp))
+    }
+}
+
