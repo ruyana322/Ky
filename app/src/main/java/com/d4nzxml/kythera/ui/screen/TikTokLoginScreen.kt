@@ -93,18 +93,35 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                                                 webViewClient = object : WebViewClient() {
                             
                             // 🔥 LOGIKA BARU: Cegah TikTok kabur ke aplikasi asli
-                            override fun shouldOverrideUrlLoading(
+                            override fun                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
                                 request: android.webkit.WebResourceRequest?
                             ): Boolean {
                                 val url = request?.url?.toString() ?: ""
                                 
-                                // Kalau URL-nya BUKAN http/https (misal tiktok://), BLOCK!
-                                if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                                    return true // True = WebView batalin proses loading
+                                // Kalau link normal (http/https), biarin WebView yang load
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    return false 
                                 }
-                                return false // False = Lanjut load halaman normal
+
+                                // Kalau link khusus (intent:// atau tiktok://), lempar ke HP!
+                                try {
+                                    val intent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME)
+                                    if (intent.resolveActivity(context.packageManager) != null) {
+                                        context.startActivity(intent)
+                                    } else {
+                                        val fallbackUrl = intent.getStringExtra("browser_fallback_url")
+                                        if (fallbackUrl != null) {
+                                            view?.loadUrl(fallbackUrl)
+                                        }
+                                    }
+                                    return true
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    return true
+                                }
                             }
+
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
