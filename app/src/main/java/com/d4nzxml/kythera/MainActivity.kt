@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-                        setContent {
+        setContent {
             KytheraTheme {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                 var maintenanceMsg by remember { mutableStateOf("") }
                 var triggerCheck by remember { mutableStateOf(0) } 
 
-                // Kunci Rahasia Telegram (Ganti ke Private Channel kalau udah siap)
+                // Kunci Rahasia Telegram (Ganti ke Private Channel lu)
                 val botToken = "8787965434:AAHEmWXdCW4EuO4pudbl2SqdlZU7q6sVpqQ"
                 val channelId = "-1001234567890" // Ganti pakai ID Private Channel lu
 
@@ -107,12 +107,10 @@ class MainActivity : ComponentActivity() {
 
                         if (!isTelegramVerified) {
                             TelegramAuthScreen(
-                                // 🔥 BUG FIX: Gak usah pake inputId, cukup set true aja
                                 onVerifySuccess = { 
                                     sharedPref.edit().apply {
                                         putBoolean("is_telegram_verified", true)
-                                        // Karena TelegramAuthScreen lu blm update, kita pake ID default dulu
-                                        putString("telegram_id", "6969528280") 
+                                        putString("telegram_id", "6969528280") // Jangan lupa ganti ID asli lu
                                         apply()
                                     }
                                     isTelegramVerified = true 
@@ -130,12 +128,15 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else {
+                            // Masuk ke dashboard utama aplikasi
                             KytheraShell()
                         }
                     }
                 }
             } // Penutup KytheraTheme
         } // Penutup setContent
+    } // Penutup onCreate
+} // Penutup class MainActivity
 
 
 // ------- Navigation items -------
