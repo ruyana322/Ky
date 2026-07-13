@@ -21,57 +21,119 @@ import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
 
-// ─── History Screen ───────────────────────────────────────────────────────────
+// 🔥 Ganti fungsi HistoryScreen lama dengan ini:
 @Composable
 fun HistoryScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(16.dp)
     ) {
-        Text("History", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-        Text("Riwayat semua proses video.", color = KColor.Text2, fontSize = 13.sp)
-        Spacer(Modifier.height(20.dp))
+        // Header
+        Text("Profile", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text("Akun TikTok yang terhubung.", color = KColor.Text3, fontSize = 14.sp)
+        Spacer(Modifier.height(24.dp))
 
-        // Placeholder items
-        val items = listOf(
-            Triple(Icons.Rounded.Image,       KColor.Accent,  "Enhance foto_wedding.jpg"  to "Photo Enhance · 4x Upscale · 2m lalu"),
-            Triple(Icons.Rounded.SwapHoriz,   KColor.Accent2, "Convert gameplay.mov"       to "Converter · H.264 / 1080p · 15m lalu"),
-            Triple(Icons.Rounded.Compress,    KColor.Accent3, "Compress tutorial.mp4"      to "Compress · 85% size reduction · 1j lalu"),
-            Triple(Icons.Rounded.Edit,        KColor.Orange,  "Patch vlog_final.mp4"       to "Patch Metadata · D4nzxml · 3j lalu"),
-        )
-
-        GlassCard {
-            items.forEachIndexed { i, (icon, color, data) ->
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        // 🔥 Card Profil Utama
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(8.dp, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(KColor.Surface2)
+                .border(1.dp, KColor.Border, RoundedCornerShape(16.dp))
+                .padding(24.dp)
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally, 
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Avatar Bulat
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(KColor.Accent, KColor.Accent2))),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        Modifier.size(40.dp).padding(2.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
-                            color = color.copy(0.1f),
-                            modifier = Modifier.fillMaxSize()
-                        ) {}
-                        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(data.first, color = KColor.Text, fontSize = 13.sp,
-                            fontWeight = FontWeight.W500, maxLines = 1)
-                        Text(data.second, color = KColor.Text3, fontSize = 11.sp)
-                    }
-                    KBadge("Done", KColor.Accent3)
+                    Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.Black, modifier = Modifier.size(48.dp))
                 }
-                if (i < items.lastIndex) HorizontalDivider(color = KColor.Border, thickness = 0.5.dp)
+                Spacer(Modifier.height(16.dp))
+                
+                // Nama & Username (Eksklusif Kythera)
+                Text("Dadan Ruyana", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("@jonggolgamecenter", color = KColor.Text2, fontSize = 14.sp)
+                
+                Spacer(Modifier.height(24.dp))
+                
+                // Statistik Akun
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    ProfileStat("Mengikuti", "128")
+                    ProfileStat("Pengikut", "10.5K")
+                    ProfileStat("Suka", "1.2M")
+                }
             }
+        }
+        
+        Spacer(Modifier.height(28.dp))
+        
+        // 🔥 Menu Opsi Akun
+        Text("Pengaturan Akun", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        
+        ProfileMenuItem(Icons.Rounded.CloudSync, "Sinkronisasi TikTok", "Terhubung")
+        ProfileMenuItem(Icons.Rounded.Storage, "Bersihkan Cache", "124 MB")
+        ProfileMenuItem(Icons.Rounded.Logout, "Keluar", "", isDestructive = true)
+        
+        Spacer(Modifier.height(100.dp))
+    }
+}
+
+// 🔥 Komponen pendukung 1 (Taruh di bawah HistoryScreen)
+@Composable
+fun ProfileStat(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = KColor.Text3, fontSize = 12.sp)
+    }
+}
+
+// 🔥 Komponen pendukung 2 (Taruh di bawah ProfileStat)
+@Composable
+fun ProfileMenuItem(icon: ImageVector, title: String, trailingText: String, isDestructive: Boolean = false) {
+    val contentColor = if (isDestructive) KColor.Orange else Color.White
+    val iconColor = if (isDestructive) KColor.Orange else KColor.Accent
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(KColor.Surface2)
+            .border(1.dp, KColor.Border, RoundedCornerShape(12.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp).clip(CircleShape).background(iconColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(title, color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        
+        if (trailingText.isNotEmpty()) {
+            Text(trailingText, color = KColor.Text3, fontSize = 12.sp)
         }
     }
 }
+
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 @Composable
