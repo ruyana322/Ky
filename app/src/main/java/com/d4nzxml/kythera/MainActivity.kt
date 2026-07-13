@@ -42,51 +42,101 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-                setContent {
+                        setContent {
             KytheraTheme {
-                // 1. Panggil Context Compose dulu biar aman
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
 
-                // 2. Baca status login terakhir dari brankas
-                var isTelegramVerified by remember { 
-                    mutableStateOf(sharedPref.getBoolean("is_telegram_verified", false)) 
-                }
-                var isTiktokVerified by remember { 
-                    mutableStateOf(sharedPref.getBoolean("is_tiktok_verified", false)) 
+                // 🔥 STATE UNTUK PENJAGA GERBANG
+                var appStatus by remember { mutableStateOf("CHECKING") } 
+                var maintenanceMsg by remember { mutableStateOf("") }
+                var triggerCheck by remember { mutableStateOf(0) } 
+
+                // Kunci Rahasia Telegram (Ganti ke Private Channel kalau udah siap)
+                val botToken = "8787965434:AAHEmWXdCW4EuO4pudbl2SqdlZU7q6sVpqQ"
+                val channelId = "-1001234567890" // Ganti pakai ID Private Channel lu
+
+                LaunchedEffect(triggerCheck) {
+                    appStatus = "CHECKING"
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            val url = java.net.URL("https://api.telegram.org/bot$botToken/getChat?chat_id=$channelId")
+                            val conn = url.openConnection() as java.net.HttpURLConnection
+                            conn.connectTimeout = 5000 
+                            
+                            if (conn.responseCode == 200) {
+                                val res = conn.inputStream.bufferedReader().readText()
+                                val resultObj = org.json.JSONObject(res).optJSONObject("result")
+                                val desc = resultObj?.optString("description", "ACTIVE") ?: "ACTIVE"
+                                
+                                if (desc.contains("MAINTENANCE", ignoreCase = true)) {
+                                    val splitDesc = desc.split("|")
+                                    if (splitDesc.size > 1) {
+                                        maintenanceMsg = splitDesc[1]
+                                    }
+                                    appStatus = "MAINTENANCE"
+                                } else {
+                                    appStatus = "ACTIVE"
+                                }
+                            } else {
+                                appStatus = "ACTIVE" 
+                            }
+                        } catch (e: Exception) {
+                            appStatus = "ACTIVE" 
+                        }
+                    }
                 }
 
-                                if (!isTelegramVerified) {
-                    TelegramAuthScreen(
-                        // Asumsi fungsi lu ngirim ID yang diketik user (misal: inputId)
-                        onVerifySuccess = { inputId -> 
-                            sharedPref.edit().apply {
-                                putBoolean("is_telegram_verified", true)
-                                putString("telegram_id", inputId) // 🔥 Simpan ID user ke brankas!
-                                apply()
-                            }
-                            isTelegramVerified = true 
+                when (appStatus) {
+                    "CHECKING" -> {
+                        InitialLoadingScreen()
+                    }
+                    "MAINTENANCE" -> {
+                        MaintenanceScreen(
+                            pesan = maintenanceMsg,
+                            onRetry = { triggerCheck++ }
+                        )
+                    }
+                    "ACTIVE" -> {
+                        var isTelegramVerified by remember { 
+                            mutableStateOf(sharedPref.getBoolean("is_telegram_verified", false)) 
                         }
-                    )
-                }
- else if (!isTiktokVerified) {
-                    TikTokLoginScreen(
-                        onCookieScraped = { extractedCookie ->
-                            sharedPref.edit().apply {
-                                putBoolean("is_tiktok_verified", true)
-                                putString("tiktok_cookie", extractedCookie)
-                                apply()
-                            }
-                            isTiktokVerified = true 
+                        var isTiktokVerified by remember { 
+                            mutableStateOf(sharedPref.getBoolean("is_tiktok_verified", false)) 
                         }
-                    )
-                } else {
-                    KytheraShell()
+
+                        if (!isTelegramVerified) {
+                            TelegramAuthScreen(
+                                // 🔥 BUG FIX: Gak usah pake inputId, cukup set true aja
+                                onVerifySuccess = { 
+                                    sharedPref.edit().apply {
+                                        putBoolean("is_telegram_verified", true)
+                                        // Karena TelegramAuthScreen lu blm update, kita pake ID default dulu
+                                        putString("telegram_id", "6969528280") 
+                                        apply()
+                                    }
+                                    isTelegramVerified = true 
+                                }
+                            )
+                        } else if (!isTiktokVerified) {
+                            TikTokLoginScreen(
+                                onCookieScraped = { extractedCookie ->
+                                    sharedPref.edit().apply {
+                                        putBoolean("is_tiktok_verified", true)
+                                        putString("tiktok_cookie", extractedCookie)
+                                        apply()
+                                    }
+                                    isTiktokVerified = true 
+                                }
+                            )
+                        } else {
+                            KytheraShell()
+                        }
+                    }
                 }
             } // Penutup KytheraTheme
         } // Penutup setContent
-    } // Penutup onCreate
-} // Penutup class MainActivity
+
 
 // ------- Navigation items -------
 
