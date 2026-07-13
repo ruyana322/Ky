@@ -56,24 +56,24 @@ class MainActivity : ComponentActivity() {
                 val botToken = "8787965434:AAHEmWXdCW4EuO4pudbl2SqdlZU7q6sVpqQ"
                 val channelId = "-1001234567890" // Ganti pakai ID Private Channel lu
 
-                LaunchedEffect(triggerCheck) {
+                                LaunchedEffect(triggerCheck) {
                     appStatus = "CHECKING"
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
-                            val url = java.net.URL("https://api.telegram.org/bot$botToken/getChat?chat_id=$channelId")
+                            // 🔥 URL RAW GIST LU UDAH DIPASANG DI SINI (AMAN DARI HACKER)
+                            val url = java.net.URL("https://gist.githubusercontent.com/ruyana322/b44b44244f13d1feb2e18f19fcfa61a0/raw/cfd33605e33942b16d372037186d86ad29361407/kythera_status.json")
                             val conn = url.openConnection() as java.net.HttpURLConnection
                             conn.connectTimeout = 5000 
                             
                             if (conn.responseCode == 200) {
                                 val res = conn.inputStream.bufferedReader().readText()
-                                val resultObj = org.json.JSONObject(res).optJSONObject("result")
-                                val desc = resultObj?.optString("description", "ACTIVE") ?: "ACTIVE"
+                                val resultObj = org.json.JSONObject(res)
                                 
-                                if (desc.contains("MAINTENANCE", ignoreCase = true)) {
-                                    val splitDesc = desc.split("|")
-                                    if (splitDesc.size > 1) {
-                                        maintenanceMsg = splitDesc[1]
-                                    }
+                                // Ngebaca status dari file Gist lu
+                                val status = resultObj.optString("status", "ACTIVE")
+                                
+                                if (status == "MAINTENANCE") {
+                                    maintenanceMsg = resultObj.optString("message", "Sedang perbaikan sistem")
                                     appStatus = "MAINTENANCE"
                                 } else {
                                     appStatus = "ACTIVE"
@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+
 
                 when (appStatus) {
                     "CHECKING" -> {
