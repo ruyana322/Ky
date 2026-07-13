@@ -1,5 +1,7 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.shadow
@@ -7,7 +9,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -27,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
+import java.util.Locale
 
 // ─── History Screen (Berubah jadi Profile) ────────────────────────────────────
 @Composable
@@ -37,23 +43,31 @@ fun HistoryScreen() {
     val isTiktokLinked = sharedPref.getBoolean("is_tiktok_verified", false)
     val tiktokCookie = sharedPref.getString("tiktok_cookie", "") ?: ""
 
-    // 🔥 STATE UNTUK MENAMPUNG DATA DARI API
-    var usernameTikTok by remember { mutableStateOf("Dadan Ruyana") }
-    var nicknameTikTok by remember { mutableStateOf("@jonggolgamecenter") }
+    // 🔥 STATE UNTUK MENAMPUNG DATA FULL DARI API
+    var usernameTikTok by remember { mutableStateOf("Memuat...") }
+    var nicknameTikTok by remember { mutableStateOf("@memuat...") }
+    var profileBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    
+    var followingCount by remember { mutableStateOf("-") }
+    var followerCount by remember { mutableStateOf("-") }
+    var likesCount by remember { mutableStateOf("-") }
+    
     var isLoadingData by remember { mutableStateOf(false) }
 
-        // 🔥 MESIN PENYEDOT API (Berjalan otomatis di background)
+    // 🔥 MESIN PENYEDOT API GANDA (Berjalan otomatis di background)
     LaunchedEffect(isTiktokLinked) {
         if (isTiktokLinked && tiktokCookie.isNotEmpty()) {
             isLoadingData = true
-            try {
-                // Pindah ke jalur IO (Background Thread) yang bener pakai withContext
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    // TAHAP 1: Ambil Username dan Link Avatar
                     val url = java.net.URL("https://www.tiktok.com/passport/web/account/info/")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.requestMethod = "GET"
                     connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                     connection.setRequestProperty("Cookie", tiktokCookie)
+
+                    var extractedUsername = ""
 
                     if (connection.responseCode == 200) {
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
@@ -61,22 +75,62 @@ fun HistoryScreen() {
                         val dataObj = jsonObject.optJSONObject("data")
                         
                         if (dataObj != null) {
-                            val userObj = dataObj.optString("username", "")
-                            if (userObj.isNotEmpty()) {
-                                usernameTikTok = userObj
-                                nicknameTikTok = "@$userObj"
+                            extractedUsername = dataObj.optString("username", "")
+                            if (extractedUsername.isNotEmpty()) {
+                                usernameTikTok = extractedUsername
+                                nicknameTikTok = "@$extractedUsername"
+                            }
+                            
+                            // Download Foto Profil manual jadi Bitmap
+                            val avatarUrl = dataObj.optString("avatar_url", "")
+                            if (avatarUrl.isNotEmpty()) {
+                                try {
+                                    val imgUrl = java.net.URL(avatarUrl)
+                                    val imgConn = imgUrl.openConnection() as java.net.HttpURLConnection
+                                    imgConn.doInput = true
+                                    imgConn.connect()
+                                    val bitmap = BitmapFactory.decodeStream(imgConn.inputStream)
+                                    if (bitmap != null) {
+                                        profileBitmap = bitmap.asImageBitmap()
+                                    }
+                                } catch (e: Exception) { e.printStackTrace() }
                             }
                         }
                     }
+
+                    // TAHAP 2: Pakai Username buat nembak data Statistik (Followers dll)
+                    if (extractedUsername.isNotEmpty()) {
+                        try {
+                            val statsUrl = java.net.URL("https://www.tiktok.com/api/user/detail/?uniqueId=$extractedUsername")
+                            val statsConn = statsUrl.openConnection() as java.net.HttpURLConnection
+                            statsConn.requestMethod = "GET"
+                            statsConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                            statsConn.setRequestProperty("Cookie", tiktokCookie)
+
+                            if (statsConn.responseCode == 200) {
+                                val statsRes = statsConn.inputStream.bufferedReader().use { it.readText() }
+                                val statsJson = org.json.JSONObject(statsRes)
+                                val userInfo = statsJson.optJSONObject("userInfo")
+                                val statsObj = userInfo?.optJSONObject("stats")
+                                
+                                if (statsObj != null) {
+                                    // Parse angka dan format jadi "10.5K", "1.2M", dll
+                                    followingCount = formatK(statsObj.optInt("followingCount", 0))
+                                    followerCount = formatK(statsObj.optInt("followerCount", 0))
+                                    likesCount = formatK(statsObj.optInt("heartCount", 0))
+                                }
+                            }
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    isLoadingData = false
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                isLoadingData = false
             }
         }
     }
-
 
     Column(
         modifier = Modifier
@@ -102,6 +156,7 @@ fun HistoryScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally, 
                 modifier = Modifier.fillMaxWidth()
             ) {
+                // 🔥 AVATAR DINAMIS
                 Box(
                     modifier = Modifier
                         .size(88.dp)
@@ -109,7 +164,16 @@ fun HistoryScreen() {
                         .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(KColor.Accent, KColor.Accent2))),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.Black, modifier = Modifier.size(48.dp))
+                    if (profileBitmap != null) {
+                        Image(
+                            bitmap = profileBitmap!!,
+                            contentDescription = "Profile Picture",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.Black, modifier = Modifier.size(48.dp))
+                    }
                 }
                 Spacer(Modifier.height(16.dp))
                 
@@ -123,13 +187,14 @@ fun HistoryScreen() {
                 
                 Spacer(Modifier.height(24.dp))
                 
+                // 🔥 STATISTIK DINAMIS
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    ProfileStat("Mengikuti", "128")
-                    ProfileStat("Pengikut", "10.5K")
-                    ProfileStat("Suka", "1.2M")
+                    ProfileStat("Mengikuti", followingCount)
+                    ProfileStat("Pengikut", followerCount)
+                    ProfileStat("Suka", likesCount)
                 }
             }
         }
@@ -165,6 +230,15 @@ fun HistoryScreen() {
         )
         
         Spacer(Modifier.height(100.dp))
+    }
+}
+
+// 🔥 Fungsi Pembantu buat ngeringkas angka (Misal: 10500 jadi 10.5K)
+private fun formatK(num: Int): String {
+    return when {
+        num >= 1_000_000 -> String.format(Locale.US, "%.1fM", num / 1_000_000.0).replace(".0M", "M")
+        num >= 1_000 -> String.format(Locale.US, "%.1fK", num / 1_000.0).replace(".0K", "K")
+        else -> num.toString()
     }
 }
 
