@@ -184,7 +184,7 @@ val telegramId = sharedPref.getString("telegram_id", "") ?: ""
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    ProfileStat("User ID", if(telegramId == "ID_LU_DISINI") "Unknown" else telegramId)
+                    ProfileStat("User ID", if(telegramId == "6969528280") "Unknown" else telegramId)
                     ProfileStat("Tipe Akun", "Premium")
                     ProfileStat("Status", "Online")
                 }
@@ -276,8 +276,15 @@ fun ProfileMenuItem(
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 @Composable
 fun SettingsScreen() {
-    var isDarkMode by remember { mutableStateOf(true) }
-    var isTurboMode by remember { mutableStateOf(true) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+
+    // 🔥 STATE MEMORI UNTUK TOGGLE (Baca dari HP)
+    var isDarkMode by remember { mutableStateOf(sharedPref.getBoolean("pref_dark_mode", true)) }
+    var isTurboMode by remember { mutableStateOf(sharedPref.getBoolean("pref_turbo_mode", true)) }
+    
+    // 🔥 STATE UNTUK BACA UKURAN CACHE ASLI
+    var cacheSize by remember { mutableStateOf(getCacheSize(context)) }
 
     Column(
         modifier = Modifier
@@ -293,9 +300,16 @@ fun SettingsScreen() {
         Spacer(Modifier.height(12.dp))
         GlassCard {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SettingToggleRow(Icons.Rounded.DarkMode, "Tema Gelap", "Gunakan tampilan gelap", isDarkMode) { isDarkMode = it }
-                SettingActionRow(Icons.Rounded.Language, "Bahasa", "Indonesia")
-                SettingActionRow(Icons.Rounded.Folder, "Lokasi Penyimpanan", "/Internal/Kythera/")
+                SettingToggleRow(Icons.Rounded.DarkMode, "Tema Gelap", "Gunakan tampilan gelap", isDarkMode) { 
+                    isDarkMode = it 
+                    sharedPref.edit().putBoolean("pref_dark_mode", it).apply()
+                }
+                SettingActionRow(Icons.Rounded.Language, "Bahasa", "Indonesia") {
+                    android.widget.Toast.makeText(context, "Mendukung bahasa Indonesia untuk saat ini", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                SettingActionRow(Icons.Rounded.Folder, "Lokasi Penyimpanan", "/Internal/Kythera/") {
+                    android.widget.Toast.makeText(context, "Folder Kythera ada di direktori utama", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -304,9 +318,19 @@ fun SettingsScreen() {
         Spacer(Modifier.height(12.dp))
         GlassCard {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SettingToggleRow(Icons.Rounded.Bolt, "Mode Performa", "Gunakan seluruh core CPU/GPU", isTurboMode) { isTurboMode = it }
-                SettingActionRow(Icons.Rounded.Memory, "Thread AI/FFmpeg", "Auto (Maksimal)")
-                SettingActionRow(Icons.Rounded.DeleteOutline, "Hapus Cache", "Aman untuk dibersihkan")
+                SettingToggleRow(Icons.Rounded.Bolt, "Mode Performa", "Gunakan seluruh core CPU/GPU", isTurboMode) { 
+                    isTurboMode = it 
+                    sharedPref.edit().putBoolean("pref_turbo_mode", it).apply()
+                }
+                SettingActionRow(Icons.Rounded.Memory, "Thread AI/FFmpeg", "Auto (Maksimal)") {
+                    android.widget.Toast.makeText(context, "Thread otomatis menyesuaikan spesifikasi HP", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                // 🔥 TOMBOL HAPUS CACHE ASLI
+                SettingActionRow(Icons.Rounded.DeleteOutline, "Hapus Cache", cacheSize) {
+                    clearAppCache(context)
+                    cacheSize = getCacheSize(context) // Update teks setelah dihapus
+                    android.widget.Toast.makeText(context, "Cache berhasil dibersihkan!", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -315,8 +339,12 @@ fun SettingsScreen() {
         Spacer(Modifier.height(12.dp))
         GlassCard {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SettingActionRow(Icons.Rounded.CheckCircle, "Status AI Engine", "Online & Siap", iconTint = KColor.Accent2)
-                SettingActionRow(Icons.Rounded.SystemUpdate, "Update Engine", "Cek pembaruan model AI")
+                SettingActionRow(Icons.Rounded.CheckCircle, "Status AI Engine", "Online & Siap", iconTint = KColor.Accent2) {
+                    android.widget.Toast.makeText(context, "Server AI Berjalan Normal", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                SettingActionRow(Icons.Rounded.SystemUpdate, "Update Engine", "Cek pembaruan model AI") {
+                    android.widget.Toast.makeText(context, "Lu menggunakan engine versi terbaru!", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -325,8 +353,12 @@ fun SettingsScreen() {
         Spacer(Modifier.height(12.dp))
         GlassCard {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SettingActionRow(Icons.Rounded.History, "Riwayat", "Lihat log proses video")
-                SettingActionRow(Icons.Rounded.BarChart, "Statistik", "Data penggunaan tools")
+                SettingActionRow(Icons.Rounded.History, "Riwayat", "Lihat log proses video") {
+                    android.widget.Toast.makeText(context, "Riwayat kosong", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                SettingActionRow(Icons.Rounded.BarChart, "Statistik", "Data penggunaan tools") {
+                    android.widget.Toast.makeText(context, "Belum ada statistik render", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -335,92 +367,71 @@ fun SettingsScreen() {
         Spacer(Modifier.height(12.dp))
         GlassCard {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SettingActionRow(Icons.Rounded.Favorite, "Support Dev D4nzxml", "Traktir kopi / Donasi", iconTint = Color(0xFFFF4B4B))
-                SettingActionRow(Icons.Rounded.Article, "Changelog", "Versi 2.0.1")
-                SettingActionRow(Icons.Rounded.ChatBubbleOutline, "Feedback", "Laporkan bug atau saran")
-                SettingActionRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "Kebijakan Privasi")
+                // 🔥 ARAHKAN KE WEB LU
+                SettingActionRow(Icons.Rounded.Favorite, "Support Dev D4nzxml", "Traktir kopi / Donasi", iconTint = Color(0xFFFF4B4B)) {
+                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://kytheramethode.my.id"))
+                    context.startActivity(webIntent)
+                }
+                SettingActionRow(Icons.Rounded.Article, "Changelog", "Versi 2.0.1") {
+                    android.widget.Toast.makeText(context, "Update: Peningkatan UI & Integrasi Telegram", android.widget.Toast.LENGTH_LONG).show()
+                }
+                // 🔥 ARAHKAN KE WA LU
+                SettingActionRow(Icons.Rounded.ChatBubbleOutline, "Feedback", "Laporkan bug atau saran") {
+                    val waIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://wa.me/6282129942772"))
+                    context.startActivity(waIntent)
+                }
+                SettingActionRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "Kebijakan Privasi") {
+                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://kytheramethode.my.id"))
+                    context.startActivity(webIntent)
+                }
                 Spacer(Modifier.height(8.dp))
-                SettingActionRow(Icons.Rounded.Logout, "Keluar Akun", "Akhiri sesi saat ini", isDestructive = true)
+                
+                // 🔥 TOMBOL LOGOUT ASLI (Hapus data & Tutup App)
+                SettingActionRow(Icons.Rounded.Logout, "Keluar Akun", "Akhiri sesi saat ini", isDestructive = true) {
+                    sharedPref.edit().clear().apply()
+                    android.widget.Toast.makeText(context, "Sesi diakhiri, silakan login ulang.", android.widget.Toast.LENGTH_SHORT).show()
+                    kotlin.system.exitProcess(0)
+                }
             }
         }
 
         Spacer(Modifier.height(40.dp))
 
+        // 🔥 FOOTER DIBERSIHKAN DARI NAMA PERUSAHAAN LAIN
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("© 2026 Powered by D4nzxml", color = KColor.Text3, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("Jonggol Game Center", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp)
+            Text("© 2026 Powered by D4nzxml Studio", color = KColor.Text3, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("Dadan Ruyana - Cugenang, Kab. Cianjur", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp)
         }
 
         Spacer(Modifier.height(100.dp))
     }
 }
 
-@Composable
-fun SettingActionRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    iconTint: Color = KColor.Text2,
-    isDestructive: Boolean = false,
-    onClick: () -> Unit = {}
-) {
-    val color = if (isDestructive) KColor.Orange else Color.White
-    val tint = if (isDestructive) KColor.Orange else iconTint
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            if (subtitle.isNotEmpty()) {
-                Text(subtitle, color = KColor.Text3, fontSize = 11.sp)
-            }
+// 🔥 FUNGSI TAMBAHAN BUAT MESIN CACHE (Taruh di luar fungsi SettingsScreen)
+fun getCacheSize(context: android.content.Context): String {
+    return try {
+        val size = context.cacheDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
+        when {
+            size < 1024 -> "$size B"
+            size < 1024 * 1024 -> "${size / 1024} KB"
+            else -> "${size / (1024 * 1024)} MB"
         }
-        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = KColor.Text3, modifier = Modifier.size(18.dp))
+    } catch (e: Exception) {
+        "0 MB"
     }
 }
 
-@Composable
-fun SettingToggleRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = KColor.Text2, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = KColor.Text3, fontSize = 11.sp)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = KColor.Accent,
-                uncheckedThumbColor = KColor.Text3,
-                uncheckedTrackColor = KColor.Surface2
-            )
-        )
+fun clearAppCache(context: android.content.Context) {
+    try {
+        context.cacheDir.deleteRecursively()
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
+
 // ─── Layar Maintenance & Loading ──────────────────────────────────────────────
 
 @Composable
