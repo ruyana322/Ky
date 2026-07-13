@@ -56,27 +56,57 @@ class MainActivity : ComponentActivity() {
                 val botToken = "8787965434:AAHEmWXdCW4EuO4pudbl2SqdlZU7q6sVpqQ"
                 val channelId = "-1001234567890" // Ganti pakai ID Private Channel lu
 
-                                LaunchedEffect(triggerCheck) {
+                                // Pastikan di bagian atas Composable lu udah ada pemanggilan context, contohnya:
+// val context = LocalContext.current 
+// val triggerCheck = remember { mutableStateOf(false) }
+// ...
+
+                LaunchedEffect(triggerCheck.value) {
                     appStatus = "CHECKING"
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
-                            // 🔥 URL RAW GIST LU UDAH DIPASANG DI SINI (AMAN DARI HACKER)
-                            val url = java.net.URL("https://gist.githubusercontent.com/ruyana322/b44b44244f13d1feb2e18f19fcfa61a0/raw/cfd33605e33942b16d372037186d86ad29361407/kythera_status.json")
+                            // 🔥 1. Nembak Link Abadi Gist Lu
+                            val url = java.net.URL("https://gist.githubusercontent.com/ruyana322/b44b44244f13d1feb2e18f19fcfa61a0/raw/kythera_status.json")
                             val conn = url.openConnection() as java.net.HttpURLConnection
                             conn.connectTimeout = 5000 
                             
                             if (conn.responseCode == 200) {
                                 val res = conn.inputStream.bufferedReader().readText()
-                                val resultObj = org.json.JSONObject(res)
+                                val rootObj = org.json.JSONObject(res)
                                 
-                                // Ngebaca status dari file Gist lu
-                                val status = resultObj.optString("status", "ACTIVE")
+                                // 🔥 2. BACA STATUS MAINTENANCE
+                                val statusObj = rootObj.optJSONObject("app_status")
+                                val status = statusObj?.optString("status", "ACTIVE") ?: "ACTIVE"
                                 
                                 if (status == "MAINTENANCE") {
-                                    maintenanceMsg = resultObj.optString("message", "Sedang perbaikan sistem")
+                                    maintenanceMsg = statusObj?.optString("message", "Sedang perbaikan sistem") ?: "Sedang perbaikan sistem"
                                     appStatus = "MAINTENANCE"
                                 } else {
                                     appStatus = "ACTIVE"
+                                    
+                                    // 🔥 3. SIMPAN SEMUA RACIKAN KE BRANKAS APLIKASI
+                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+                                    sharedPref.edit().apply {
+                                        
+                                        // Racikan FFmpeg Converter
+                                        val convObj = rootObj.optJSONObject("ffmpeg_converter")
+                                        putString("conv_crf_extra", convObj?.optString("crf_extra_args", "-bf 0") ?: "-bf 0")
+                                        putString("conv_audio", convObj?.optString("audio_args", "-c:a aac -b:a 192k") ?: "-c:a aac -b:a 192k")
+                                        putString("conv_global", convObj?.optString("global_extra_args", "-movflags +faststart") ?: "-movflags +faststart")
+                                        
+                                        // Racikan FFmpeg Compressor
+                                        val compObj = rootObj.optJSONObject("ffmpeg_compressor")
+                                        putString("comp_audio_compress", compObj?.optString("audio_compress_args", "-c:a aac -b:a 128k") ?: "-c:a aac -b:a 128k")
+                                        putString("comp_audio_copy", compObj?.optString("audio_copy_args", "-c:a copy") ?: "-c:a copy")
+                                        putString("comp_meta", compObj?.optString("remove_metadata_args", "-map_metadata -1") ?: "-map_metadata -1")
+                                        
+                                        // Racikan AI RealSR
+                                        val aiObj = rootObj.optJSONObject("ai_realsr")
+                                        putString("ai_scale", aiObj?.optString("scale_factor", "4") ?: "4")
+                                        putString("ai_cpu_args", aiObj?.optString("cpu_fallback_args", "-g -1") ?: "-g -1")
+                                        
+                                        apply() // Kunci brankasnya!
+                                    }
                                 }
                             } else {
                                 appStatus = "ACTIVE" 
@@ -86,6 +116,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+
 
 
                 when (appStatus) {
