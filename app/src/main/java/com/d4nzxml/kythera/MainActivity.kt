@@ -2,7 +2,6 @@ package com.d4nzxml.kythera
 import androidx.compose.material3.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -64,7 +63,7 @@ class MainActivity : ComponentActivity() {
 // val triggerCheck = remember { mutableStateOf(false) }
 // ...
 
-                LaunchedEffect(triggerCheck.value) {
+                LaunchedEffect(triggerCheck) {
                     appStatus = "CHECKING"
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
