@@ -334,6 +334,9 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
 // ─── Drawer ───────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
+    // 🔥 PENTING: Panggil context di sini buat ngebuka aplikasi lain (WA/Web)
+    val context = androidx.compose.ui.platform.LocalContext.current
+
     ModalDrawerSheet(
         drawerContainerColor = KColor.Surface,
         modifier = Modifier.width(280.dp)
@@ -392,9 +395,34 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Icon(Icons.Rounded.Email, contentDescription = "Email", tint = KColor.Text3, modifier = Modifier.size(24.dp))
-            Icon(Icons.Rounded.Share, contentDescription = "Share", tint = KColor.Text3, modifier = Modifier.size(24.dp))
-            Icon(Icons.Rounded.Language, contentDescription = "Web", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+            // 🔥 TOMBOL PESAN (WHATSAPP)
+            IconButton(onClick = {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    data = android.net.Uri.parse("https://wa.me/6282129942772")
+                }
+                context.startActivity(intent)
+            }) {
+                Icon(Icons.Rounded.Email, contentDescription = "Pesan WA", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+            }
+
+            // 🔥 TOMBOL SHARE (TELEGRAM)
+            IconButton(onClick = {
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_TEXT, "Ayo gabung ke channel Telegram Kythera: https://t.me/kytheraa_123")
+                }
+                context.startActivity(android.content.Intent.createChooser(shareIntent, "Bagikan via"))
+            }) {
+                Icon(Icons.Rounded.Share, contentDescription = "Share", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+            }
+
+            // 🔥 TOMBOL DUNIA (WEBSITE METHDOE)
+            IconButton(onClick = {
+                val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://kytheramethode.my.id"))
+                context.startActivity(webIntent)
+            }) {
+                Icon(Icons.Rounded.Language, contentDescription = "Web", tint = KColor.Text3, modifier = Modifier.size(24.dp))
+            }
         }
 
         Box(
@@ -403,7 +431,8 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
                 .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("v2.0.1 · FFmpeg min-gpl 6.x", color = KColor.Text3, fontSize = 10.sp)
+            // 🔥 TEKS FOOTER UDAH DIGANTI
+            Text("v2.0.1 · Kythera ai", color = KColor.Text3, fontSize = 10.sp)
         }
     }
 }
