@@ -42,12 +42,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-                                                KytheraTheme {
-                // 1. Panggil brankas penyimpanan bawaan Android
-                val sharedPref = getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+                setContent {
+            KytheraTheme {
+                // 1. Panggil Context Compose dulu biar aman
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
 
-                // 2. Baca status login terakhir dari brankas (default-nya false kalau belum pernah)
+                // 2. Baca status login terakhir dari brankas
                 var isTelegramVerified by remember { 
                     mutableStateOf(sharedPref.getBoolean("is_telegram_verified", false)) 
                 }
@@ -56,19 +57,15 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (!isTelegramVerified) {
-                    // GERBANG 1: Masukin ID Telegram
                     TelegramAuthScreen(
                         onVerifySuccess = { 
-                            // KUNCI: Simpan status sukses ke brankas biar permanen!
                             sharedPref.edit().putBoolean("is_telegram_verified", true).apply()
                             isTelegramVerified = true 
                         }
                     )
                 } else if (!isTiktokVerified) {
-                    // GERBANG 2: Login TikTok
                     TikTokLoginScreen(
                         onCookieScraped = { extractedCookie ->
-                            // KUNCI: Simpan status dan cookie TikTok-nya sekalian!
                             sharedPref.edit().apply {
                                 putBoolean("is_tiktok_verified", true)
                                 putString("tiktok_cookie", extractedCookie)
@@ -78,13 +75,15 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else {
-                    // GERBANG 3: Masuk ke Dashboard
                     KytheraShell()
                 }
-            } // (Penutup KytheraTheme)
+            } // Penutup KytheraTheme
+        } // Penutup setContent
+    } // Penutup onCreate
+} // Penutup class MainActivity
 
+// ------- Navigation items -------
 
-//Navigation items
 
 data class NavItem(val icon: ImageVector, val label: String)
 
