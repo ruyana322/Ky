@@ -63,8 +63,8 @@ class MainActivity : ComponentActivity() {
     } // 🔥 TAMBAHIN INI (Penutup onCreate)
 } // 🔥 TAMBAHIN INI (Penutup class MainActivity)
 
-// ------- Navigation items -------
- ─────────────────────────────────────────────────────────
+//Navigation items
+
 data class NavItem(val icon: ImageVector, val label: String)
 
 // 🔥 Menu History diganti jadi Profile (Pakai Icon Standar Person)
