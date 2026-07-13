@@ -43,15 +43,24 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-                                    KytheraTheme {
-                // State penahan layar
-                var isTelegramVerified by remember { mutableStateOf(false) }
-                var isTiktokVerified by remember { mutableStateOf(false) } // Nambah ini
+                                                KytheraTheme {
+                // 1. Panggil brankas penyimpanan bawaan Android
+                val sharedPref = getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+
+                // 2. Baca status login terakhir dari brankas (default-nya false kalau belum pernah)
+                var isTelegramVerified by remember { 
+                    mutableStateOf(sharedPref.getBoolean("is_telegram_verified", false)) 
+                }
+                var isTiktokVerified by remember { 
+                    mutableStateOf(sharedPref.getBoolean("is_tiktok_verified", false)) 
+                }
 
                 if (!isTelegramVerified) {
                     // GERBANG 1: Masukin ID Telegram
                     TelegramAuthScreen(
                         onVerifySuccess = { 
+                            // KUNCI: Simpan status sukses ke brankas biar permanen!
+                            sharedPref.edit().putBoolean("is_telegram_verified", true).apply()
                             isTelegramVerified = true 
                         }
                     )
@@ -59,19 +68,20 @@ class MainActivity : ComponentActivity() {
                     // GERBANG 2: Login TikTok
                     TikTokLoginScreen(
                         onCookieScraped = { extractedCookie ->
-                            // TODO: Nanti cookie-nya bisa lu simpen ke database/DataStore di sini
-                            println("Dapet Cookie Sadapan: $extractedCookie")
-                            isTiktokVerified = true // Lanjut ke Dashboard!
+                            // KUNCI: Simpan status dan cookie TikTok-nya sekalian!
+                            sharedPref.edit().apply {
+                                putBoolean("is_tiktok_verified", true)
+                                putString("tiktok_cookie", extractedCookie)
+                                apply()
+                            }
+                            isTiktokVerified = true 
                         }
                     )
                 } else {
-                    // GERBANG 3: Masuk ke aplikasi utama (Dashboard)
+                    // GERBANG 3: Masuk ke Dashboard
                     KytheraShell()
                 }
             } // (Penutup KytheraTheme)
-        } // (Penutup setContent)
-    } // (Penutup onCreate)
-} // (Penutup class MainActivity)
 
 
 //Navigation items
