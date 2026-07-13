@@ -69,11 +69,12 @@ jobs:
           fi
           echo "FFmpeg AAR size: $(du -sh app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar)"
 
-      - name: Decode Keystore
+            - name: Decode Keystore
         env:
           ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo $ENCODED_STRING | base64 -d > app/dadan_ruyana_release.keystore
+          echo "$ENCODED_STRING" | base64 -di > app/dadan_ruyana_release.keystore
+
 
       - name: Rakit APK Release
         env:
