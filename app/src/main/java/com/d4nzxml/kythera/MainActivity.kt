@@ -43,12 +43,23 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            KytheraTheme {
-                KytheraShell()
+                        KytheraTheme {
+                // Tambahin state penahan ini
+                var isAuthenticated by remember { mutableStateOf(false) }
+
+                if (!isAuthenticated) {
+                    // Kalau belum verifikasi, kurung di layar ini
+                    TelegramAuthScreen(
+                        onVerifySuccess = { 
+                            isAuthenticated = true 
+                        }
+                    )
+                } else {
+                    // Kalau udah sukses, baru lepas ke Dashboard utama
+                    KytheraShell()
+                }
             }
-        }
-    }
-}
+
 
 // ─── Navigation items ─────────────────────────────────────────────────────────
 data class NavItem(val icon: ImageVector, val label: String)
