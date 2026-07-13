@@ -3,11 +3,13 @@ package com.d4nzxml.kythera.ui.screen
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.SwapHoriz
@@ -15,6 +17,8 @@ import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,8 +43,16 @@ fun ConverterScreen() {
     var selectedFmt by remember { mutableStateOf("MP4") }
     var selectedCodec by remember { mutableStateOf("libx264") }
     var selectedRes by remember { mutableStateOf("original") }
-    var bitrateM    by remember { mutableStateOf(8f) }
+    
+    // 🔥 ENCODING MODE STATE
+    var encodeMode by remember { mutableStateOf("CRF") }
+    var crfValue by remember { mutableStateOf(23f) } // Default CRF
+    var bitrateM by remember { mutableStateOf(8f) }
+    var selectedPreset by remember { mutableStateOf("medium") }
+    
     var isProcessing by remember { mutableStateOf(false) }
+    // 🔥 STATE UNTUK PROGRESS 1-100%
+    var progressPercent by remember { mutableStateOf(0) }
 
     val formats = listOf("MP4", "MKV", "AVI", "WEBM", "MOV", "GIF")
     val codecs  = linkedMapOf(
@@ -57,6 +69,7 @@ fun ConverterScreen() {
         "720p (1280x720)"    to "1280:720",
         "480p (854x480)"     to "854:480",
     )
+    val presets = listOf("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -78,13 +91,21 @@ fun ConverterScreen() {
         }
         scope.launch {
             isProcessing = true
-            val result = ffmpeg.convertVideo(
+            progressPercent = 0
+            
+            // Logika rahasia bf 0 disisipkan di dalam FfmpegService, di sini kita oper modenya
+            val result = ffmpeg.convertVideoPro(
                 inputPath    = inputPath!!,
                 targetFormat = selectedFmt.lowercase(),
-                bitrateM     = bitrateM.toInt(),
                 codec        = selectedCodec,
                 resolution   = selectedRes,
+                mode         = encodeMode,
+                crf          = crfValue.toInt(),
+                bitrateM     = bitrateM.toInt(),
+                preset       = selectedPreset,
+                onProgress   = { p -> progressPercent = p } // 🔥 Tangkap persentase
             )
+            
             isProcessing = false
             if (result.success) {
                 val saved = GalleryService.saveVideo(context, result.outputPath)
@@ -127,13 +148,6 @@ fun ConverterScreen() {
                     selectedFileName = fileName,
                     selectedFileSize = fileSize,
                 )
-                if (inputPath != null) {
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider(color = KColor.Border)
-                    Spacer(Modifier.height(10.dp))
-                    KInfoRow("Format Asli", ".${inputPath!!.substringAfterLast('.')}")
-                    KInfoRow("Size", fileSize ?: "-")
-                }
             }
             Spacer(Modifier.height(14.dp))
 
@@ -147,7 +161,6 @@ fun ConverterScreen() {
                 Spacer(Modifier.height(16.dp))
 
                 KFieldLabel("Format Output")
-                // 3-column grid format buttons
                 val fmtRows = formats.chunked(3)
                 fmtRows.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -168,6 +181,46 @@ fun ConverterScreen() {
                     selected = codecs.entries.first { it.value == selectedCodec }.key,
                     onSelect = { selectedCodec = codecs[it]!! }
                 )
+                
+                Spacer(Modifier.height(14.dp))
+                
+                // 🔥 ENCODING MODE TABS
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    KFormatTabButton("CRF", encodeMode == "CRF") { encodeMode = "CRF" }
+                    KFormatTabButton("CBR", encodeMode == "CBR") { encodeMode = "CBR" }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                if (encodeMode == "CRF") {
+                    KFieldLabel("CRF Value (Semakin kecil semakin HD)")
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Slider(
+                            value = crfValue, onValueChange = { crfValue = it },
+                            valueRange = 18f..51f, steps = 32,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(activeTrackColor = KColor.Accent, thumbColor = KColor.Accent)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("${crfValue.toInt()}", color = KColor.Text2, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    KFieldLabel("Bitrate Target")
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Slider(
+                            value = bitrateM, onValueChange = { bitrateM = it },
+                            valueRange = 1f..50f, steps = 48,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(activeTrackColor = KColor.Accent, thumbColor = KColor.Accent)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("${bitrateM.toInt()} Mbps", color = KColor.Text2, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                KFieldLabel("Encoder Preset")
+                KDropdownMenu(items = presets, selected = selectedPreset, onSelect = { selectedPreset = it })
+
                 Spacer(Modifier.height(14.dp))
                 KFieldLabel("Resolution")
                 KDropdownMenu(
@@ -175,21 +228,6 @@ fun ConverterScreen() {
                     selected = resolutions.entries.first { it.value == selectedRes }.key,
                     onSelect = { selectedRes = resolutions[it]!! }
                 )
-                Spacer(Modifier.height(14.dp))
-                KFieldLabel("Bitrate")
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Slider(
-                        value = bitrateM, onValueChange = { bitrateM = it },
-                        valueRange = 1f..50f, steps = 48,
-                        modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(
-                            activeTrackColor = KColor.Accent,
-                            thumbColor = KColor.Accent,
-                        )
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("${bitrateM.toInt()} Mbps", color = KColor.Text2, fontSize = 12.sp)
-                }
             }
             Spacer(Modifier.height(20.dp))
 
@@ -202,7 +240,27 @@ fun ConverterScreen() {
             Spacer(Modifier.height(24.dp))
         }
 
-        KLoadingOverlay(isProcessing)
+        // 🔥 OVERLAY PROGRESS BAR REALTIME
+        AnimatedVisibility(visible = isProcessing, enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f)),
+                contentAlignment = androidx.compose.ui.Alignment.Center
+            ) {
+                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        progress = progressPercent / 100f, 
+                        color = KColor.Accent, 
+                        strokeWidth = 6.dp, 
+                        modifier = Modifier.size(80.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text("$progressPercent%", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Sedang merender video...", color = Color.Gray, fontSize = 14.sp)
+                }
+            }
+        }
+        
         SnackbarHost(snackbar, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
     }
 }
@@ -236,7 +294,6 @@ fun KDropdownMenu(
         ExposedDropdownMenu(
             expanded = expanded, 
             onDismissRequest = { expanded = false }
-            // Parameter containerColor udah dihapus dari sini
         ) {
             items.forEach { item ->
                 DropdownMenuItem(
