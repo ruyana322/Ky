@@ -3,6 +3,7 @@ package com.d4nzxml.kythera.service
 import android.content.Context
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,35 +24,51 @@ class FfmpegService(private val context: Context) {
         return "${dir.absolutePath}/$filename"
     }
 
-    // ─── 1. CONVERTER ────────────────────────────────────────────────────────
-    suspend fun convertVideo(
+    // ─── 1. CONVERTER PRO (CRF/CBR, Preset, Progress % Realtime) ────────────
+    suspend fun convertVideoPro(
         inputPath: String,
         targetFormat: String,
-        bitrateM: Int,
         codec: String,
         resolution: String,
-        onProgress: ((Double) -> Unit)? = null,
+        mode: String,
+        crf: Int,
+        bitrateM: Int,
+        preset: String,
+        onProgress: ((Int) -> Unit)? = null
     ): FfmpegResult = withContext(Dispatchers.IO) {
         val ts = System.currentTimeMillis()
         val outputPath = tempPath("Kythera_Convert_$ts.$targetFormat")
 
-        val scaleFilter = if (resolution == "original") ""
-        else "-vf \"scale=$resolution:flags=lanczos\""
-
         val parts = mutableListOf(
             "-y", "-ignore_unknown",
             "-i \"$inputPath\"",
-        )
-        if (scaleFilter.isNotEmpty()) parts.add(scaleFilter)
-        parts += listOf(
             "-c:v $codec",
-            "-b:v ${bitrateM}M",
+            "-preset $preset"
+        )
+
+        // 🔥 Logika Rahasia CRF & bf 0
+        if (mode == "CRF") {
+            parts.add("-crf $crf")
+            parts.add("-bf 0") // Khusus disisipkan saat mode CRF
+        } else {
+            parts.add("-b:v ${bitrateM}M")
+        }
+
+        // Filter Resolusi
+        if (resolution != "original") {
+            parts.add("-vf \"scale=$resolution:flags=lanczos\"")
+        }
+
+        parts.addAll(listOf(
             "-c:a aac", "-b:a 192k",
             "-movflags +faststart",
             "\"$outputPath\""
-        )
+        ))
 
-        execute(parts.joinToString(" "), outputPath, onProgress)
+        val cmd = parts.joinToString(" ")
+        
+        // Eksekusi pakai fungsi khusus yang bisa ngitung persentase
+        executeWithPercentage(cmd, outputPath, inputPath, onProgress)
     }
 
     // ─── 2. COMPRESS ─────────────────────────────────────────────────────────
@@ -132,7 +149,7 @@ class FfmpegService(private val context: Context) {
         execute(cmd, outputPath, onProgress)
     }
 
-    // ─── Internal executor ───────────────────────────────────────────────────
+    // ─── Internal Executor Asli (Untuk Kompatibilitas) ──────────────────────
     private fun execute(
         cmd: String,
         outputPath: String,
@@ -145,9 +162,49 @@ class FfmpegService(private val context: Context) {
         val session    = FFmpegKit.execute(cmd)
         val returnCode = session.returnCode
         
-        // Baris disableStatistics() udah dihapus sesuai saran Kimi
-
         return if (ReturnCode.isSuccess(returnCode)) {
+            FfmpegResult(success = true, outputPath = outputPath)
+        } else {
+            val logs = session.allLogsAsString ?: "No logs"
+            val tail = if (logs.length > 200) logs.takeLast(200) else logs
+            FfmpegResult(success = false, errorMessage = tail)
+        }
+    }
+    
+    // ─── Executor Baru (Untuk Realtime 1-100%) ──────────────────────────────
+    private fun executeWithPercentage(
+        cmd: String,
+        outputPath: String,
+        inputPath: String,
+        onProgress: ((Int) -> Unit)?
+    ): FfmpegResult {
+        // 🔥 Baca info file di awal buat dapetin durasi aslinya pakai FFprobeKit
+        var durationMs = 0.0
+        try {
+            val mediaInfo = FFprobeKit.getMediaInformation(inputPath)
+            val durationStr = mediaInfo.mediaInformation?.duration
+            if (durationStr != null) {
+                durationMs = durationStr.toDouble() * 1000.0
+            }
+        } catch (e: Exception) {
+            // Biarkan saja jika metadata tidak terbaca
+        }
+
+        FFmpegKitConfig.enableStatisticsCallback { stat ->
+            if (onProgress != null && durationMs > 0) {
+                val time = stat.time.toDouble() // Waktu yang sukses dirender
+                var percentage = ((time / durationMs) * 100).toInt()
+                if (percentage > 100) percentage = 100
+                if (percentage < 0) percentage = 0
+                onProgress.invoke(percentage) // Lempar ke UI
+            }
+        }
+
+        val session = FFmpegKit.execute(cmd)
+        val returnCode = session.returnCode
+        
+        return if (ReturnCode.isSuccess(returnCode)) {
+            onProgress?.invoke(100) // Paksa 100% jika udah kelar
             FfmpegResult(success = true, outputPath = outputPath)
         } else {
             val logs = session.allLogsAsString ?: "No logs"
