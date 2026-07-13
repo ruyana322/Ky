@@ -32,9 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
-import java.util.Locale
 
-// ─── History Screen (Berubah jadi Profile) ────────────────────────────────────
+// ─── History Screen (Berubah jadi Profile Telegram) ───────────────────────────
 @Composable
 fun HistoryScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -43,92 +42,85 @@ fun HistoryScreen() {
     val isTiktokLinked = sharedPref.getBoolean("is_tiktok_verified", false)
     val tiktokCookie = sharedPref.getString("tiktok_cookie", "") ?: ""
 
-    // 🔥 STATE UNTUK MENAMPUNG DATA FULL DARI API
-    var usernameTikTok by remember { mutableStateOf("Memuat...") }
-    var nicknameTikTok by remember { mutableStateOf("@memuat...") }
+    // 🔥 PENTING: Ganti tulisan ID_LU_DISINI dengan angka ID Telegram lu yang asli!
+    // Contoh: val telegramId = "1234567890" (Bisa dicek dari bot @userinfobot di Tele)
+    // 🔥 Ambil ID Telegram dinamis dari brankas (yang diketik user pas awal login)
+val telegramId = sharedPref.getString("telegram_id", "") ?: ""
+    val botToken = "8787965434:AAHEmWXdCW4EuO4pudbl2SqdlZU7q6sVpqQ"
+
+    // STATE UNTUK MENAMPUNG DATA DARI TELEGRAM
+    var userNameProfile by remember { mutableStateOf("Mencari Sinyal...") }
+    var nickNameProfile by remember { mutableStateOf("@telegram") }
     var profileBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-    
-    var followingCount by remember { mutableStateOf("-") }
-    var followerCount by remember { mutableStateOf("-") }
-    var likesCount by remember { mutableStateOf("-") }
-    
     var isLoadingData by remember { mutableStateOf(false) }
 
-    // 🔥 MESIN PENYEDOT API GANDA (Berjalan otomatis di background)
-    LaunchedEffect(isTiktokLinked) {
-        if (isTiktokLinked && tiktokCookie.isNotEmpty()) {
+    // 🔥 MESIN PENYEDOT API TELEGRAM (Anti-Blokir)
+    LaunchedEffect(Unit) {
+        if (telegramId != "ID_LU_DISINI" && telegramId.isNotEmpty()) {
             isLoadingData = true
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
-                    // TAHAP 1: Ambil Username dan Link Avatar
-                    val url = java.net.URL("https://www.tiktok.com/passport/web/account/info/")
-                    val connection = url.openConnection() as java.net.HttpURLConnection
-                    connection.requestMethod = "GET"
-                    connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                    connection.setRequestProperty("Cookie", tiktokCookie)
+                    // 1. Narik Nama & Username Telegram
+                    val chatUrl = java.net.URL("https://api.telegram.org/bot$botToken/getChat?chat_id=$telegramId")
+                    val chatConn = chatUrl.openConnection() as java.net.HttpURLConnection
+                    if (chatConn.responseCode == 200) {
+                        val res = chatConn.inputStream.bufferedReader().readText()
+                        val resultObj = org.json.JSONObject(res).optJSONObject("result")
+                        if (resultObj != null) {
+                            val firstName = resultObj.optString("first_name", "Kythera User")
+                            val lastName = resultObj.optString("last_name", "")
+                            val tUsername = resultObj.optString("username", "")
 
-                    var extractedUsername = ""
-
-                    if (connection.responseCode == 200) {
-                        val response = connection.inputStream.bufferedReader().use { it.readText() }
-                        val jsonObject = org.json.JSONObject(response)
-                        val dataObj = jsonObject.optJSONObject("data")
-                        
-                        if (dataObj != null) {
-                            extractedUsername = dataObj.optString("username", "")
-                            if (extractedUsername.isNotEmpty()) {
-                                usernameTikTok = extractedUsername
-                                nicknameTikTok = "@$extractedUsername"
-                            }
-                            
-                            // Download Foto Profil manual jadi Bitmap
-                            val avatarUrl = dataObj.optString("avatar_url", "")
-                            if (avatarUrl.isNotEmpty()) {
-                                try {
-                                    val imgUrl = java.net.URL(avatarUrl)
-                                    val imgConn = imgUrl.openConnection() as java.net.HttpURLConnection
-                                    imgConn.doInput = true
-                                    imgConn.connect()
-                                    val bitmap = BitmapFactory.decodeStream(imgConn.inputStream)
-                                    if (bitmap != null) {
-                                        profileBitmap = bitmap.asImageBitmap()
-                                    }
-                                } catch (e: Exception) { e.printStackTrace() }
-                            }
+                            userNameProfile = if (lastName.isNotEmpty()) "$firstName $lastName" else firstName
+                            nickNameProfile = if (tUsername.isNotEmpty()) "@$tUsername" else "@telegram_user"
                         }
                     }
 
-                    // TAHAP 2: Pakai Username buat nembak data Statistik (Followers dll)
-                    if (extractedUsername.isNotEmpty()) {
-                        try {
-                            val statsUrl = java.net.URL("https://www.tiktok.com/api/user/detail/?uniqueId=$extractedUsername")
-                            val statsConn = statsUrl.openConnection() as java.net.HttpURLConnection
-                            statsConn.requestMethod = "GET"
-                            statsConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                            statsConn.setRequestProperty("Cookie", tiktokCookie)
+                    // 2. Narik Foto Profil Telegram
+                    val photoUrl = java.net.URL("https://api.telegram.org/bot$botToken/getUserProfilePhotos?user_id=$telegramId&limit=1")
+                    val photoConn = photoUrl.openConnection() as java.net.HttpURLConnection
+                    if (photoConn.responseCode == 200) {
+                        val pRes = photoConn.inputStream.bufferedReader().readText()
+                        val pResult = org.json.JSONObject(pRes).optJSONObject("result")
+                        val photosArray = pResult?.optJSONArray("photos")
+                        
+                        if (photosArray != null && photosArray.length() > 0) {
+                            // Ambil file_id dari foto (index 0 itu resolusi paling kecil/sedang)
+                            val photoObj = photosArray.getJSONArray(0).getJSONObject(0)
+                            val fileId = photoObj.optString("file_id")
 
-                            if (statsConn.responseCode == 200) {
-                                val statsRes = statsConn.inputStream.bufferedReader().use { it.readText() }
-                                val statsJson = org.json.JSONObject(statsRes)
-                                val userInfo = statsJson.optJSONObject("userInfo")
-                                val statsObj = userInfo?.optJSONObject("stats")
-                                
-                                if (statsObj != null) {
-                                    // Parse angka dan format jadi "10.5K", "1.2M", dll
-                                    followingCount = formatK(statsObj.optInt("followingCount", 0))
-                                    followerCount = formatK(statsObj.optInt("followerCount", 0))
-                                    likesCount = formatK(statsObj.optInt("heartCount", 0))
+                            // 3. Ubah file_id jadi Link Gambar Asli
+                            val fileUrl = java.net.URL("https://api.telegram.org/bot$botToken/getFile?file_id=$fileId")
+                            val fileConn = fileUrl.openConnection() as java.net.HttpURLConnection
+                            if (fileConn.responseCode == 200) {
+                                val fRes = fileConn.inputStream.bufferedReader().readText()
+                                val fResult = org.json.JSONObject(fRes).optJSONObject("result")
+                                val filePath = fResult?.optString("file_path", "")
+
+                                if (!filePath.isNullOrEmpty()) {
+                                    // 4. Eksekusi Download Bitmap!
+                                    val downloadUrl = java.net.URL("https://api.telegram.org/file/bot$botToken/$filePath")
+                                    val dlConn = downloadUrl.openConnection() as java.net.HttpURLConnection
+                                    dlConn.doInput = true
+                                    dlConn.connect()
+                                    val bitmap = BitmapFactory.decodeStream(dlConn.inputStream)
+                                    if (bitmap != null) {
+                                        profileBitmap = bitmap.asImageBitmap()
+                                    }
                                 }
                             }
-                        } catch (e: Exception) { e.printStackTrace() }
+                        }
                     }
-
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    userNameProfile = "Gagal Konek"
                 } finally {
                     isLoadingData = false
                 }
             }
+        } else {
+            userNameProfile = "Dadan Ruyana" // Balik ke default kalau ID belum diisi
+            nickNameProfile = "@jonggolgamecenter"
         }
     }
 
@@ -139,7 +131,7 @@ fun HistoryScreen() {
             .padding(16.dp)
     ) {
         Text("Profile", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Akun TikTok yang terhubung.", color = KColor.Text3, fontSize = 14.sp)
+        Text("Sistem Terintegrasi Kythera.", color = KColor.Text3, fontSize = 14.sp)
         Spacer(Modifier.height(24.dp))
 
         // 🔥 Card Profil Utama
@@ -156,7 +148,7 @@ fun HistoryScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally, 
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // 🔥 AVATAR DINAMIS
+                // 🔥 AVATAR TELEGRAM
                 Box(
                     modifier = Modifier
                         .size(88.dp)
@@ -177,24 +169,24 @@ fun HistoryScreen() {
                 }
                 Spacer(Modifier.height(16.dp))
                 
-                // 🔥 NAMA & USERNAME DINAMIS
+                // 🔥 NAMA & USERNAME DARI TELEGRAM
                 if (isLoadingData) {
                     CircularProgressIndicator(color = KColor.Accent, modifier = Modifier.size(24.dp))
                 } else {
-                    Text(usernameTikTok, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Text(nicknameTikTok, color = KColor.Text2, fontSize = 14.sp)
+                    Text(userNameProfile, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(nickNameProfile, color = KColor.Text2, fontSize = 14.sp)
                 }
                 
                 Spacer(Modifier.height(24.dp))
                 
-                // 🔥 STATISTIK DINAMIS
+                // 🔥 STATISTIK (Disesuaikan buat gaya Hacker / Tool Developer)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    ProfileStat("Mengikuti", followingCount)
-                    ProfileStat("Pengikut", followerCount)
-                    ProfileStat("Suka", likesCount)
+                    ProfileStat("User ID", if(telegramId == "ID_LU_DISINI") "Unknown" else telegramId)
+                    ProfileStat("Tipe Akun", "Premium")
+                    ProfileStat("Status", "Online")
                 }
             }
         }
@@ -233,20 +225,11 @@ fun HistoryScreen() {
     }
 }
 
-// 🔥 Fungsi Pembantu buat ngeringkas angka (Misal: 10500 jadi 10.5K)
-private fun formatK(num: Int): String {
-    return when {
-        num >= 1_000_000 -> String.format(Locale.US, "%.1fM", num / 1_000_000.0).replace(".0M", "M")
-        num >= 1_000 -> String.format(Locale.US, "%.1fK", num / 1_000.0).replace(".0K", "K")
-        else -> num.toString()
-    }
-}
-
 // 🔥 Komponen pendukung 1 (Profil)
 @Composable
 fun ProfileStat(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Text(label, color = KColor.Text3, fontSize = 12.sp)
     }
