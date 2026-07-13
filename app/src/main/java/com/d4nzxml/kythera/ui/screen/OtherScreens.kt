@@ -31,6 +31,13 @@ import com.d4nzxml.kythera.ui.theme.KColor
 // ─── History Screen (Berubah jadi Profile) ────────────────────────────────────
 @Composable
 fun HistoryScreen() {
+    // 🔥 1. Panggil brankas memori buat ngecek status TikTok
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+    
+    val isTiktokLinked = sharedPref.getBoolean("is_tiktok_verified", false)
+    val tiktokCookie = sharedPref.getString("tiktok_cookie", "Belum ada cookie") ?: ""
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -68,7 +75,7 @@ fun HistoryScreen() {
                 }
                 Spacer(Modifier.height(16.dp))
                 
-                // Nama & Username (Eksklusif Kythera)
+                // Nama & Username (Nanti ini bisa kita ganti narik API kalau mau)
                 Text("Dadan Ruyana", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("@jonggolgamecenter", color = KColor.Text2, fontSize = 14.sp)
                 
@@ -92,15 +99,40 @@ fun HistoryScreen() {
         Text("Pengaturan Akun", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         
-        ProfileMenuItem(Icons.Rounded.CloudSync, "Sinkronisasi TikTok", "Terhubung")
-        ProfileMenuItem(Icons.Rounded.Storage, "Bersihkan Cache", "124 MB")
-        ProfileMenuItem(Icons.Rounded.Logout, "Keluar", "", isDestructive = true)
+        // Data Status TikTok Otomatis
+        ProfileMenuItem(
+            icon = Icons.Rounded.CloudSync, 
+            title = "Sinkronisasi TikTok", 
+            trailingText = if (isTiktokLinked) "Terhubung 🟢" else "Belum 🔴"
+        )
+        
+        // Menampilkan Session ID
+        ProfileMenuItem(
+            icon = Icons.Rounded.Cookie, 
+            title = "Sesi TikTok", 
+            trailingText = if (tiktokCookie.length > 15) tiktokCookie.take(15) + "..." else tiktokCookie
+        )
+        
+        ProfileMenuItem(icon = Icons.Rounded.Storage, title = "Bersihkan Cache", trailingText = "124 MB")
+        
+        // Tombol Keluar yang beneran berfungsi
+        ProfileMenuItem(
+            icon = Icons.Rounded.Logout, 
+            title = "Keluar & Hapus Data", 
+            trailingText = "", 
+            isDestructive = true,
+            onClick = {
+                // Bersihkan brankas dan reset paksa!
+                sharedPref.edit().clear().apply()
+                kotlin.system.exitProcess(0)
+            }
+        )
         
         Spacer(Modifier.height(100.dp))
     }
 }
 
-// 🔥 Komponen pendukung 1 (Profil)
+// 🔥 Komponen pendukung 1 (Profil) - TETAP SAMA
 @Composable
 fun ProfileStat(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -110,9 +142,15 @@ fun ProfileStat(label: String, value: String) {
     }
 }
 
-// 🔥 Komponen pendukung 2 (Profil)
+// 🔥 Komponen pendukung 2 (Profil) - DIUPGRADE
 @Composable
-fun ProfileMenuItem(icon: ImageVector, title: String, trailingText: String, isDestructive: Boolean = false) {
+fun ProfileMenuItem(
+    icon: ImageVector, 
+    title: String, 
+    trailingText: String, 
+    isDestructive: Boolean = false,
+    onClick: () -> Unit = {} // 🔥 Tambahan fungsi klik
+) {
     val contentColor = if (isDestructive) KColor.Orange else Color.White
     val iconColor = if (isDestructive) KColor.Orange else KColor.Accent
     
@@ -122,6 +160,7 @@ fun ProfileMenuItem(icon: ImageVector, title: String, trailingText: String, isDe
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(KColor.Surface2)
+            .clickable(onClick = onClick) // 🔥 Biar barisnya bisa dipencet
             .border(1.dp, KColor.Border, RoundedCornerShape(12.dp))
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -140,6 +179,7 @@ fun ProfileMenuItem(icon: ImageVector, title: String, trailingText: String, isDe
         }
     }
 }
+
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 @Composable
