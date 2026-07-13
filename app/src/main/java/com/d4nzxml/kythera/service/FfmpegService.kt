@@ -24,7 +24,7 @@ class FfmpegService(private val context: Context) {
         return "${dir.absolutePath}/$filename"
     }
 
-    // ─── 1. CONVERTER PRO (CRF/CBR, Preset, Progress % Realtime) ────────────
+        // ─── 1. CONVERTER PRO (CRF/CBR, Preset, Progress % Realtime) ────────────
     suspend fun convertVideoPro(
         inputPath: String,
         targetFormat: String,
@@ -39,6 +39,13 @@ class FfmpegService(private val context: Context) {
         val ts = System.currentTimeMillis()
         val outputPath = tempPath("Kythera_Convert_$ts.$targetFormat")
 
+        // 🔥 1. BUKA BRANKAS APLIKASI BUAT NGAMBIL RACIKAN GIST
+        val sharedPref = context.getSharedPreferences("KytheraPrefs", Context.MODE_PRIVATE)
+        val crfExtra = sharedPref.getString("conv_crf_extra", "-bf 0")
+        val audioArgs = sharedPref.getString("conv_audio", "-c:a aac -b:a 192k")
+        val globalArgs = sharedPref.getString("conv_global", "-movflags +faststart")
+
+        // 🔥 2. RACIK PERINTAHNYA
         val parts = mutableListOf(
             "-y", "-ignore_unknown",
             "-i \"$inputPath\"",
@@ -46,10 +53,11 @@ class FfmpegService(private val context: Context) {
             "-preset $preset"
         )
 
-        // 🔥 Logika Rahasia CRF & bf 0
+        // Logika Mode CRF atau CBR (Tetap jalan normal dari pilihan UI layar)
         if (mode == "CRF") {
             parts.add("-crf $crf")
-            parts.add("-bf 0") // Khusus disisipkan saat mode CRF
+            // Masukin bumbu rahasia CRF dari internet!
+            if (!crfExtra.isNullOrEmpty()) parts.add(crfExtra) 
         } else {
             parts.add("-b:v ${bitrateM}M")
         }
@@ -59,17 +67,18 @@ class FfmpegService(private val context: Context) {
             parts.add("-vf \"scale=$resolution:flags=lanczos\"")
         }
 
-        parts.addAll(listOf(
-            "-c:a aac", "-b:a 192k",
-            "-movflags +faststart",
-            "\"$outputPath\""
-        ))
+        // Masukin bumbu Audio dan Global dari internet!
+        if (!audioArgs.isNullOrEmpty()) parts.add(audioArgs)
+        if (!globalArgs.isNullOrEmpty()) parts.add(globalArgs)
+        
+        parts.add("\"$outputPath\"")
 
         val cmd = parts.joinToString(" ")
         
         // Eksekusi pakai fungsi khusus yang bisa ngitung persentase
         executeWithPercentage(cmd, outputPath, inputPath, onProgress)
     }
+
 
     // ─── 2. COMPRESS ─────────────────────────────────────────────────────────
     suspend fun compressVideo(
