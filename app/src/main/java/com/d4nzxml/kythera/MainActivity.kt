@@ -72,42 +72,42 @@ class MainActivity : ComponentActivity() {
                             val url = java.net.URL("https://gist.githubusercontent.com/ruyana322/b44b44244f13d1feb2e18f19fcfa61a0/raw/kythera_status.json")
                             val conn = url.openConnection() as java.net.HttpURLConnection
                             conn.connectTimeout = 5000 
-                            
+
                             if (conn.responseCode == 200) {
                                 val res = conn.inputStream.bufferedReader().readText()
                                 val rootObj = org.json.JSONObject(res)
-                                
+
                                 // 🔥 2. BACA STATUS MAINTENANCE
                                 val statusObj = rootObj.optJSONObject("app_status")
                                 val status = statusObj?.optString("status", "ACTIVE") ?: "ACTIVE"
-                                
+
                                 if (status == "MAINTENANCE") {
                                     maintenanceMsg = statusObj?.optString("message", "Sedang perbaikan sistem") ?: "Sedang perbaikan sistem"
                                     appStatus = "MAINTENANCE"
                                 } else {
                                     appStatus = "ACTIVE"
-                                    
+
                                     // 🔥 3. SIMPAN SEMUA RACIKAN KE BRANKAS APLIKASI
                                     val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
                                     sharedPref.edit().apply {
-                                        
+
                                         // Racikan FFmpeg Converter
                                         val convObj = rootObj.optJSONObject("ffmpeg_converter")
                                         putString("conv_crf_extra", convObj?.optString("crf_extra_args", "-bf 0") ?: "-bf 0")
                                         putString("conv_audio", convObj?.optString("audio_args", "-c:a aac -b:a 192k") ?: "-c:a aac -b:a 192k")
                                         putString("conv_global", convObj?.optString("global_extra_args", "-movflags +faststart") ?: "-movflags +faststart")
-                                        
+
                                         // Racikan FFmpeg Compressor
                                         val compObj = rootObj.optJSONObject("ffmpeg_compressor")
                                         putString("comp_audio_compress", compObj?.optString("audio_compress_args", "-c:a aac -b:a 128k") ?: "-c:a aac -b:a 128k")
                                         putString("comp_audio_copy", compObj?.optString("audio_copy_args", "-c:a copy") ?: "-c:a copy")
                                         putString("comp_meta", compObj?.optString("remove_metadata_args", "-map_metadata -1") ?: "-map_metadata -1")
-                                        
+
                                         // Racikan AI RealSR
                                         val aiObj = rootObj.optJSONObject("ai_realsr")
                                         putString("ai_scale", aiObj?.optString("scale_factor", "4") ?: "4")
                                         putString("ai_cpu_args", aiObj?.optString("cpu_fallback_args", "-g -1") ?: "-g -1")
-                                        
+
                                         apply() // Kunci brankasnya!
                                     }
                                 }
@@ -240,12 +240,13 @@ fun KytheraShell() {
                     exit = scaleOut(tween(150)) + fadeOut(tween(150))
                 ) {
                     FloatingActionButton(
-                        onClick = { currentIndex = 6 },
-                        containerColor = KColor.Accent,
-                        contentColor = Color.Black,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
-                    ) {
+    onClick = { currentIndex = 6 },
+    containerColor = KColor.Accent,
+    contentColor = androidx.compose.ui.graphics.Color.Black, // Panggil lengkap biar gak ambigunya
+    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), // Panggil lengkap juga
+    modifier = Modifier.shadow(8.dp, androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+)
+ {
                         Icon(Icons.Rounded.Upload, contentDescription = "Upload TikTok")
                     }
                 }
@@ -346,14 +347,14 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
                         modifier = Modifier.size(if (isActive) 24.dp else 20.dp)
                     )
                 }
-                
+
                 Text(
                     text = item.label,
                     color = if (isActive) KColor.Accent else KColor.Text3,
                     fontSize = 10.sp,
                     fontWeight = if (isActive) FontWeight.W600 else FontWeight.W400
                 )
-                
+
                 Spacer(Modifier.height(4.dp))
                 Box(
                     modifier = Modifier
@@ -425,7 +426,7 @@ fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
         }
 
         Spacer(Modifier.weight(1f))
-        
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
