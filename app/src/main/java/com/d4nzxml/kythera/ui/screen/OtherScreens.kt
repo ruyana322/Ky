@@ -1,11 +1,11 @@
 package com.d4nzxml.kythera.ui.screen
+
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.clickable
@@ -13,12 +13,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,31 +42,26 @@ fun HistoryScreen() {
     var nicknameTikTok by remember { mutableStateOf("@jonggolgamecenter") }
     var isLoadingData by remember { mutableStateOf(false) }
 
-    // 🔥 MESIN PENYEDOT API (Berjalan otomatis di background pas layar dibuka)
+    // 🔥 MESIN PENYEDOT API (Berjalan otomatis di background)
     LaunchedEffect(isTiktokLinked) {
         if (isTiktokLinked && tiktokCookie.isNotEmpty()) {
             isLoadingData = true
             kotlinx.coroutines.Dispatchers.IO.invoke {
                 try {
-                    // Nembak API internal web TikTok
                     val url = java.net.URL("https://www.tiktok.com/passport/web/account/info/")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.requestMethod = "GET"
-                    
-                    // Nyamar jadi browser + masukin Cookie curian kita
                     connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                     connection.setRequestProperty("Cookie", tiktokCookie)
 
                     if (connection.responseCode == 200) {
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
-                        // Parsing JSON manual biar gak butuh library tambahan
                         val jsonObject = org.json.JSONObject(response)
                         val dataObj = jsonObject.optJSONObject("data")
                         
                         if (dataObj != null) {
                             val userObj = dataObj.optString("username", "")
                             if (userObj.isNotEmpty()) {
-                                // Update UI dengan data asli dari TikTok
                                 usernameTikTok = userObj
                                 nicknameTikTok = "@$userObj"
                             }
@@ -116,7 +111,7 @@ fun HistoryScreen() {
                 }
                 Spacer(Modifier.height(16.dp))
                 
-                // 🔥 NAMA & USERNAME SEKARANG DINAMIS!
+                // 🔥 NAMA & USERNAME DINAMIS
                 if (isLoadingData) {
                     CircularProgressIndicator(color = KColor.Accent, modifier = Modifier.size(24.dp))
                 } else {
@@ -171,12 +166,57 @@ fun HistoryScreen() {
     }
 }
 
+// 🔥 Komponen pendukung 1 (Profil)
+@Composable
+fun ProfileStat(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = KColor.Text3, fontSize = 12.sp)
+    }
+}
 
+// 🔥 Komponen pendukung 2 (Profil)
+@Composable
+fun ProfileMenuItem(
+    icon: ImageVector, 
+    title: String, 
+    trailingText: String, 
+    isDestructive: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    val contentColor = if (isDestructive) KColor.Orange else Color.White
+    val iconColor = if (isDestructive) KColor.Orange else KColor.Accent
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(KColor.Surface2)
+            .clickable(onClick = onClick)
+            .border(1.dp, KColor.Border, RoundedCornerShape(12.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp).clip(CircleShape).background(iconColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(title, color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        
+        if (trailingText.isNotEmpty()) {
+            Text(trailingText, color = KColor.Text3, fontSize = 12.sp)
+        }
+    }
+}
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 @Composable
 fun SettingsScreen() {
-    // State buat Toggle
     var isDarkMode by remember { mutableStateOf(true) }
     var isTurboMode by remember { mutableStateOf(true) }
 
@@ -186,12 +226,10 @@ fun SettingsScreen() {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        // Header
         Text("Pengaturan", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Text("Konfigurasi dan preferensi Kythera Tools.", color = KColor.Text3, fontSize = 14.sp)
         Spacer(Modifier.height(24.dp))
 
-        // ⚙️ UMUM
         KSectionHeader("Umum", Icons.Rounded.Settings, KColor.Accent)
         Spacer(Modifier.height(12.dp))
         GlassCard {
@@ -203,7 +241,6 @@ fun SettingsScreen() {
         }
         Spacer(Modifier.height(24.dp))
 
-        // 🚀 PERFORMA
         KSectionHeader("Performa", Icons.Rounded.Speed, KColor.Orange)
         Spacer(Modifier.height(12.dp))
         GlassCard {
@@ -215,7 +252,6 @@ fun SettingsScreen() {
         }
         Spacer(Modifier.height(24.dp))
 
-        // 🤖 ENGINE
         KSectionHeader("Engine", Icons.Rounded.SmartToy, KColor.Accent2)
         Spacer(Modifier.height(12.dp))
         GlassCard {
@@ -226,7 +262,6 @@ fun SettingsScreen() {
         }
         Spacer(Modifier.height(24.dp))
 
-        // 📱 APLIKASI
         KSectionHeader("Aplikasi", Icons.Rounded.AppShortcut, KColor.Accent)
         Spacer(Modifier.height(12.dp))
         GlassCard {
@@ -237,7 +272,6 @@ fun SettingsScreen() {
         }
         Spacer(Modifier.height(24.dp))
 
-        // ℹ️ TENTANG
         KSectionHeader("Tentang", Icons.Rounded.Info, KColor.Accent3)
         Spacer(Modifier.height(12.dp))
         GlassCard {
@@ -247,14 +281,12 @@ fun SettingsScreen() {
                 SettingActionRow(Icons.Rounded.ChatBubbleOutline, "Feedback", "Laporkan bug atau saran")
                 SettingActionRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "Kebijakan Privasi")
                 Spacer(Modifier.height(8.dp))
-                // Tombol Logout dikasih warna peringatan
                 SettingActionRow(Icons.Rounded.Logout, "Keluar Akun", "Akhiri sesi saat ini", isDestructive = true)
             }
         }
 
         Spacer(Modifier.height(40.dp))
 
-        // 🔥 COPYRIGHT FOOTER
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -263,11 +295,10 @@ fun SettingsScreen() {
             Text("Jonggol Game Center", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp)
         }
 
-        Spacer(Modifier.height(100.dp)) // Jarak aman buat Bottom Navigation
+        Spacer(Modifier.height(100.dp))
     }
 }
 
-// ─── Komponen Pendukung Khusus Settings (Taruh di bawah SettingsScreen) ───
 @Composable
 fun SettingActionRow(
     icon: ImageVector,
