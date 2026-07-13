@@ -54,14 +54,17 @@ class MainActivity : ComponentActivity() {
                             isAuthenticated = true 
                         }
                     )
-                } else {
+                                } else {
                     // Kalau udah sukses, baru lepas ke Dashboard utama
                     KytheraShell()
                 }
-            }
+            } // Ini baris 61 di layar lu sekarang (Penutup KytheraTheme)
+        } // 🔥 TAMBAHIN INI (Penutup setContent)
+    } // 🔥 TAMBAHIN INI (Penutup onCreate)
+} // 🔥 TAMBAHIN INI (Penutup class MainActivity)
 
-
-// ─── Navigation items ─────────────────────────────────────────────────────────
+// ------- Navigation items -------
+ ─────────────────────────────────────────────────────────
 data class NavItem(val icon: ImageVector, val label: String)
 
 // 🔥 Menu History diganti jadi Profile (Pakai Icon Standar Person)
