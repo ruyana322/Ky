@@ -421,3 +421,76 @@ fun SettingToggleRow(
         )
     }
 }
+// ─── Layar Maintenance & Loading ──────────────────────────────────────────────
+
+@Composable
+fun MaintenanceScreen(pesan: String, onRetry: () -> Unit) {
+    val colorBg = Color(0xFF121212)
+    val colorAccent = Color(0xFF00E5FF)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorBg)
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Build,
+            contentDescription = "Maintenance",
+            tint = colorAccent,
+            modifier = Modifier.size(100.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Text(
+            text = "Sedang Diperbarui",
+            color = Color.White,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        Text(
+            text = pesan.ifEmpty { "Kythera sedang dalam perbaikan server atau update ke versi terbaru. Silakan kembali lagi nanti." },
+            color = Color.Gray,
+            fontSize = 16.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(40.dp))
+        
+        Button(
+            onClick = onRetry,
+            modifier = Modifier.fillMaxWidth().height(55.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = colorAccent),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Icon(Icons.Rounded.Refresh, contentDescription = null, tint = Color.Black)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Coba Lagi", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        TextButton(onClick = { kotlin.system.exitProcess(0) }) {
+            Text("Tutup Aplikasi", color = Color.Red, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun InitialLoadingScreen() {
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF121212)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        CircularProgressIndicator(color = Color(0xFF00E5FF))
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Menghubungkan ke Server Kythera...", color = Color.Gray, fontSize = 14.sp)
+    }
+}
