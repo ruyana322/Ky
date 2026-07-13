@@ -549,7 +549,7 @@ fun SettingActionRow(
     isDestructive: Boolean = false,
     onClick: () -> Unit
 ) {
-    val textColor = if (isDestructive) Color(0xFFFF4B4B) else Color.White // Warna merah kalau tombol bahaya
+    val textColor = if (isDestructive) Color(0xFFFF4B4B) else Color.White 
     val finalIconTint = if (isDestructive) Color(0xFFFF4B4B) else iconTint
 
     Row(
@@ -559,7 +559,9 @@ fun SettingActionRow(
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(finalIconTint, contentDescription = null, tint = finalIconTint, modifier = Modifier.size(24.dp))
+        // 🔥 TYPO GUA UDAH DIBENERIN DI SINI: Parameter pertamanya "icon", bukan warna
+        Icon(icon, contentDescription = null, tint = finalIconTint, modifier = Modifier.size(24.dp))
+        
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = textColor, fontSize = 14.sp, fontWeight = FontWeight.W600)
@@ -568,4 +570,3 @@ fun SettingActionRow(
         Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.size(20.dp))
     }
 }
-
