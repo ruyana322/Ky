@@ -70,41 +70,159 @@ fun HistoryScreen() {
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 @Composable
 fun SettingsScreen() {
-    var notif    by remember { mutableStateOf(true) }
-    var autoSave by remember { mutableStateOf(true) }
-    var dark     by remember { mutableStateOf(true) }
+    // State buat Toggle
+    var isDarkMode by remember { mutableStateOf(true) }
+    var isTurboMode by remember { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(16.dp)
     ) {
-        Text("Pengaturan", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-        Text("Konfigurasi aplikasi Kythera Tools.", color = KColor.Text2, fontSize = 13.sp)
-        Spacer(Modifier.height(20.dp))
+        // Header
+        Text("Pengaturan", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text("Konfigurasi dan preferensi Kythera Tools.", color = KColor.Text3, fontSize = 14.sp)
+        Spacer(Modifier.height(24.dp))
 
+        // ⚙️ UMUM
         KSectionHeader("Umum", Icons.Rounded.Settings, KColor.Accent)
         Spacer(Modifier.height(12.dp))
         GlassCard {
-            KToggleRow("Notifikasi", "Tampilkan notifikasi setelah proses selesai",
-                notif) { notif = it }
-            Spacer(Modifier.height(14.dp))
-            KToggleRow("Auto Simpan ke Galeri", "Langsung simpan output ke galeri",
-                autoSave) { autoSave = it }
-            Spacer(Modifier.height(14.dp))
-            KToggleRow("Dark Mode", "Tema gelap (default aktif)",
-                dark) { dark = it }
+            Column(Modifier.padding(vertical = 8.dp)) {
+                SettingToggleRow(Icons.Rounded.DarkMode, "Tema Gelap", "Gunakan tampilan gelap", isDarkMode) { isDarkMode = it }
+                SettingActionRow(Icons.Rounded.Language, "Bahasa", "Indonesia")
+                SettingActionRow(Icons.Rounded.Folder, "Lokasi Penyimpanan", "/Internal/Kythera/")
+            }
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(24.dp))
 
-        KSectionHeader("Tentang", Icons.Rounded.Info, KColor.Accent2)
+        // 🚀 PERFORMA
+        KSectionHeader("Performa", Icons.Rounded.Speed, KColor.Orange)
         Spacer(Modifier.height(12.dp))
         GlassCard {
-            KInfoRow("Versi", "1.0.0")
-            KInfoRow("Build", "FFmpeg min-gpl 6.x")
-            KInfoRow("Developer", "D4nzxml · JGC")
-            KInfoRow("Platform", "Android Native (Kotlin + Compose)")
+            Column(Modifier.padding(vertical = 8.dp)) {
+                SettingToggleRow(Icons.Rounded.Bolt, "Mode Performa", "Gunakan seluruh core CPU/GPU", isTurboMode) { isTurboMode = it }
+                SettingActionRow(Icons.Rounded.Memory, "Thread AI/FFmpeg", "Auto (Maksimal)")
+                SettingActionRow(Icons.Rounded.DeleteOutline, "Hapus Cache", "Aman untuk dibersihkan")
+            }
         }
+        Spacer(Modifier.height(24.dp))
+
+        // 🤖 ENGINE
+        KSectionHeader("Engine", Icons.Rounded.SmartToy, KColor.Accent2)
+        Spacer(Modifier.height(12.dp))
+        GlassCard {
+            Column(Modifier.padding(vertical = 8.dp)) {
+                SettingActionRow(Icons.Rounded.CheckCircle, "Status AI Engine", "Online & Siap", iconTint = KColor.Accent2)
+                SettingActionRow(Icons.Rounded.SystemUpdate, "Update Engine", "Cek pembaruan model AI")
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+
+        // 📱 APLIKASI
+        KSectionHeader("Aplikasi", Icons.Rounded.AppShortcut, KColor.Accent)
+        Spacer(Modifier.height(12.dp))
+        GlassCard {
+            Column(Modifier.padding(vertical = 8.dp)) {
+                SettingActionRow(Icons.Rounded.History, "Riwayat", "Lihat log proses video")
+                SettingActionRow(Icons.Rounded.BarChart, "Statistik", "Data penggunaan tools")
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+
+        // ℹ️ TENTANG
+        KSectionHeader("Tentang", Icons.Rounded.Info, KColor.Accent3)
+        Spacer(Modifier.height(12.dp))
+        GlassCard {
+            Column(Modifier.padding(vertical = 8.dp)) {
+                SettingActionRow(Icons.Rounded.Favorite, "Support Dev D4nzxml", "Traktir kopi / Donasi", iconTint = Color(0xFFFF4B4B))
+                SettingActionRow(Icons.Rounded.Article, "Changelog", "Versi 2.0.1")
+                SettingActionRow(Icons.Rounded.ChatBubbleOutline, "Feedback", "Laporkan bug atau saran")
+                SettingActionRow(Icons.Rounded.PrivacyTip, "Privacy Policy", "Kebijakan Privasi")
+                Spacer(Modifier.height(8.dp))
+                // Tombol Logout dikasih warna peringatan
+                SettingActionRow(Icons.Rounded.Logout, "Keluar Akun", "Akhiri sesi saat ini", isDestructive = true)
+            }
+        }
+
+        Spacer(Modifier.height(40.dp))
+
+        // 🔥 COPYRIGHT FOOTER
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("© 2026 Powered by D4nzxml", color = KColor.Text3, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("Jonggol Game Center", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp)
+        }
+
+        Spacer(Modifier.height(100.dp)) // Jarak aman buat Bottom Navigation
+    }
+}
+
+// ─── Komponen Pendukung Khusus Settings (Taruh di bawah SettingsScreen) ───
+
+@Composable
+fun SettingActionRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    iconTint: Color = KColor.Text2,
+    isDestructive: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    val color = if (isDestructive) KColor.Orange else Color.White
+    val tint = if (isDestructive) KColor.Orange else iconTint
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            if (subtitle.isNotEmpty()) {
+                Text(subtitle, color = KColor.Text3, fontSize = 11.sp)
+            }
+        }
+        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = KColor.Text3, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+fun SettingToggleRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = KColor.Text2, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = KColor.Text3, fontSize = 11.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = KColor.Accent,
+                uncheckedThumbColor = KColor.Text3,
+                uncheckedTrackColor = KColor.Surface2
+            )
+        )
     }
 }
