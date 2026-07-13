@@ -42,12 +42,13 @@ fun HistoryScreen() {
     var nicknameTikTok by remember { mutableStateOf("@jonggolgamecenter") }
     var isLoadingData by remember { mutableStateOf(false) }
 
-    // 🔥 MESIN PENYEDOT API (Berjalan otomatis di background)
+        // 🔥 MESIN PENYEDOT API (Berjalan otomatis di background)
     LaunchedEffect(isTiktokLinked) {
         if (isTiktokLinked && tiktokCookie.isNotEmpty()) {
             isLoadingData = true
-            kotlinx.coroutines.Dispatchers.IO.invoke {
-                try {
+            try {
+                // Pindah ke jalur IO (Background Thread) yang bener pakai withContext
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val url = java.net.URL("https://www.tiktok.com/passport/web/account/info/")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.requestMethod = "GET"
@@ -67,14 +68,15 @@ fun HistoryScreen() {
                             }
                         }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                } finally {
-                    isLoadingData = false
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isLoadingData = false
             }
         }
     }
+
 
     Column(
         modifier = Modifier
