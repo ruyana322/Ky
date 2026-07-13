@@ -56,14 +56,20 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf(sharedPref.getBoolean("is_tiktok_verified", false)) 
                 }
 
-                if (!isTelegramVerified) {
+                                if (!isTelegramVerified) {
                     TelegramAuthScreen(
-                        onVerifySuccess = { 
-                            sharedPref.edit().putBoolean("is_telegram_verified", true).apply()
+                        // Asumsi fungsi lu ngirim ID yang diketik user (misal: inputId)
+                        onVerifySuccess = { inputId -> 
+                            sharedPref.edit().apply {
+                                putBoolean("is_telegram_verified", true)
+                                putString("telegram_id", inputId) // 🔥 Simpan ID user ke brankas!
+                                apply()
+                            }
                             isTelegramVerified = true 
                         }
                     )
-                } else if (!isTiktokVerified) {
+                }
+ else if (!isTiktokVerified) {
                     TikTokLoginScreen(
                         onCookieScraped = { extractedCookie ->
                             sharedPref.edit().apply {
