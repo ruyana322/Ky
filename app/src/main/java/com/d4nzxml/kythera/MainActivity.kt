@@ -1,4 +1,6 @@
 package com.d4nzxml.kythera
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
