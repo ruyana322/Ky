@@ -1,306 +1,347 @@
 package com.d4nzxml.kythera.ui.screen
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.d4nzxml.kythera.service.FfmpegService
-import com.d4nzxml.kythera.service.GalleryService
-import com.d4nzxml.kythera.ui.components.*
-import com.d4nzxml.kythera.ui.theme.KColor
-import com.d4nzxml.kythera.util.getRealPathFromUri
-import kotlinx.coroutines.launch
+
+// --- Palette Warna ---
+val DashBg = Color(0xFF18152B)
+val CardSolidBg = Color(0xFF26233E)
+val TextTitle = Color(0xFFF1F1F1)
+val TextDesc = Color(0xFFAAA8C2)
+val AccentCyan = Color(0xFF00CEC9)
+val AccentPurple = Color(0xFF8A2BE2)
+val InputBg = Color(0xFF1D1A31)
 
 @Composable
 fun ConverterScreen() {
-    val context = LocalContext.current
-    val scope   = rememberCoroutineScope()
-    val ffmpeg  = remember { FfmpegService(context) }
-    val snackbar = remember { SnackbarHostState() }
-
-    var inputPath   by remember { mutableStateOf<String?>(null) }
-    var fileName    by remember { mutableStateOf<String?>(null) }
-    var fileSize    by remember { mutableStateOf<String?>(null) }
-    var selectedFmt by remember { mutableStateOf("MP4") }
-    var selectedCodec by remember { mutableStateOf("libx264") }
-    var selectedRes by remember { mutableStateOf("original") }
-    
-    // 🔥 ENCODING MODE STATE
-    var encodeMode by remember { mutableStateOf("CRF") }
-    var crfValue by remember { mutableStateOf(23f) } // Default CRF
-    var bitrateM by remember { mutableStateOf(8f) }
+    var selectedFormat by remember { mutableStateOf("MP4") }
+    var selectedCodec by remember { mutableStateOf("H.264 (AVC) - Compatible") }
+    var isCrfMode by remember { mutableStateOf(true) }
+    var crfValue by remember { mutableStateOf(23f) }
     var selectedPreset by remember { mutableStateOf("medium") }
-    
-    var isProcessing by remember { mutableStateOf(false) }
-    // 🔥 STATE UNTUK PROGRESS 1-100%
-    var progressPercent by remember { mutableStateOf(0) }
+    var selectedResolution by remember { mutableStateOf("Original") }
 
-    val formats = listOf("MP4", "MKV", "AVI", "WEBM", "MOV", "GIF")
-    val codecs  = linkedMapOf(
-        "H.264 (AVC) — Compatible"  to "libx264",
-        "H.265 (HEVC) — Efficient"  to "libx265",
-        "AV1 — Next Gen"            to "libaom-av1",
-        "VP9 — Web Optimized"       to "libvpx-vp9",
-    )
-    val resolutions = linkedMapOf(
-        "Original"           to "original",
-        "4K UHD (3840x2160)" to "3840:2160",
-        "1440p (2560x1440)"  to "2560:1440",
-        "1080p (1920x1080)"  to "1920:1080",
-        "720p (1280x720)"    to "1280:720",
-        "480p (854x480)"     to "854:480",
-    )
-    val presets = listOf("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DashBg)
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp)
+    ) {
+        // Teks Deskripsi Atas
+        Text(
+            text = "Konversi video ke berbagai format dengan kontrol kualitas penuh.",
+            color = TextDesc,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
 
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            val path = getRealPathFromUri(context, it)
-            fileName = it.lastPathSegment ?: "video"
-            fileSize = context.contentResolver.openFileDescriptor(it, "r")?.use { fd ->
-                FfmpegService.formatSize(fd.statSize)
-            }
-            inputPath = path
-        }
-    }
-
-    fun convert() {
-        if (inputPath == null) {
-            scope.launch { snackbar.showSnackbar("Pilih video dulu Kang!") }
-            return
-        }
-        scope.launch {
-            isProcessing = true
-            progressPercent = 0
-            
-            // Logika rahasia bf 0 disisipkan di dalam FfmpegService, di sini kita oper modenya
-            val result = ffmpeg.convertVideoPro(
-                inputPath    = inputPath!!,
-                targetFormat = selectedFmt.lowercase(),
-                codec        = selectedCodec,
-                resolution   = selectedRes,
-                mode         = encodeMode,
-                crf          = crfValue.toInt(),
-                bitrateM     = bitrateM.toInt(),
-                preset       = selectedPreset,
-                onProgress   = { p -> progressPercent = p } // 🔥 Tangkap persentase
-            )
-            
-            isProcessing = false
-            if (result.success) {
-                val saved = GalleryService.saveVideo(context, result.outputPath)
-                snackbar.showSnackbar(
-                    if (saved) "SUKSES! Video tersimpan di Galeri/Kythera 🎉"
-                    else "Selesai, tapi gagal simpan ke galeri."
-                )
-            } else {
-                snackbar.showSnackbar("ERROR FFmpeg: ${result.errorMessage}")
-            }
-        }
-    }
-
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp)
-        ) {
-            Text("Converter Video", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.W800)
-            Text("Konversi video ke berbagai format dengan kontrol kualitas penuh.",
-                color = KColor.Text2, fontSize = 13.sp)
-            Spacer(Modifier.height(20.dp))
-
-            // ── Input ──────────────────────────────────────────────────
-            GlassCard {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    KStepBadge("1", KColor.Accent)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Input Video", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 15.sp)
-                }
-                Spacer(Modifier.height(16.dp))
-                KDropZone(
-                    onTap = { picker.launch("video/*") },
-                    title = "Drop video atau klik upload",
-                    subtitle = "MP4, AVI, MKV, MOV, WEBM, FLV",
-                    icon = Icons.Rounded.CloudUpload,
-                    accentColor = KColor.Accent,
-                    selectedFileName = fileName,
-                    selectedFileSize = fileSize,
-                )
-            }
-            Spacer(Modifier.height(14.dp))
-
-            // ── Output Settings ────────────────────────────────────────
-            GlassCard {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    KStepBadge("2", KColor.Accent2)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Output Settings", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 15.sp)
-                }
-                Spacer(Modifier.height(16.dp))
-
-                KFieldLabel("Format Output")
-                val fmtRows = formats.chunked(3)
-                fmtRows.forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { f ->
-                            Box(Modifier.weight(1f)) {
-                                KFormatTabButton(f, selectedFmt == f) { selectedFmt = f }
-                            }
-                        }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                Spacer(Modifier.height(8.dp))
-                KFieldLabel("Codec")
-                KDropdownMenu(
-                    items = codecs.keys.toList(),
-                    selected = codecs.entries.first { it.value == selectedCodec }.key,
-                    onSelect = { selectedCodec = codecs[it]!! }
-                )
-                
-                Spacer(Modifier.height(14.dp))
-                
-                // 🔥 ENCODING MODE TABS
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    KFormatTabButton("CRF", encodeMode == "CRF") { encodeMode = "CRF" }
-                    KFormatTabButton("CBR", encodeMode == "CBR") { encodeMode = "CBR" }
-                }
-                Spacer(Modifier.height(12.dp))
-
-                if (encodeMode == "CRF") {
-                    KFieldLabel("CRF Value (Semakin kecil semakin HD)")
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Slider(
-                            value = crfValue, onValueChange = { crfValue = it },
-                            valueRange = 18f..51f, steps = 32,
-                            modifier = Modifier.weight(1f),
-                            colors = SliderDefaults.colors(activeTrackColor = KColor.Accent, thumbColor = KColor.Accent)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("${crfValue.toInt()}", color = KColor.Text2, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    KFieldLabel("Bitrate Target")
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Slider(
-                            value = bitrateM, onValueChange = { bitrateM = it },
-                            valueRange = 1f..50f, steps = 48,
-                            modifier = Modifier.weight(1f),
-                            colors = SliderDefaults.colors(activeTrackColor = KColor.Accent, thumbColor = KColor.Accent)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("${bitrateM.toInt()} Mbps", color = KColor.Text2, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(Modifier.height(14.dp))
-                KFieldLabel("Encoder Preset")
-                KDropdownMenu(items = presets, selected = selectedPreset, onSelect = { selectedPreset = it })
-
-                Spacer(Modifier.height(14.dp))
-                KFieldLabel("Resolution")
-                KDropdownMenu(
-                    items = resolutions.keys.toList(),
-                    selected = resolutions.entries.first { it.value == selectedRes }.key,
-                    onSelect = { selectedRes = resolutions[it]!! }
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-
-            KPrimaryButton(
-                label = "Konversi Sekarang",
-                icon = Icons.Rounded.SwapHoriz,
-                enabled = !isProcessing,
-                onClick = ::convert
-            )
-            Spacer(Modifier.height(24.dp))
-        }
-
-        // 🔥 OVERLAY PROGRESS BAR REALTIME
-        AnimatedVisibility(visible = isProcessing, enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f)),
-                contentAlignment = androidx.compose.ui.Alignment.Center
-            ) {
-                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        progress = progressPercent / 100f, 
-                        color = KColor.Accent, 
-                        strokeWidth = 6.dp, 
-                        modifier = Modifier.size(80.dp)
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text("$progressPercent%", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Sedang merender video...", color = Color.Gray, fontSize = 14.sp)
-                }
-            }
+        // --- STEP 1: INPUT VIDEO ---
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StepBadge(number = "1", color = AccentCyan)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("Input Video", color = TextTitle, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         
-        SnackbarHost(snackbar, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Kotak Upload Dashed
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardSolidBg.copy(alpha = 0.5f))
+                .drawBehind {
+                    drawRoundRect(
+                        color = Color(0xFF4A3E85),
+                        style = Stroke(
+                            width = 4f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
+                    )
+                }
+                .clickable { /* Aksi buka file manager */ },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AccentCyan.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.CloudUpload, contentDescription = null, tint = AccentCyan)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Drop video atau klik upload", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("MP4, AVI, MKV, MOV, WEBM, FLV", color = TextDesc, fontSize = 10.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // --- STEP 2: OUTPUT SETTINGS ---
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StepBadge(number = "2", color = AccentPurple)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("Output Settings", color = TextTitle, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Card Settings
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardSolidBg)
+                .padding(20.dp)
+        ) {
+            // 1. Format Output
+            SettingLabel("Format Output")
+            val formats = listOf("MP4", "MKV", "AVI", "WEBM", "MOV", "GIF")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    formats.take(3).forEach { format ->
+                        FormatButton(
+                            text = format,
+                            isSelected = selectedFormat == format,
+                            modifier = Modifier.weight(1f),
+                            onClick = { selectedFormat = format }
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    formats.takeLast(3).forEach { format ->
+                        FormatButton(
+                            text = format,
+                            isSelected = selectedFormat == format,
+                            modifier = Modifier.weight(1f),
+                            onClick = { selectedFormat = format }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 2. Codec
+            SettingLabel("Codec")
+            CustomDropdown(
+                value = selectedCodec,
+                options = listOf("H.264 (AVC) - Compatible", "H.265 (HEVC) - High Compression", "VP9", "AV1"),
+                onValueChange = { selectedCodec = it }
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 3. CRF vs CBR Toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(InputBg)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isCrfMode) CardSolidBg else Color.Transparent)
+                        .border(
+                            width = if (isCrfMode) 1.dp else 0.dp,
+                            color = if (isCrfMode) AccentCyan.copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable { isCrfMode = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("CRF", color = if (isCrfMode) AccentCyan else TextDesc, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (!isCrfMode) CardSolidBg else Color.Transparent)
+                        .border(
+                            width = if (!isCrfMode) 1.dp else 0.dp,
+                            color = if (!isCrfMode) AccentCyan.copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable { isCrfMode = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("CBR", color = if (!isCrfMode) AccentCyan else TextDesc, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 4. Slider (Hanya muncul kalau CRF)
+            if (isCrfMode) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    SettingLabel("CRF Value (Semakin kecil semakin HD)")
+                    Text(crfValue.toInt().toString(), color = AccentCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Slider(
+                    value = crfValue,
+                    onValueChange = { crfValue = it },
+                    valueRange = 0f..51f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = AccentCyan,
+                        activeTrackColor = AccentCyan,
+                        inactiveTrackColor = InputBg
+                    )
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // 5. Encoder Preset
+            SettingLabel("Encoder Preset")
+            CustomDropdown(
+                value = selectedPreset,
+                options = listOf("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"),
+                onValueChange = { selectedPreset = it }
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 6. Resolution
+            SettingLabel("Resolution")
+            CustomDropdown(
+                value = selectedResolution,
+                options = listOf("Original", "1080p", "720p", "480p", "360p"),
+                onValueChange = { selectedResolution = it }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Tombol Konversi Sekarang
+        Button(
+            onClick = { /* Eksekusi FFmpeg di sini */ },
+            modifier = Modifier.height(48.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+            contentPadding = PaddingValues(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF4A3E85), Color(0xFF6C5CE7))))
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Konversi Sekarang", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(80.dp))
     }
 }
 
-// ─── Dropdown ─────────────────────────────────────────────────────────────────
-@OptIn(ExperimentalMaterial3Api::class)
+// --- Komponen Pelengkap UI ---
+
 @Composable
-fun KDropdownMenu(
-    items: List<String>,
-    selected: String,
-    onSelect: (String) -> Unit
-) {
+fun StepBadge(number: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.2f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(number, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun SettingLabel(text: String) {
+    Text(text, color = TextDesc, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+}
+
+@Composable
+fun FormatButton(text: String, isSelected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isSelected) AccentCyan.copy(alpha = 0.1f) else InputBg)
+            .border(
+                width = 1.dp,
+                color = if (isSelected) AccentCyan else Color.Transparent,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = if (isSelected) AccentCyan else TextDesc, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+fun CustomDropdown(value: String, options: List<String>, onValueChange: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-        OutlinedTextField(
-            value = selected,
-            onValueChange = {},
-            readOnly = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor   = KColor.Accent,
-                unfocusedBorderColor = KColor.Border,
-                focusedTextColor     = KColor.Text2,
-                unfocusedTextColor   = KColor.Text2,
-                focusedContainerColor   = KColor.Surface,
-                unfocusedContainerColor = KColor.Surface,
-            ),
-            textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = KColor.Text2)
-        )
-        ExposedDropdownMenu(
-            expanded = expanded, 
-            onDismissRequest = { expanded = false }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(InputBg)
+                .clickable { expanded = true }
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            items.forEach { item ->
+            Text(value, color = TextTitle, fontSize = 13.sp)
+            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = TextDesc)
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(CardSolidBg)
+        ) {
+            options.forEach { selectionOption ->
                 DropdownMenuItem(
-                    text = { Text(item, color = KColor.Text2, fontSize = 13.sp) },
-                    onClick = { onSelect(item); expanded = false }
+                    text = { Text(selectionOption, color = TextTitle, fontSize = 13.sp) },
+                    onClick = {
+                        onValueChange(selectionOption)
+                        expanded = false
+                    }
                 )
             }
         }
