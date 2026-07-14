@@ -1,6 +1,10 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,10 +28,12 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.arthenica.ffmpegkit.FFmpegKitConfig // Cuma buat ambil real path
-import com.d4nzxml.kythera.service.FfmpegService // 🔥 IMPORT SERVICE LU
+import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.d4nzxml.kythera.service.FfmpegService
+import com.d4nzxml.kythera.service.GalleryService // 🔥 KURIR RESMI LU MASUK SINI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -46,12 +52,15 @@ fun CompressScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope() 
     
-    // 🔥 Inisialisasi Service Lu
     val ffmpegService = remember { FfmpegService(context) }
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) } 
     var progressPercent by remember { mutableIntStateOf(0) } 
+    
+    // 🔥 State buat Notif Premium
+    var toastMessage by remember { mutableStateOf<String?>(null) }
+    var isErrorToast by remember { mutableStateOf(false) }
     
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -162,7 +171,7 @@ fun CompressScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL COMPRESS (PANGGIL SERVICE FFMPEG LU) ---
+            // --- TOMBOL COMPRESS ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
@@ -173,15 +182,12 @@ fun CompressScreen() {
                             }
                             
                             val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
-                            
-                            // Ekstrak angka persen target ("30%" -> 30)
                             val percentInt = selectedTarget.replace("%", "").toIntOrNull() ?: 60
 
-                            // Animasi Loading Pintar (Karena service lu pake executor lama)
+                            // Loading pintar nunggu Service kelar
                             var isProcessing = true
                             scope.launch(Dispatchers.Main) {
                                 var currentP = 0
-                                // Two-pass butuh waktu lebih lama, jadi loadingnya kita set pelan
                                 val delayTime = if (isTwoPass) 400L else 200L 
                                 while (isProcessing && currentP < 95) {
                                     delay(delayTime)
@@ -190,34 +196,46 @@ fun CompressScreen() {
                                 }
                             }
 
-                            // 🔥 EKSEKUSI SERVICE LU DI SINI
+                            // 1. Eksekusi FFmpeg
                             val result = ffmpegService.compressVideo(
                                 inputPath = inputPath,
                                 compressPercent = percentInt,
                                 compressAudio = isAudioCompression,
                                 removeMetadata = isRemoveMetadata,
                                 twoPass = isTwoPass,
-                                onProgress = { 
-                                    // Karena dari Service cuma ngeluarin -1.0, 
-                                    // kita abaikan aja dan pakai loading pintar di atas.
-                                }
+                                onProgress = { }
                             )
 
-                            // Beresin UI
                             isProcessing = false
-                            withContext(Dispatchers.Main) {
-                                progressPercent = 100 // Loncat ke 100 kalau kelar
-                                delay(300)
-                                isLoading = false
-                                if (result.success) {
-                                    Toast.makeText(context, "Selesai! Tersimpan di: ${result.outputPath}", Toast.LENGTH_LONG).show()
-                                } else {
-                                    Toast.makeText(context, "Gagal Kompresi: ${result.errorMessage}", Toast.LENGTH_LONG).show()
+                            
+                            // 2. Oper hasil ke GalleryService
+                            if (result.success) {
+                                val savedToGallery = GalleryService.saveVideo(context, result.outputPath)
+                                
+                                withContext(Dispatchers.Main) {
+                                    progressPercent = 100
+                                    delay(300)
+                                    isLoading = false
+                                    
+                                    if (savedToGallery) {
+                                        toastMessage = "Selesai! Tersimpan di Galeri (Movies/Kythera)"
+                                        isErrorToast = false
+                                    } else {
+                                        toastMessage = "Video sukses, tapi gagal masuk ke Galeri."
+                                        isErrorToast = true
+                                    }
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    isLoading = false
+                                    toastMessage = "Gagal Kompresi Video!"
+                                    isErrorToast = true
                                 }
                             }
                         }
                     } else {
-                        Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
+                        toastMessage = "Pilih video terlebih dahulu!"
+                        isErrorToast = true
                     }
                 },
                 modifier = Modifier.height(48.dp),
@@ -243,7 +261,7 @@ fun CompressScreen() {
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(80.dp))
+            Spacer(modifier = Modifier.height(100.dp))
         }
 
         // TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
@@ -256,7 +274,6 @@ fun CompressScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // Lingkaran Progress
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             progress = progressPercent / 100f,
@@ -265,7 +282,6 @@ fun CompressScreen() {
                             modifier = Modifier.size(80.dp),
                             strokeWidth = 6.dp
                         )
-                        // Angka Persen
                         Text(
                             text = "$progressPercent%", 
                             color = Color.White, 
@@ -278,6 +294,31 @@ fun CompressScreen() {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(if (isTwoPass) "Mode Two-Pass (Lebih Lama)" else "Mohon jangan tutup aplikasi", color = TextDesc, fontSize = 11.sp)
                 }
+            }
+        }
+
+        // 🔥 CUSTOM NOTIFIKASI PREMIUM
+        AnimatedVisibility(
+            visible = toastMessage != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isErrorToast) Color(0xFFE74C3C).copy(alpha = 0.95f) else Color(0xFF27AE60).copy(alpha = 0.95f))
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(toastMessage ?: "", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            }
+        }
+
+        LaunchedEffect(toastMessage) {
+            if (toastMessage != null) {
+                delay(3500)
+                toastMessage = null
             }
         }
     }
@@ -309,7 +350,7 @@ fun CompressionTargetCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(title, color = TextTitle, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(2.dp))
-            Text(desc, color = TextDesc, fontSize = 9.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text(desc, color = TextDesc, fontSize = 9.sp, textAlign = TextAlign.Center)
         }
     }
 }
