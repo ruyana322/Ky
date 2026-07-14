@@ -3,6 +3,7 @@ package com.d4nzxml.kythera.ui.screen
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
@@ -66,16 +67,17 @@ fun EnhanceScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var progressPercent by remember { mutableIntStateOf(0) } 
 
-    // 🔥 State buat menahan gambar di memori buat Preview
+    // State buat Preview & File Sementara
     var inputBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var resultBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showPreview by remember { mutableStateOf(false) }
+    var pendingSavedUri by remember { mutableStateOf<Uri?>(null) } 
 
-    // 🔥 State buat Notifikasi Custom Premium
+    // State buat Notifikasi
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var isErrorToast by remember { mutableStateOf(false) }
 
@@ -102,7 +104,6 @@ fun EnhanceScreen() {
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // --- KOTAK UPLOAD DASHED ---
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -155,7 +156,6 @@ fun EnhanceScreen() {
                                         isLoading = true
                                     }
 
-                                    // Baca foto dari galeri jadi Bitmap
                                     val inputStream = context.contentResolver.openInputStream(selectedFileUri!!)
                                     val loadedBitmap = BitmapFactory.decodeStream(inputStream)
                                     inputStream?.close()
@@ -169,37 +169,57 @@ fun EnhanceScreen() {
                                         return@withContext
                                     }
 
-                                    // Tahan input bitmap di memori buat ditampilin di preview nanti
-                                    withContext(Dispatchers.Main) {
-                                        inputBitmap = loadedBitmap
-                                    }
+                                    withContext(Dispatchers.Main) { inputBitmap = loadedBitmap }
 
-                                    // Loading pintar sambil nunggu AI kerja
                                     var isProcessing = true
                                     scope.launch(Dispatchers.Main) {
                                         var currentP = 0
-                                        while (isProcessing && currentP < 95) {
+                                        while (isProcessing && currentP < 90) { // Berhenti di 90% nunggu PNG kelar dirender
                                             delay(500) 
                                             currentP += 1
-                                            progressPercent = currentP.coerceAtMost(95)
+                                            progressPercent = currentP.coerceAtMost(90)
                                         }
                                     }
 
-                                    // Panggil Mesin AI
                                     RealSrEngine.setup(context) 
                                     val (resBitmap, errorLog) = RealSrEngine.upscaleWithLog(context, loadedBitmap)
-
                                     isProcessing = false 
 
                                     if (resBitmap != null) {
+                                        withContext(Dispatchers.Main) { progressPercent = 92 } // Tandain AI beres, masuk fase simpan PNG
+                                        
+                                        System.gc() // Bersihin memori biar HP lega sebelum nulis file raksasa
+
+                                        // 🔥 SILENT SAVE KEMBALI KE PNG (100% QUALITY)
+                                        val uri = withContext(Dispatchers.IO) {
+                                            try {
+                                                val resolver = context.contentResolver
+                                                val values = ContentValues().apply {
+                                                    put(MediaStore.Images.Media.DISPLAY_NAME, "Kythera_x4_${System.currentTimeMillis()}.png")
+                                                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                                                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/kytheraImg")
+                                                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                                                }
+                                                val newUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                                                if (newUri != null) {
+                                                    resolver.openOutputStream(newUri)?.use { out ->
+                                                        resBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                                    }
+                                                    values.clear()
+                                                    values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                                                    resolver.update(newUri, values, null, null)
+                                                }
+                                                newUri
+                                            } catch (e: Exception) { null }
+                                        }
+
                                         withContext(Dispatchers.Main) {
                                             progressPercent = 100
-                                            resultBitmap = resBitmap // Tahan output bitmap
-                                            delay(400) 
+                                            resultBitmap = resBitmap
+                                            pendingSavedUri = uri // Tahan URI file PNG yang baru disimpen
+                                            delay(200) 
                                             isLoading = false
-                                            
-                                            // 🔥 MUNCULIN PREVIEW!
-                                            showPreview = true 
+                                            showPreview = true // Buka Slider
                                         }
                                     } else {
                                         withContext(Dispatchers.Main) {
@@ -239,180 +259,81 @@ fun EnhanceScreen() {
         }
 
         // ==========================================
-        // 2. LAYAR PREVIEW BEFORE/AFTER (PICSART STYLE)
+        // 2. LAYAR PREVIEW BEFORE/AFTER
         // ==========================================
         AnimatedVisibility(
             visible = showPreview && inputBitmap != null && resultBitmap != null,
             enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
         ) {
-            // Deteksi tombol back di HP biar nggak keluar aplikasi, tapi cuma nutup preview
-            BackHandler {
+            // Fungsi Batal (Menghapus file yang tadi disimpan diam-diam)
+            val cancelPreview = {
+                scope.launch(Dispatchers.IO) {
+                    pendingSavedUri?.let { context.contentResolver.delete(it, null, null) }
+                }
                 showPreview = false
                 inputBitmap = null
                 resultBitmap = null
+                pendingSavedUri = null
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-                    .clickable(enabled = false) {} // Tahan klik biar ga nembus ke belakang
-            ) {
-                // Logika Slider Pembatas
+            BackHandler { cancelPreview() }
+
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
                 var sliderPosition by remember { mutableFloatStateOf(0.5f) }
 
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                val width = size.width.toFloat()
-                                sliderPosition = (sliderPosition + dragAmount.x / width).coerceIn(0f, 1f)
-                            }
+                    modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            sliderPosition = (sliderPosition + dragAmount.x / size.width).coerceIn(0f, 1f)
                         }
+                    }
                 ) {
-                    // Gambar Hasil AI (After) - Posisi Full di Belakang
                     Image(
-                        bitmap = resultBitmap!!.asImageBitmap(),
-                        contentDescription = "After",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
+                        bitmap = resultBitmap!!.asImageBitmap(), contentDescription = "After",
+                        contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
                     )
 
-                    // Gambar Asli (Before) - Dipotong dinamis sesuai tarikan jari slider
                     Image(
-                        bitmap = inputBitmap!!.asImageBitmap(),
-                        contentDescription = "Before",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .drawWithContent {
-                                clipRect(right = size.width * sliderPosition) {
-                                    this@drawWithContent.drawContent()
-                                }
-                            }
+                        bitmap = inputBitmap!!.asImageBitmap(), contentDescription = "Before",
+                        contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().drawWithContent {
+                            clipRect(right = size.width * sliderPosition) { this@drawWithContent.drawContent() }
+                        }
                     )
 
-                    // Garis Pemisah (Slider Line)
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val xPos = size.width * sliderPosition
-                        drawLine(
-                            color = Color.White,
-                            start = Offset(xPos, 0f),
-                            end = Offset(xPos, size.height),
-                            strokeWidth = 6f
-                        )
-                        drawCircle(
-                            color = Color.White,
-                            radius = 24f,
-                            center = Offset(xPos, size.height / 2)
-                        )
-                        drawCircle(
-                            color = AccentCyan,
-                            radius = 12f,
-                            center = Offset(xPos, size.height / 2)
-                        )
+                        drawLine(color = Color.White, start = Offset(xPos, 0f), end = Offset(xPos, size.height), strokeWidth = 6f)
+                        drawCircle(color = Color.White, radius = 24f, center = Offset(xPos, size.height / 2))
+                        drawCircle(color = AccentCyan, radius = 12f, center = Offset(xPos, size.height / 2))
                     }
 
-                    // Label "Before"
-                    Text(
-                        text = "Before", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(bottom = 40.dp, start = 20.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-
-                    // Label "After"
-                    Text(
-                        text = "After", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(bottom = 40.dp, end = 20.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
+                    Text("Before", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 40.dp, start = 20.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+                    Text("After", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 40.dp, end = 20.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                 }
 
-                // Header Atas (Tombol Back & Simpan)
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent)
-                            )
-                        )
-                        .padding(horizontal = 12.dp, vertical = 24.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent))).padding(horizontal = 12.dp, vertical = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Tombol Kembali
                     IconButton(
-                        onClick = {
-                            showPreview = false
-                            inputBitmap = null
-                            resultBitmap = null // Hapus cache biar RAM HP lega
-                        },
+                        onClick = { cancelPreview() },
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                    ) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Batal", tint = Color.White)
-                    }
+                    ) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Batal", tint = Color.White) }
 
-                    // 🔥 TOMBOL SIMPAN KE "kytheraImg"
+                    // 🔥 TOMBOL SIMPAN INSTAN TANPA LOADING
                     Button(
                         onClick = {
-                            scope.launch {
-                                withContext(Dispatchers.Main) { isLoading = true }
-                                
-                                val isSaved = withContext(Dispatchers.IO) {
-                                    try {
-                                        val resolver = context.contentResolver
-                                        val values = ContentValues().apply {
-                                            put(MediaStore.Images.Media.DISPLAY_NAME, "Kythera_Enhanced_${System.currentTimeMillis()}.png")
-                                            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                                            // 🔥 TARGET FOLDER BARU SESUAI PERMINTAAN LU
-                                            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/kytheraImg")
-                                            put(MediaStore.Images.Media.IS_PENDING, 1)
-                                        }
-
-                                        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                                        if (uri != null) {
-                                            resolver.openOutputStream(uri)?.use { out ->
-                                                resultBitmap!!.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                            }
-                                            values.clear()
-                                            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                                            resolver.update(uri, values, null, null)
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                        false
-                                    }
-                                }
-
-                                withContext(Dispatchers.Main) {
-                                    isLoading = false
-                                    if (isSaved) {
-                                        toastMessage = "Tersimpan di Pictures/kytheraImg"
-                                        isErrorToast = false
-                                        // Tutup preview & bersihin RAM
-                                        showPreview = false
-                                        inputBitmap = null
-                                        resultBitmap = null
-                                        selectedFileUri = null
-                                    } else {
-                                        toastMessage = "Gagal menyimpan foto!"
-                                        isErrorToast = true
-                                    }
-                                }
-                            }
+                            toastMessage = "Selesai! Tersimpan di Pictures/kytheraImg"
+                            isErrorToast = false
+                            
+                            // Langsung tutup dan beresin memori (File PNG udah aman di galeri)
+                            showPreview = false
+                            inputBitmap = null
+                            resultBitmap = null
+                            pendingSavedUri = null 
+                            selectedFileUri = null
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
                         shape = RoundedCornerShape(50)
@@ -430,10 +351,7 @@ fun EnhanceScreen() {
         // ==========================================
         if (isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f))
-                    .clickable(enabled = false) {}, 
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -445,14 +363,13 @@ fun EnhanceScreen() {
                         Text("$progressPercent%", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text("AI RealSR sedang bekerja...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(if (progressPercent > 90) "Membangun File PNG..." else "AI RealSR sedang bekerja...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Menggunakan GPU Vulkan NCNN", color = TextDesc, fontSize = 11.sp)
                 }
             }
         }
 
-        // Custom Notifikasi Premium
         AnimatedVisibility(
             visible = toastMessage != null,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -460,14 +377,9 @@ fun EnhanceScreen() {
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
         ) {
             Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isErrorToast) Color(0xFFE74C3C).copy(alpha = 0.95f) else Color(0xFF27AE60).copy(alpha = 0.95f))
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(if (isErrorToast) Color(0xFFE74C3C).copy(alpha = 0.95f) else Color(0xFF27AE60).copy(alpha = 0.95f)).padding(horizontal = 20.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center
-            ) {
-                Text(toastMessage ?: "", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-            }
+            ) { Text(toastMessage ?: "", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
         }
 
         LaunchedEffect(toastMessage) {
