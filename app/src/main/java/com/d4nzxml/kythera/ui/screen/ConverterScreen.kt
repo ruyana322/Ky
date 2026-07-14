@@ -36,7 +36,17 @@ private val InputBg = Color(0xFF1D1A31)
 
 
 @Composable
-fun ConverterScreen() {
+fun ConverterScreen() {// Buat nyimpen data file (URI) yang udah dipilih
+var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+// Ini mesin buat ngebuka Galeri / File Manager
+val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+) { uri ->
+    // Pas user milih file, URI-nya disimpen ke sini
+    selectedFileUri = uri
+}
+
     var selectedFormat by remember { mutableStateOf("MP4") }
     var selectedCodec by remember { mutableStateOf("H.264 (AVC) - Compatible") }
     var isCrfMode by remember { mutableStateOf(true) }
@@ -85,7 +95,9 @@ fun ConverterScreen() {
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-                .clickable { /* Aksi buka file manager */ },
+                .clickable { 
+    filePickerLauncher.launch("video/*") 
+},
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
