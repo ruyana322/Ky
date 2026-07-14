@@ -1,5 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
@@ -76,7 +77,7 @@ fun EnhanceScreen() {
     var inputBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var resultBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showPreview by remember { mutableStateOf(false) }
-    var pendingSavedPath by remember { mutableStateOf<String?>(null) } // 🔥 Simpan path aslinya
+    var pendingSavedPath by remember { mutableStateOf<String?>(null) }
 
     // State buat Notifikasi
     var toastMessage by remember { mutableStateOf<String?>(null) }
@@ -187,25 +188,26 @@ fun EnhanceScreen() {
                                         var currentP = 0
                                         while (isProcessing && currentP < 90) { 
                                             delay(500) 
+                                            // 🔥 KUNCI ANTI-NABRAK: Langsung stop kalau isProcessing udah false
+                                            if (!isProcessing) break 
                                             currentP += 1
-                                            progressPercent = currentP.coerceAtMost(90)
+                                            progressPercent = currentP
                                         }
                                     }
 
                                     RealSrEngine.setup(context) 
                                     val (resBitmap, errorLog) = RealSrEngine.upscaleWithLog(context, loadedBitmap)
+                                    
+                                    // Matiin loading palsu SEKARANG JUGA
                                     isProcessing = false 
 
                                     if (resBitmap != null) {
-                                        withContext(Dispatchers.Main) { progressPercent = 92 } 
-                                        
                                         System.gc() 
 
-                                        // 🔥 SILENT SAVE DIRECT KE DCIM PUBLIC STORAGE
+                                        // Simpan ke DCIM Public Storage diam-diam
                                         val savedFilePath = withContext(Dispatchers.IO) {
                                             try {
                                                 val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
-                                                // Masukin ke KytheraImg (bisa lu ganti jadi "RealSR" kalau mau persis aslinya)
                                                 val kytheraDir = File(dcimDir, "kytheraImg")
                                                 if (!kytheraDir.exists()) kytheraDir.mkdirs()
 
@@ -214,7 +216,6 @@ fun EnhanceScreen() {
                                                     resBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                                                 }
 
-                                                // 🔥 Trigger Media Scanner (Biar galeri sadar ada foto baru)
                                                 MediaScannerConnection.scanFile(
                                                     context,
                                                     arrayOf(outFile.absolutePath),
@@ -226,10 +227,11 @@ fun EnhanceScreen() {
                                         }
 
                                         withContext(Dispatchers.Main) {
+                                            // 🔥 BARU 100% KETIKA BENER-BENER BERES
                                             progressPercent = 100
                                             resultBitmap = resBitmap
                                             pendingSavedPath = savedFilePath 
-                                            delay(200) 
+                                            delay(300) // Kasih lihat angka 100% bentar
                                             isLoading = false
                                             showPreview = true 
                                         }
@@ -280,11 +282,9 @@ fun EnhanceScreen() {
         ) {
             val cancelPreview = {
                 scope.launch(Dispatchers.IO) {
-                    // Kalau user batal, kita hapus foto diam-diam yang ada di DCIM tadi
                     pendingSavedPath?.let { path -> 
                         val file = File(path)
                         if (file.exists()) file.delete()
-                        // Update galeri biar fotonya ilang
                         MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
                     }
                 }
@@ -341,7 +341,6 @@ fun EnhanceScreen() {
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
                     ) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Batal", tint = Color.White) }
 
-                    // 🔥 TOMBOL SIMPAN (CUMA KASIH NOTIF KARENA UDAH DISIMPAN DIAM-DIAM)
                     Button(
                         onClick = {
                             toastMessage = "Selesai! Tersimpan di DCIM/kytheraImg"
@@ -377,7 +376,7 @@ fun EnhanceScreen() {
                         Text("$progressPercent%", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text(if (progressPercent > 90) "Menyimpan File PNG..." else "AI RealSR sedang bekerja...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("AI RealSR sedang merender...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Menggunakan GPU Vulkan NCNN", color = TextDesc, fontSize = 11.sp)
                 }
