@@ -26,6 +26,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -38,7 +40,10 @@ private val AccentOrange = Color(0xFFF39C12)
 @Composable
 fun CompressScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope() // 🔥 Buat jalanin loading di background
+    
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var isLoading by remember { mutableStateOf(false) } // 🔥 State loading
     
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -51,137 +56,167 @@ fun CompressScreen() {
     var isRemoveMetadata by remember { mutableStateOf(false) }
     var isTwoPass by remember { mutableStateOf(true) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DashBg)
-            .verticalScroll(rememberScrollState())
-            .padding(18.dp)
-    ) {
-        Text("Compress Video", color = TextTitle, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "Kurangi ukuran file video dengan algoritma kompresi cerdas.",
-            color = TextDesc, fontSize = 12.sp, modifier = Modifier.padding(bottom = 24.dp)
-        )
-
-        // --- KOTAK UPLOAD DASHED ---
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(140.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(CardSolidBg.copy(alpha = 0.5f))
-                .drawBehind {
-                    drawRoundRect(
-                        color = Color(0xFF2B4752), 
-                        style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
-                    )
-                }
-                .clickable { filePickerLauncher.launch("video/*") },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (selectedFileUri != null) {
-                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Video Siap Diccompress!", color = AccentGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Tap untuk mengganti video", color = TextDesc, fontSize = 10.sp)
-                } else {
-                    Box(
-                        modifier = Modifier.size(42.dp).clip(CircleShape).background(AccentGreen.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = null, tint = AccentGreen)
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Drop video untuk compress", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Maksimal file 2GB per proses", color = TextDesc, fontSize = 10.sp)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("Target Kompresi", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CompressionTargetCard("30%", "Light", "Kualitas hampir sama", AccentGreen, selectedTarget == "30%", Modifier.weight(1f)) { selectedTarget = "30%" }
-            CompressionTargetCard("60%", "Balanced", "Recommended", AccentGreen, selectedTarget == "60%", Modifier.weight(1f)) { selectedTarget = "60%" }
-            CompressionTargetCard("85%", "Aggressive", "Ukuran minimal", AccentOrange, selectedTarget == "85%", Modifier.weight(1f)) { selectedTarget = "85%" }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        SwitchSettingRow("Audio Compression", "Kompres juga track audio", isAudioCompression) { isAudioCompression = it }
-        SwitchSettingRow("Remove Metadata", "Hapus data EXIF dan metadata", isRemoveMetadata) { isRemoveMetadata = it }
-        SwitchSettingRow("Two-Pass Encoding", "Kualitas lebih baik, proses lebih lama", isTwoPass) { isTwoPass = it }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // --- ESTIMASI OUTPUT CARD ---
-        val reductionFraction = when (selectedTarget) {
-            "30%" -> 0.3f
-            "60%" -> 0.6f
-            "85%" -> 0.85f
-            else -> 0.5f
-        }
-
+    // 🔥 Pake Box di luar biar bisa numpuk layar loading
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardSolidBg).padding(20.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .background(DashBg)
+                .verticalScroll(rememberScrollState())
+                .padding(18.dp)
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Estimasi Output", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text("Pengurangan $selectedTarget", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Box(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(InputBg)) {
-                Box(modifier = Modifier.fillMaxWidth(reductionFraction).fillMaxHeight().clip(CircleShape).background(AccentGreen))
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("0 MB", color = TextDesc, fontSize = 10.sp)
-                Text("$selectedTarget size reduction", color = AccentGreen.copy(alpha = 0.7f), fontSize = 10.sp)
-                Text("Original", color = TextDesc, fontSize = 10.sp)
-            }
-        }
+            Text("Compress Video", color = TextTitle, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Kurangi ukuran file video dengan algoritma kompresi cerdas.",
+                color = TextDesc, fontSize = 12.sp, modifier = Modifier.padding(bottom = 24.dp)
+            )
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // --- TOMBOL COMPRESS ---
-        Button(
-            onClick = { 
-                if (selectedFileUri != null) {
-                    Toast.makeText(context, "Memulai Proses Kompresi...", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
-                }
-            },
-            modifier = Modifier.height(48.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-            contentPadding = PaddingValues(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
+            // --- KOTAK UPLOAD DASHED ---
             Box(
                 modifier = Modifier
-                    .background(
-                        Brush.horizontalGradient(
-                            if (selectedFileUri != null) listOf(Color(0xFF00CEC9), AccentGreen) 
-                            else listOf(Color(0xFF3B414B), Color(0xFF3B414B))
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(CardSolidBg.copy(alpha = 0.5f))
+                    .drawBehind {
+                        drawRoundRect(
+                            color = Color(0xFF2B4752), 
+                            style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                         )
-                    )
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                    }
+                    .clickable { filePickerLauncher.launch("video/*") },
                 contentAlignment = Alignment.Center
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, tint = DashBg, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Compress Video", color = DashBg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (selectedFileUri != null) {
+                        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(36.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Video Siap Diccompress!", color = AccentGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Tap untuk mengganti video", color = TextDesc, fontSize = 10.sp)
+                    } else {
+                        Box(
+                            modifier = Modifier.size(42.dp).clip(CircleShape).background(AccentGreen.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null, tint = AccentGreen)
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Drop video untuk compress", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Maksimal file 2GB per proses", color = TextDesc, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("Target Kompresi", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompressionTargetCard("30%", "Light", "Kualitas hampir sama", AccentGreen, selectedTarget == "30%", Modifier.weight(1f)) { selectedTarget = "30%" }
+                CompressionTargetCard("60%", "Balanced", "Recommended", AccentGreen, selectedTarget == "60%", Modifier.weight(1f)) { selectedTarget = "60%" }
+                CompressionTargetCard("85%", "Aggressive", "Ukuran minimal", AccentOrange, selectedTarget == "85%", Modifier.weight(1f)) { selectedTarget = "85%" }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            SwitchSettingRow("Audio Compression", "Kompres juga track audio", isAudioCompression) { isAudioCompression = it }
+            SwitchSettingRow("Remove Metadata", "Hapus data EXIF dan metadata", isRemoveMetadata) { isRemoveMetadata = it }
+            SwitchSettingRow("Two-Pass Encoding", "Kualitas lebih baik, proses lebih lama", isTwoPass) { isTwoPass = it }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // --- ESTIMASI OUTPUT CARD ---
+            val reductionFraction = when (selectedTarget) {
+                "30%" -> 0.3f
+                "60%" -> 0.6f
+                "85%" -> 0.85f
+                else -> 0.5f
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardSolidBg).padding(20.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Estimasi Output", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Pengurangan $selectedTarget", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(InputBg)) {
+                    Box(modifier = Modifier.fillMaxWidth(reductionFraction).fillMaxHeight().clip(CircleShape).background(AccentGreen))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("0 MB", color = TextDesc, fontSize = 10.sp)
+                    Text("$selectedTarget size reduction", color = AccentGreen.copy(alpha = 0.7f), fontSize = 10.sp)
+                    Text("Original", color = TextDesc, fontSize = 10.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // --- TOMBOL COMPRESS ---
+            Button(
+                onClick = { 
+                    if (selectedFileUri != null) {
+                        // 🔥 JALANIN LOADING PROSES
+                        scope.launch {
+                            isLoading = true
+                            delay(3000) // Simulasi FFmpeg jalan 3 detik
+                            isLoading = false
+                            Toast.makeText(context, "Kompresi Selesai!", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                contentPadding = PaddingValues(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            Brush.horizontalGradient(
+                                if (selectedFileUri != null) listOf(Color(0xFF00CEC9), AccentGreen) 
+                                else listOf(Color(0xFF3B414B), Color(0xFF3B414B))
+                            )
+                        )
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, tint = DashBg, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Compress Video", color = DashBg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(80.dp))
+        }
+
+        // 🔥 TAMPILAN LOADING OVERLAY
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .clickable(enabled = false) {}, // Blokir klik di belakang layar
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        color = AccentGreen, // 🔥 Loadingnya pake warna ijo
+                        modifier = Modifier.size(50.dp),
+                        strokeWidth = 4.dp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Mengkompresi Video...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
         }
-        Spacer(modifier = Modifier.height(80.dp))
     }
 }
 
