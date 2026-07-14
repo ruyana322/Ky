@@ -1,5 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,8 +27,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.arthenica.ffmpegkit.FFprobeKit
+import com.arthenica.ffmpegkit.ReturnCode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -40,10 +47,11 @@ private val AccentOrange = Color(0xFFF39C12)
 @Composable
 fun CompressScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope() // 🔥 Buat jalanin loading di background
+    val scope = rememberCoroutineScope() 
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    var isLoading by remember { mutableStateOf(false) } // 🔥 State loading
+    var isLoading by remember { mutableStateOf(false) } 
+    var progressPercent by remember { mutableIntStateOf(0) } // 🔥 State Baru Buat Persen (0-100)
     
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -56,7 +64,6 @@ fun CompressScreen() {
     var isRemoveMetadata by remember { mutableStateOf(false) }
     var isTwoPass by remember { mutableStateOf(true) }
 
-    // 🔥 Pake Box di luar biar bisa numpuk layar loading
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -127,7 +134,6 @@ fun CompressScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- ESTIMASI OUTPUT CARD ---
             val reductionFraction = when (selectedTarget) {
                 "30%" -> 0.3f
                 "60%" -> 0.6f
@@ -156,16 +162,85 @@ fun CompressScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL COMPRESS ---
+            // --- TOMBOL COMPRESS (LOGIKA FFMPEG PERCENTAGE) ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
-                        // 🔥 JALANIN LOADING PROSES
                         scope.launch {
-                            isLoading = true
-                            delay(3000) // Simulasi FFmpeg jalan 3 detik
-                            isLoading = false
-                            Toast.makeText(context, "Kompresi Selesai!", Toast.LENGTH_SHORT).show()
+                            withContext(Dispatchers.IO) {
+                                try {
+                                    val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
+                                    
+                                    // 🔥 Tarik Info Durasi Video Buat Ngitung Persen
+                                    val mediaInfo = FFprobeKit.getMediaInformation(inputPath)
+                                    val durationStr = mediaInfo?.mediaInformation?.duration
+                                    val totalDurationMs = durationStr?.toFloatOrNull()?.times(1000)?.toLong() ?: 0L
+
+                                    val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                                    val kytheraDir = File(moviesDir, "KytheraTools")
+                                    if (!kytheraDir.exists()) kytheraDir.mkdirs()
+                                    
+                                    val outputFile = File(kytheraDir, "Compress_${System.currentTimeMillis()}.mp4")
+                                    val outputPath = outputFile.absolutePath
+
+                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+                                    val audioArgs = if (isAudioCompression) {
+                                        sharedPref.getString("comp_audio_compress", "-c:a aac -b:a 128k") ?: "-c:a aac -b:a 128k"
+                                    } else {
+                                        sharedPref.getString("comp_audio_copy", "-c:a copy") ?: "-c:a copy"
+                                    }
+                                    val metaArgs = if (isRemoveMetadata) {
+                                        sharedPref.getString("comp_meta", "-map_metadata -1") ?: "-map_metadata -1"
+                                    } else ""
+
+                                    val crfValue = when (selectedTarget) {
+                                        "30%" -> "23" 
+                                        "60%" -> "28" 
+                                        "85%" -> "32" 
+                                        else -> "28"
+                                    }
+                                    val passArgs = if (isTwoPass) "-preset slow" else "-preset fast"
+                                    val command = "-i \"$inputPath\" -c:v libx264 -crf $crfValue $passArgs $audioArgs $metaArgs -y \"$outputPath\""
+
+                                    // Reset UI ke loading
+                                    withContext(Dispatchers.Main) {
+                                        progressPercent = 0
+                                        isLoading = true
+                                    }
+
+                                    // 🔥 Eksekusi FFmpeg Async (Bisa Nyadap Persen)
+                                    FFmpegKit.executeAsync(command, { session ->
+                                        // Kalau udah selesai
+                                        val returnCode = session.returnCode
+                                        scope.launch(Dispatchers.Main) {
+                                            isLoading = false
+                                            if (ReturnCode.isSuccess(returnCode)) {
+                                                Toast.makeText(context, "Selesai! Disimpan di Movies/KytheraTools", Toast.LENGTH_LONG).show()
+                                            } else {
+                                                Toast.makeText(context, "Gagal Kompresi!", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }, { log ->
+                                        // (Log ga perlu kita pantau)
+                                    }, { statistics ->
+                                        // 🔥 Ngitung Persen Tiap Detik
+                                        if (totalDurationMs > 0) {
+                                            val timeMs = statistics.time.toFloat()
+                                            val percentage = ((timeMs / totalDurationMs) * 100).toInt()
+                                            
+                                            scope.launch(Dispatchers.Main) {
+                                                progressPercent = percentage.coerceIn(0, 100)
+                                            }
+                                        }
+                                    })
+                                    
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        isLoading = false
+                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
                         }
                     } else {
                         Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
@@ -197,23 +272,37 @@ fun CompressScreen() {
             Spacer(modifier = Modifier.height(80.dp))
         }
 
-        // 🔥 TAMPILAN LOADING OVERLAY
+        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
         if (isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .clickable(enabled = false) {}, // Blokir klik di belakang layar
+                    .background(Color.Black.copy(alpha = 0.85f))
+                    .clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        color = AccentGreen, // 🔥 Loadingnya pake warna ijo
-                        modifier = Modifier.size(50.dp),
-                        strokeWidth = 4.dp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Mengkompresi Video...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    // Lingkaran Progress (Bisa muter ngikutin persen)
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = progressPercent / 100f,
+                            color = AccentGreen,
+                            trackColor = CardSolidBg,
+                            modifier = Modifier.size(80.dp),
+                            strokeWidth = 6.dp
+                        )
+                        // Angka Persen di tengah lingkaran
+                        Text(
+                            text = "$progressPercent%", 
+                            color = Color.White, 
+                            fontWeight = FontWeight.ExtraBold, 
+                            fontSize = 18.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text("Sedang Mengkompresi Video...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Mohon jangan tutup aplikasi", color = TextDesc, fontSize = 11.sp)
                 }
             }
         }
