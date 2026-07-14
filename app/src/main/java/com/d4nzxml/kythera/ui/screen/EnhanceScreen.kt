@@ -32,16 +32,17 @@ private val AccentCyan = Color(0xFF00CEC9)
 private val ButtonDarkBg = Color(0xFF2D284B)
 
 @Composable
-fun EnhanceScreen() {// Buat nyimpen data file (URI) yang udah dipilih
-var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+fun EnhanceScreen() {
+    // Buat nyimpen data file (URI) yang udah dipilih
+    var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
-// Ini mesin buat ngebuka Galeri / File Manager
-val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
-) { uri ->
-    // Pas user milih file, URI-nya disimpen ke sini
-    selectedFileUri = uri
-}
+    // Ini mesin buat ngebuka Galeri / File Manager
+    val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        // Pas user milih file, URI-nya disimpen ke sini
+        selectedFileUri = uri
+    }
 
     Column(
         modifier = Modifier
@@ -74,7 +75,7 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-                .clickable { filePickerLauncher.launch("image/*") }
+                .clickable { filePickerLauncher.launch("image/*") }, // 🔥 KOMA YANG HILANG UDAH DITAMBAHIN DI SINI
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -88,9 +89,17 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
                     Icon(Icons.Rounded.Image, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Upload Foto", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("JPG, PNG, WEBP", color = TextDesc, fontSize = 10.sp)
+                
+                // 🔥 LOGIKA BARU: Teks berubah kalau foto udah kepilih
+                if (selectedFileUri != null) {
+                    Text("Foto Siap Diproses!", color = AccentCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Tap untuk mengganti foto", color = TextDesc, fontSize = 10.sp)
+                } else {
+                    Text("Upload Foto", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("JPG, PNG, WEBP", color = TextDesc, fontSize = 10.sp)
+                }
             }
         }
 
@@ -100,13 +109,17 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
         Button(
             onClick = { /* Eksekusi AI RealSR */ },
             modifier = Modifier.height(48.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = ButtonDarkBg),
+            colors = ButtonDefaults.buttonColors(
+                // Tombol nyala kalau udah ada foto yang dipilih
+                containerColor = if (selectedFileUri != null) AccentCyan else ButtonDarkBg,
+                contentColor = if (selectedFileUri != null) DashBg else TextDesc
+            ),
             shape = RoundedCornerShape(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = TextDesc, modifier = Modifier.size(16.dp))
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Tingkatkan Resolusi", color = TextDesc, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Tingkatkan Resolusi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
