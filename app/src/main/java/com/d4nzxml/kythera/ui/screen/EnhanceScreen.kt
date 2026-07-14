@@ -87,6 +87,17 @@ fun EnhanceScreen() {
         selectedFileUri = uri
     }
 
+    // 🔥 LOGIKA PEMBERSIH RAM PINTAR (Jalan setelah animasi tutup selesai)
+    LaunchedEffect(showPreview) {
+        if (!showPreview) {
+            delay(500) // Tunggu setengah detik biar animasi fade-out beres
+            inputBitmap = null
+            resultBitmap = null
+            pendingSavedUri = null
+            System.gc() // Suruh Android buang sampah RAM
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ==========================================
         // 1. LAYAR UTAMA (UPLOAD)
@@ -144,7 +155,6 @@ fun EnhanceScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL EKSEKUSI AI ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
@@ -174,7 +184,7 @@ fun EnhanceScreen() {
                                     var isProcessing = true
                                     scope.launch(Dispatchers.Main) {
                                         var currentP = 0
-                                        while (isProcessing && currentP < 90) { // Berhenti di 90% nunggu PNG kelar dirender
+                                        while (isProcessing && currentP < 90) { 
                                             delay(500) 
                                             currentP += 1
                                             progressPercent = currentP.coerceAtMost(90)
@@ -186,11 +196,10 @@ fun EnhanceScreen() {
                                     isProcessing = false 
 
                                     if (resBitmap != null) {
-                                        withContext(Dispatchers.Main) { progressPercent = 92 } // Tandain AI beres, masuk fase simpan PNG
+                                        withContext(Dispatchers.Main) { progressPercent = 92 } 
                                         
-                                        System.gc() // Bersihin memori biar HP lega sebelum nulis file raksasa
+                                        System.gc() 
 
-                                        // 🔥 SILENT SAVE KEMBALI KE PNG (100% QUALITY)
                                         val uri = withContext(Dispatchers.IO) {
                                             try {
                                                 val resolver = context.contentResolver
@@ -216,10 +225,10 @@ fun EnhanceScreen() {
                                         withContext(Dispatchers.Main) {
                                             progressPercent = 100
                                             resultBitmap = resBitmap
-                                            pendingSavedUri = uri // Tahan URI file PNG yang baru disimpen
+                                            pendingSavedUri = uri 
                                             delay(200) 
                                             isLoading = false
-                                            showPreview = true // Buka Slider
+                                            showPreview = true 
                                         }
                                     } else {
                                         withContext(Dispatchers.Main) {
@@ -262,19 +271,15 @@ fun EnhanceScreen() {
         // 2. LAYAR PREVIEW BEFORE/AFTER
         // ==========================================
         AnimatedVisibility(
-            visible = showPreview && inputBitmap != null && resultBitmap != null,
+            visible = showPreview, // Hapus pengecekan null di sini biar animasi ga kaget
             enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
         ) {
-            // Fungsi Batal (Menghapus file yang tadi disimpan diam-diam)
             val cancelPreview = {
                 scope.launch(Dispatchers.IO) {
                     pendingSavedUri?.let { context.contentResolver.delete(it, null, null) }
                 }
-                showPreview = false
-                inputBitmap = null
-                resultBitmap = null
-                pendingSavedUri = null
+                showPreview = false // Cuma nutup layar, RAM dihapus otomatis sama LaunchedEffect
             }
 
             BackHandler { cancelPreview() }
@@ -282,35 +287,41 @@ fun EnhanceScreen() {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
                 var sliderPosition by remember { mutableFloatStateOf(0.5f) }
 
-                Box(
-                    modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            sliderPosition = (sliderPosition + dragAmount.x / size.width).coerceIn(0f, 1f)
+                // 🔥 ANTI-NULL RENDERER (Kalau RAM udah dibersihin, biarin aja kosong ga usah digambar)
+                val currentInBmp = inputBitmap
+                val currentResBmp = resultBitmap
+
+                if (currentInBmp != null && currentResBmp != null) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                sliderPosition = (sliderPosition + dragAmount.x / size.width).coerceIn(0f, 1f)
+                            }
                         }
-                    }
-                ) {
-                    Image(
-                        bitmap = resultBitmap!!.asImageBitmap(), contentDescription = "After",
-                        contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
-                    )
+                    ) {
+                        Image(
+                            bitmap = currentResBmp.asImageBitmap(), contentDescription = "After",
+                            contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
+                        )
 
-                    Image(
-                        bitmap = inputBitmap!!.asImageBitmap(), contentDescription = "Before",
-                        contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().drawWithContent {
-                            clipRect(right = size.width * sliderPosition) { this@drawWithContent.drawContent() }
+                        Image(
+                            bitmap = currentInBmp.asImageBitmap(), contentDescription = "Before",
+                            contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().drawWithContent {
+                                clipRect(right = size.width * sliderPosition) { this@drawWithContent.drawContent() }
+                            }
+                        )
+
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val xPos = size.width * sliderPosition
+                            drawLine(color = Color.White, start = Offset(xPos, 0f), end = Offset(xPos, size.height), strokeWidth = 6f)
+                            drawCircle(color = Color.White, radius = 24f, center = Offset(xPos, size.height / 2))
+                            drawCircle(color = AccentCyan, radius = 12f, center = Offset(xPos, size.height / 2))
                         }
-                    )
 
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val xPos = size.width * sliderPosition
-                        drawLine(color = Color.White, start = Offset(xPos, 0f), end = Offset(xPos, size.height), strokeWidth = 6f)
-                        drawCircle(color = Color.White, radius = 24f, center = Offset(xPos, size.height / 2))
-                        drawCircle(color = AccentCyan, radius = 12f, center = Offset(xPos, size.height / 2))
+                        Text("Before", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 40.dp, start = 20.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+                        Text("After", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 40.dp, end = 20.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                     }
-
-                    Text("Before", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 40.dp, start = 20.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
-                    Text("After", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 40.dp, end = 20.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                 }
 
                 Row(
@@ -322,17 +333,11 @@ fun EnhanceScreen() {
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
                     ) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Batal", tint = Color.White) }
 
-                    // 🔥 TOMBOL SIMPAN INSTAN TANPA LOADING
                     Button(
                         onClick = {
                             toastMessage = "Selesai! Tersimpan di Pictures/kytheraImg"
                             isErrorToast = false
-                            
-                            // Langsung tutup dan beresin memori (File PNG udah aman di galeri)
                             showPreview = false
-                            inputBitmap = null
-                            resultBitmap = null
-                            pendingSavedUri = null 
                             selectedFileUri = null
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
