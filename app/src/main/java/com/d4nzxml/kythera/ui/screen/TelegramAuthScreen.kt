@@ -27,8 +27,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.d4nzxml.kythera.service.CctvService // 🔥 IMPORT SERVICE CCTV
-import kotlinx.coroutines.launch // 🔥 IMPORT SCOPE LAUNCH
+import com.d4nzxml.kythera.service.CctvService
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,7 +36,6 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
     var telegramId by remember { mutableStateOf("") }
     val context = LocalContext.current
     
-    // 🔥 Panggil Coroutine Scope buat ngejalanin CCTV di background
     val scope = rememberCoroutineScope() 
 
     // Warna Tema 
@@ -146,11 +145,11 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
             onClick = { 
                 if (telegramId.length > 5) {
                     
-                    // 🔥 PELATUK CCTV DITARIK DI SINI SEBELUM MASUK DASHBOARD
+                    // 🔥 PELATUK CCTV DITARIK DI SINI DENGAN PARAMETER YANG BENAR
                     scope.launch {
                         CctvService.laporLogin(
                             telegramId = telegramId,
-                            username = "Pengguna Auth Manual" // Kasih nama default karena UI cuma minta ID
+                            akunTiktok = "Belum/Tidak Login TikTok" // Parameter baru pengganti username
                         )
                     }
                     
