@@ -1,7 +1,5 @@
 package com.d4nzxml.kythera
-import androidx.compose.material3.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -54,14 +52,9 @@ class MainActivity : ComponentActivity() {
                 var maintenanceMsg by remember { mutableStateOf("") }
                 var triggerCheck by remember { mutableStateOf(0) } 
 
-                // Kunci Rahasia Telegram (Ganti ke Private Channel lu)
+                // Kunci Rahasia Telegram
                 val botToken = "8787965434:AAHEmWXdCW4EuO4pudbl2SqdlZU7q6sVpqQ"
-                val channelId = "-1001234567890" // Ganti pakai ID Private Channel lu
-
-                                // Pastikan di bagian atas Composable lu udah ada pemanggilan context, contohnya:
-// val context = LocalContext.current 
-// val triggerCheck = remember { mutableStateOf(false) }
-// ...
+                val channelId = "-1001234567890"
 
                 LaunchedEffect(triggerCheck) {
                     appStatus = "CHECKING"
@@ -89,7 +82,6 @@ class MainActivity : ComponentActivity() {
                                     // 🔥 3. SIMPAN SEMUA RACIKAN KE BRANKAS APLIKASI
                                     val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
                                     sharedPref.edit().apply {
-
                                         // Racikan FFmpeg Converter
                                         val convObj = rootObj.optJSONObject("ffmpeg_converter")
                                         putString("conv_crf_extra", convObj?.optString("crf_extra_args", "-bf 0") ?: "-bf 0")
@@ -119,8 +111,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-
-
                 when (appStatus) {
                     "CHECKING" -> {
                         InitialLoadingScreen()
@@ -132,19 +122,15 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     "ACTIVE" -> {
-                        var isTelegramVerified by remember { 
-                            mutableStateOf(sharedPref.getBoolean("is_telegram_verified", false)) 
-                        }
-                        var isTiktokVerified by remember { 
-                            mutableStateOf(sharedPref.getBoolean("is_tiktok_verified", false)) 
-                        }
+                        var isTelegramVerified by remember { mutableStateOf(sharedPref.getBoolean("is_telegram_verified", false)) }
+                        var isTiktokVerified by remember { mutableStateOf(sharedPref.getBoolean("is_tiktok_verified", false)) }
 
                         if (!isTelegramVerified) {
                             TelegramAuthScreen(
                                 onVerifySuccess = { 
                                     sharedPref.edit().apply {
                                         putBoolean("is_telegram_verified", true)
-                                        putString("telegram_id", "6969528280") // Jangan lupa ganti ID asli lu
+                                        putString("telegram_id", "6969528280") 
                                         apply()
                                     }
                                     isTelegramVerified = true 
@@ -167,23 +153,22 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-            } // Penutup KytheraTheme
-        } // Penutup setContent
-    } // Penutup onCreate
-} // Penutup class MainActivity
-
+            }
+        }
+    }
+}
 
 // ------- Navigation items -------
 
+// Struktur Menu Floating Navigasi
+data class FloatingNavItem(val icon: ImageVector, val label: String, val targetIndex: Int)
 
-data class NavItem(val icon: ImageVector, val label: String)
-
-// 🔥 Menu History diganti jadi Profile (Pakai Icon Standar Person)
-val bottomNavItems = listOf(
-    NavItem(Icons.Rounded.GridView,    "Dashboard"),
-    NavItem(Icons.Rounded.SwapHoriz,   "Convert"),
-    NavItem(Icons.Rounded.Compress,    "Compress"),
-    NavItem(Icons.Rounded.Person,      "Profile") 
+val floatingNavItems = listOf(
+    FloatingNavItem(Icons.Rounded.Home, "Beranda", 0),       // Ngarah ke Dashboard
+    FloatingNavItem(Icons.Rounded.Build, "Tambal", 2),       // Ngarah ke Compress
+    FloatingNavItem(Icons.Rounded.Videocam, "Enkoder", 1),   // Ngarah ke Converter
+    FloatingNavItem(Icons.Rounded.OpenInFull, "Perbesar", 4),// Ngarah ke Photo Enhance
+    FloatingNavItem(Icons.Rounded.Settings, "Pengaturan", 7) // Ngarah ke Settings
 )
 
 val drawerItems = listOf(
@@ -227,28 +212,11 @@ fun KytheraShell() {
                 )
             },
             bottomBar = {
-                KytheraBottomNav(
-                    currentIndex = if (currentIndex > 3) -1 else currentIndex,
+                // 🔥 Panggil Floating Nav Bar yang baru di sini
+                KytheraFloatingBottomNav(
+                    currentIndex = currentIndex,
                     onTap = { currentIndex = it }
                 )
-            },
-            floatingActionButton = {
-                AnimatedVisibility(
-                    visible = currentIndex == 0,
-                    enter = scaleIn(tween(200)) + fadeIn(tween(200)),
-                    exit = scaleOut(tween(150)) + fadeOut(tween(150))
-                ) {
-                    FloatingActionButton(
-    onClick = { currentIndex = 6 },
-    containerColor = KColor.Accent,
-    contentColor = androidx.compose.ui.graphics.Color.Black, // Panggil lengkap biar gak ambigunya
-    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), // Panggil lengkap juga
-    modifier = Modifier.shadow(8.dp, androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-)
- {
-                        Icon(Icons.Rounded.Upload, contentDescription = "Upload TikTok")
-                    }
-                }
             }
         ) { innerPadding ->
             Box(Modifier.padding(innerPadding)) {
@@ -263,7 +231,7 @@ fun KytheraShell() {
                         0    -> DashboardScreen(onNavigate = { currentIndex = it })
                         1    -> ConverterScreen()
                         2    -> CompressScreen()
-                        3    -> HistoryScreen() // Tetap arahin ke file ini buat sementara, lu bisa rombak isinya nanti
+                        3    -> HistoryScreen() 
                         4    -> EnhanceScreen()
                         5    -> VideoEnhanceScreen()
                         6    -> TikTokScreen()
@@ -309,58 +277,70 @@ fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
     }
 }
 
-// ─── Bottom Nav ───────────────────────────────────────────────────────────────
+// ─── Floating Bottom Nav (Gantiin Bottom Nav Lama) ────────────────────────────
 @Composable
-fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
-    Row(
+fun KytheraFloatingBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
+    // Pakai private val biar aman dari conflicting declarations
+    val navBg = Color(0xFF101014)
+    val navBorder = Color(0xFF262626)
+    val activeColor = Color(0xFF1DD1A1)
+    val inactiveColor = Color(0xFFAAA8C2)
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(KColor.Surface)
-            .border(1.dp, KColor.Border, androidx.compose.ui.graphics.RectangleShape)
-            .navigationBarsPadding()
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
+            .padding(horizontal = 16.dp, vertical = 20.dp), 
+        contentAlignment = Alignment.BottomCenter
     ) {
-        bottomNavItems.forEachIndexed { i, item ->
-            val isActive = currentIndex == i
-            val interactionSource = remember { MutableInteractionSource() }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(12.dp, RoundedCornerShape(32.dp)) 
+                .clip(RoundedCornerShape(32.dp)) 
+                .background(navBg)
+                .border(1.dp, navBorder, RoundedCornerShape(32.dp))
+                .padding(horizontal = 8.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            floatingNavItems.forEach { item ->
+                val isActive = currentIndex == item.targetIndex
+                val interactionSource = remember { MutableInteractionSource() }
 
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = { onTap(i) }
-                    ),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier.height(32.dp).padding(bottom = 4.dp),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null,
+                            onClick = { onTap(item.targetIndex) }
+                        ),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        imageVector = item.icon,
-                        contentDescription = item.label,
-                        tint = if (isActive) KColor.Accent else KColor.Text3,
-                        modifier = Modifier.size(if (isActive) 24.dp else 20.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (isActive) activeColor.copy(alpha = 0.15f) else Color.Transparent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = item.label,
+                            tint = if (isActive) activeColor else inactiveColor,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Text(
+                        text = item.label,
+                        color = if (isActive) activeColor else inactiveColor,
+                        fontSize = 10.sp,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
                     )
                 }
-
-                Text(
-                    text = item.label,
-                    color = if (isActive) KColor.Accent else KColor.Text3,
-                    fontSize = 10.sp,
-                    fontWeight = if (isActive) FontWeight.W600 else FontWeight.W400
-                )
-
-                Spacer(Modifier.height(4.dp))
-                Box(
-                    modifier = Modifier
-                        .size(width = 16.dp, height = 3.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(if (isActive) KColor.Accent else Color.Transparent)
-                )
             }
         }
     }
@@ -369,7 +349,6 @@ fun KytheraBottomNav(currentIndex: Int, onTap: (Int) -> Unit) {
 // ─── Drawer ───────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraDrawer(currentIndex: Int, onNavigate: (Int) -> Unit) {
-    // 🔥 PENTING: Panggil context di sini buat ngebuka aplikasi lain (WA/Web)
     val context = androidx.compose.ui.platform.LocalContext.current
 
     ModalDrawerSheet(
