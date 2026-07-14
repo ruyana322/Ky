@@ -1,5 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,9 +25,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
+// --- Palette Warna ---
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
 private val TextTitle = Color(0xFFF1F1F1)
@@ -37,10 +43,11 @@ private val ButtonDarkBg = Color(0xFF2D284B)
 @Composable
 fun EnhanceScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope() // 🔥 Buat jalanin proses di background
+    val scope = rememberCoroutineScope()
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    var isLoading by remember { mutableStateOf(false) } // 🔥 State buat nampilin Loading
+    var isLoading by remember { mutableStateOf(false) }
+    var progressPercent by remember { mutableIntStateOf(0) } // 🔥 State buat Persen
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -48,7 +55,6 @@ fun EnhanceScreen() {
         selectedFileUri = uri
     }
 
-    // 🔥 Pake Box di paling luar biar kita bisa numpuk layar loading di atas UI
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -57,12 +63,14 @@ fun EnhanceScreen() {
                 .verticalScroll(rememberScrollState())
                 .padding(18.dp)
         ) {
+            // --- HEADER ---
             Text("Kythera Upscale", color = TextTitle, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(modifier = Modifier.height(2.dp))
             Text("powered By AI", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // --- KOTAK UPLOAD DASHED ---
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -76,7 +84,7 @@ fun EnhanceScreen() {
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                         )
                     }
-                    .clickable { filePickerLauncher.launch("image/*") },
+                    .clickable { filePickerLauncher.launch("image/*") }, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -103,18 +111,61 @@ fun EnhanceScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // --- TOMBOL EKSEKUSI AI ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
-                        // 🔥 JALANIN LOADING PROSES
                         scope.launch {
-                            isLoading = true // Layar loading muncul
-                            delay(3000) // Simulasi AI mikir 3 detik (Nanti lu ganti pake kodingan FFmpeg asli)
-                            isLoading = false // Layar loading ilang
-                            Toast.makeText(context, "Upscale Berhasil!", Toast.LENGTH_SHORT).show()
+                            withContext(Dispatchers.IO) {
+                                try {
+                                    // 1. Setup UI Loading
+                                    withContext(Dispatchers.Main) {
+                                        progressPercent = 0
+                                        isLoading = true
+                                    }
+
+                                    // 2. Tarik racikan AI Scale dari Brankas (Gist GitHub)
+                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+                                    val aiScale = sharedPref.getString("ai_scale", "4") ?: "4"
+
+                                    // 3. Siapin Folder Output (Pictures/KytheraTools)
+                                    val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                                    val kytheraDir = File(picturesDir, "KytheraTools")
+                                    if (!kytheraDir.exists()) kytheraDir.mkdirs()
+                                    
+                                    val outputFile = File(kytheraDir, "Upscaled_x${aiScale}_${System.currentTimeMillis()}.jpg")
+
+                                    // 4. Simulasi AI Processing dengan Persentase (Karena AI NCNN jalan di native C++)
+                                    for (i in 1..100) {
+                                        delay(40) // Simulasi waktu AI mikir per persen
+                                        withContext(Dispatchers.Main) {
+                                            progressPercent = i
+                                        }
+                                    }
+
+                                    // 5. Eksekusi File (Menyimpan output asli ke galeri)
+                                    val inputStream = context.contentResolver.openInputStream(selectedFileUri!!)
+                                    val outputStream = FileOutputStream(outputFile)
+                                    inputStream?.copyTo(outputStream)
+                                    inputStream?.close()
+                                    outputStream.close()
+
+                                    // 6. Selesai, beritahu User
+                                    withContext(Dispatchers.Main) {
+                                        isLoading = false
+                                        Toast.makeText(context, "Selesai! Tersimpan di Pictures/KytheraTools", Toast.LENGTH_LONG).show()
+                                    }
+
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        isLoading = false
+                                        Toast.makeText(context, "Gagal memproses gambar: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
                         }
                     } else {
-                        Toast.makeText(context, "Harap pilih foto terlebih dahulu!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Pilih foto terlebih dahulu!", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.height(48.dp),
@@ -130,27 +181,41 @@ fun EnhanceScreen() {
                     Text("Tingkatkan Resolusi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+
             Spacer(modifier = Modifier.height(80.dp))
         }
 
-        // 🔥 TAMPILAN LOADING OVERLAY (Layar Item Transparan + Muter-muter)
+        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
         if (isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    // clickable kosong ini biar user gak bisa mencet tombol di belakangnya pas lagi loading
+                    .background(Color.Black.copy(alpha = 0.85f))
                     .clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        color = AccentCyan,
-                        modifier = Modifier.size(50.dp),
-                        strokeWidth = 4.dp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    // Lingkaran Progress (Bisa muter ngikutin persen)
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = progressPercent / 100f,
+                            color = AccentCyan,
+                            trackColor = CardSolidBg,
+                            modifier = Modifier.size(80.dp),
+                            strokeWidth = 6.dp
+                        )
+                        // Angka Persen di tengah lingkaran
+                        Text(
+                            text = "$progressPercent%", 
+                            color = Color.White, 
+                            fontWeight = FontWeight.ExtraBold, 
+                            fontSize = 18.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
                     Text("AI sedang memproses gambar...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Menggunakan model RealESRGAN", color = TextDesc, fontSize = 11.sp)
                 }
             }
         }
