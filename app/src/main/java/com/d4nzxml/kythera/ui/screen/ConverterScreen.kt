@@ -26,13 +26,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // --- Palette Warna ---
-val DashBg = Color(0xFF18152B)
-val CardSolidBg = Color(0xFF26233E)
-val TextTitle = Color(0xFFF1F1F1)
-val TextDesc = Color(0xFFAAA8C2)
-val AccentCyan = Color(0xFF00CEC9)
-val AccentPurple = Color(0xFF8A2BE2)
-val InputBg = Color(0xFF1D1A31)
+private val DashBg = Color(0xFF18152B)
+private val CardSolidBg = Color(0xFF26233E)
+private val TextTitle = Color(0xFFF1F1F1)
+private val TextDesc = Color(0xFFAAA8C2)
+private val AccentCyan = Color(0xFF00CEC9)
+private val AccentPurple = Color(0xFF8A2BE2)
+private val InputBg = Color(0xFF1D1A31)
+
 
 @Composable
 fun ConverterScreen() {
