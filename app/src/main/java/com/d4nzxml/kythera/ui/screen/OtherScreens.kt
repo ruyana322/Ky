@@ -369,7 +369,7 @@ fun SettingsScreen() {
             Column(Modifier.padding(vertical = 8.dp)) {
                 // 🔥 ARAHKAN KE WEB LU
                 SettingActionRow(Icons.Rounded.Favorite, "Support Dev D4nzxml", "Traktir kopi / Donasi", iconTint = Color(0xFFFF4B4B)) {
-                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://kytheramethode.my.id"))
+                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://trakteer.id/D4nzxml"))
                     context.startActivity(webIntent)
                 }
                 SettingActionRow(Icons.Rounded.Article, "Changelog", "Versi 2.0.1") {
@@ -403,7 +403,7 @@ fun SettingsScreen() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("© 2026 Powered by D4nzxml Studio", color = KColor.Text3, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("Dadan Ruyana - Cugenang, Kab. Cianjur", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp)
+            Text("copyright by Kythera", color = KColor.Text3.copy(alpha = 0.5f), fontSize = 10.sp)
         }
 
         Spacer(Modifier.height(100.dp))
