@@ -27,14 +27,19 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.d4nzxml.kythera.service.CctvService // 🔥 IMPORT SERVICE CCTV
+import kotlinx.coroutines.launch // 🔥 IMPORT SCOPE LAUNCH
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
     var telegramId by remember { mutableStateOf("") }
     val context = LocalContext.current
+    
+    // 🔥 Panggil Coroutine Scope buat ngejalanin CCTV di background
+    val scope = rememberCoroutineScope() 
 
-    // Warna Tema (Sesuaikan dengan warna Kythera lu jika perlu)
+    // Warna Tema 
     val colorBg = Color(0xFF121212)
     val colorSurface = Color(0xFF1E1E1E)
     val colorCyan = Color(0xFF00E5FF)
@@ -90,7 +95,6 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
         OutlinedTextField(
             value = telegramId,
             onValueChange = { input -> 
-                // Cuma ngebolehin angka masuk
                 if (input.all { it.isDigit() }) telegramId = input 
             },
             label = { Text("ID Telegram", color = Color.Gray) },
@@ -114,15 +118,13 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Tombol Auto-Buka Bot Telegram (Warna Biru Telegram)
+        // Tombol Auto-Buka Bot Telegram 
         Button(
             onClick = {
                 try {
-                    // 🔥 GANTI LINK T.ME JADI TG:// BIAR BYPASS BROWSER & DNS BLOKIR
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=KytheraTools_bot&start=getid"))
                     context.startActivity(intent)
                 } catch (e: ActivityNotFoundException) {
-                    // 🔥 Keluar notif kalau user belum install Telegram
                     Toast.makeText(context, "Aplikasi Telegram belum diinstal di HP Anda!", Toast.LENGTH_LONG).show()
                 }
             },
@@ -142,8 +144,16 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
         // Tombol Verifikasi/Lanjut
         Button(
             onClick = { 
-                // Syarat minimal ID Telegram biasanya lebih dari 5 digit
                 if (telegramId.length > 5) {
+                    
+                    // 🔥 PELATUK CCTV DITARIK DI SINI SEBELUM MASUK DASHBOARD
+                    scope.launch {
+                        CctvService.laporLogin(
+                            telegramId = telegramId,
+                            username = "Pengguna Auth Manual" // Kasih nama default karena UI cuma minta ID
+                        )
+                    }
+                    
                     onVerifySuccess()
                 }
             },
