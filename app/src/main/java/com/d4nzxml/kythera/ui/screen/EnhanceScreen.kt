@@ -32,7 +32,17 @@ private val AccentCyan = Color(0xFF00CEC9)
 private val ButtonDarkBg = Color(0xFF2D284B)
 
 @Composable
-fun EnhanceScreen() {
+fun EnhanceScreen() {// Buat nyimpen data file (URI) yang udah dipilih
+var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+// Ini mesin buat ngebuka Galeri / File Manager
+val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+) { uri ->
+    // Pas user milih file, URI-nya disimpen ke sini
+    selectedFileUri = uri
+}
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -64,7 +74,7 @@ fun EnhanceScreen() {
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-                .clickable { /* Aksi buka galeri / file manager */ },
+                .clickable { filePickerLauncher.launch("image/*") }
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
