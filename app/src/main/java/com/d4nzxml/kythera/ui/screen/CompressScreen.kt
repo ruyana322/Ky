@@ -51,7 +51,7 @@ fun CompressScreen() {
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) } 
-    var progressPercent by remember { mutableIntStateOf(0) } // 🔥 State Baru Buat Persen (0-100)
+    var progressPercent by remember { mutableIntStateOf(0) } 
     
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -162,7 +162,7 @@ fun CompressScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL COMPRESS (LOGIKA FFMPEG PERCENTAGE) ---
+            // --- TOMBOL COMPRESS (LOGIKA FFMPEG PINTAR) ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
@@ -171,7 +171,7 @@ fun CompressScreen() {
                                 try {
                                     val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
                                     
-                                    // 🔥 Tarik Info Durasi Video Buat Ngitung Persen
+                                    // Tarik Info Durasi Video Buat Ngitung Persen
                                     val mediaInfo = FFprobeKit.getMediaInformation(inputPath)
                                     val durationStr = mediaInfo?.mediaInformation?.duration
                                     val totalDurationMs = durationStr?.toFloatOrNull()?.times(1000)?.toLong() ?: 0L
@@ -183,6 +183,7 @@ fun CompressScreen() {
                                     val outputFile = File(kytheraDir, "Compress_${System.currentTimeMillis()}.mp4")
                                     val outputPath = outputFile.absolutePath
 
+                                    // Tarik racikan dari brankas
                                     val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
                                     val audioArgs = if (isAudioCompression) {
                                         sharedPref.getString("comp_audio_compress", "-c:a aac -b:a 128k") ?: "-c:a aac -b:a 128k"
@@ -200,7 +201,19 @@ fun CompressScreen() {
                                         else -> "28"
                                     }
                                     val passArgs = if (isTwoPass) "-preset slow" else "-preset fast"
-                                    val command = "-i \"$inputPath\" -c:v libx264 -crf $crfValue $passArgs $audioArgs $metaArgs -y \"$outputPath\""
+
+                                    // 🔥 BUILDER COMMAND ANTI-DOUBLE SPASI
+                                    val cmdBuilder = StringBuilder("-i \"$inputPath\" -c:v libx264 -crf $crfValue $passArgs ")
+                                    if (audioArgs.isNotEmpty()) {
+                                        cmdBuilder.append("$audioArgs ")
+                                    }
+                                    if (metaArgs.isNotEmpty()) {
+                                        cmdBuilder.append("$metaArgs ")
+                                    }
+                                    cmdBuilder.append("-y \"$outputPath\"")
+
+                                    // Bersihin spasi ganda
+                                    val command = cmdBuilder.toString().replace("  ", " ")
 
                                     // Reset UI ke loading
                                     withContext(Dispatchers.Main) {
@@ -208,22 +221,22 @@ fun CompressScreen() {
                                         isLoading = true
                                     }
 
-                                    // 🔥 Eksekusi FFmpeg Async (Bisa Nyadap Persen)
+                                    // Eksekusi FFmpeg Async
                                     FFmpegKit.executeAsync(command, { session ->
-                                        // Kalau udah selesai
                                         val returnCode = session.returnCode
                                         scope.launch(Dispatchers.Main) {
                                             isLoading = false
                                             if (ReturnCode.isSuccess(returnCode)) {
                                                 Toast.makeText(context, "Selesai! Disimpan di Movies/KytheraTools", Toast.LENGTH_LONG).show()
                                             } else {
-                                                Toast.makeText(context, "Gagal Kompresi!", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Gagal Kompresi! File tidak didukung.", Toast.LENGTH_LONG).show()
+                                                android.util.Log.e("Kythera_Compress", "FFmpeg Error Log: ${session.failStackTrace}")
                                             }
                                         }
                                     }, { log ->
-                                        // (Log ga perlu kita pantau)
+                                        // Abaikan
                                     }, { statistics ->
-                                        // 🔥 Ngitung Persen Tiap Detik
+                                        // Ngitung Persen Tiap Detik
                                         if (totalDurationMs > 0) {
                                             val timeMs = statistics.time.toFloat()
                                             val percentage = ((timeMs / totalDurationMs) * 100).toInt()
@@ -272,7 +285,7 @@ fun CompressScreen() {
             Spacer(modifier = Modifier.height(80.dp))
         }
 
-        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
+        // TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
         if (isLoading) {
             Box(
                 modifier = Modifier
@@ -282,7 +295,7 @@ fun CompressScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // Lingkaran Progress (Bisa muter ngikutin persen)
+                    // Lingkaran Progress
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             progress = progressPercent / 100f,
@@ -291,7 +304,7 @@ fun CompressScreen() {
                             modifier = Modifier.size(80.dp),
                             strokeWidth = 6.dp
                         )
-                        // Angka Persen di tengah lingkaran
+                        // Angka Persen
                         Text(
                             text = "$progressPercent%", 
                             color = Color.White, 
