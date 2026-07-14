@@ -1,7 +1,9 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -115,9 +117,14 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
         // Tombol Auto-Buka Bot Telegram (Warna Biru Telegram)
         Button(
             onClick = {
-                // Langsung nembak ke bot lu yang udah kita setting tadi!
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/KytheraTools_bot?start=getid"))
-                context.startActivity(intent)
+                try {
+                    // 🔥 GANTI LINK T.ME JADI TG:// BIAR BYPASS BROWSER & DNS BLOKIR
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=KytheraTools_bot&start=getid"))
+                    context.startActivity(intent)
+                } catch (e: ActivityNotFoundException) {
+                    // 🔥 Keluar notif kalau user belum install Telegram
+                    Toast.makeText(context, "Aplikasi Telegram belum diinstal di HP Anda!", Toast.LENGTH_LONG).show()
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()
