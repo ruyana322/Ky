@@ -1,5 +1,7 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -25,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.d4nzxml.kythera.service.RealSrEngine // 🔥 ENGINE DEWA LU MASUK SINI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -47,7 +50,7 @@ fun EnhanceScreen() {
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) }
-    var progressPercent by remember { mutableIntStateOf(0) } // 🔥 State buat Persen
+    var progressPercent by remember { mutableIntStateOf(0) } 
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -111,55 +114,86 @@ fun EnhanceScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL EKSEKUSI AI ---
+            // --- TOMBOL EKSEKUSI REAL-SR ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 try {
-                                    // 1. Setup UI Loading
+                                    // 1. Munculin UI Loading
                                     withContext(Dispatchers.Main) {
                                         progressPercent = 0
                                         isLoading = true
                                     }
 
-                                    // 2. Tarik racikan AI Scale dari Brankas (Gist GitHub)
-                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
-                                    val aiScale = sharedPref.getString("ai_scale", "4") ?: "4"
+                                    // 2. Baca URI jadi Bitmap (Format yang dibutuhin engine lu)
+                                    val inputStream = context.contentResolver.openInputStream(selectedFileUri!!)
+                                    val inputBitmap = BitmapFactory.decodeStream(inputStream)
+                                    inputStream?.close()
 
-                                    // 3. Siapin Folder Output (Pictures/KytheraTools)
-                                    val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-                                    val kytheraDir = File(picturesDir, "KytheraTools")
-                                    if (!kytheraDir.exists()) kytheraDir.mkdirs()
-                                    
-                                    val outputFile = File(kytheraDir, "Upscaled_x${aiScale}_${System.currentTimeMillis()}.jpg")
-
-                                    // 4. Simulasi AI Processing dengan Persentase (Karena AI NCNN jalan di native C++)
-                                    for (i in 1..100) {
-                                        delay(40) // Simulasi waktu AI mikir per persen
+                                    if (inputBitmap == null) {
                                         withContext(Dispatchers.Main) {
-                                            progressPercent = i
+                                            isLoading = false
+                                            Toast.makeText(context, "Gagal membaca foto!", Toast.LENGTH_SHORT).show()
+                                        }
+                                        return@withContext
+                                    }
+
+                                    // 3. Animasi Loading Pintar (Jalan pelan ke 95% sambil nunggu NCNN mikir)
+                                    var isProcessing = true
+                                    scope.launch(Dispatchers.Main) {
+                                        var currentP = 0
+                                        while (isProcessing && currentP < 95) {
+                                            delay(500) // Ngisi pelan-pelan karena NCNN agak lama
+                                            currentP += 1
+                                            progressPercent = currentP.coerceAtMost(95)
                                         }
                                     }
 
-                                    // 5. Eksekusi File (Menyimpan output asli ke galeri)
-                                    val inputStream = context.contentResolver.openInputStream(selectedFileUri!!)
-                                    val outputStream = FileOutputStream(outputFile)
-                                    inputStream?.copyTo(outputStream)
-                                    inputStream?.close()
-                                    outputStream.close()
+                                    // 4. PANGGIL ENGINE LU!
+                                    // Setup ekstrak aset dulu (kalo belum ada)
+                                    RealSrEngine.setup(context) 
+                                    
+                                    // Eksekusi NCNN Vulkan
+                                    val (resultBitmap, errorLog) = RealSrEngine.upscaleWithLog(context, inputBitmap)
 
-                                    // 6. Selesai, beritahu User
-                                    withContext(Dispatchers.Main) {
-                                        isLoading = false
-                                        Toast.makeText(context, "Selesai! Tersimpan di Pictures/KytheraTools", Toast.LENGTH_LONG).show()
+                                    // Berhentiin animasi muter
+                                    isProcessing = false 
+
+                                    // 5. Cek Hasilnya
+                                    if (resultBitmap != null) {
+                                        // Siapin Folder Output ke Galeri
+                                        val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                                        val kytheraDir = File(picturesDir, "KytheraTools")
+                                        if (!kytheraDir.exists()) kytheraDir.mkdirs()
+                                        
+                                        val outputFile = File(kytheraDir, "RealSR_${System.currentTimeMillis()}.png")
+
+                                        // Simpan Bitmap hasil AI ke file
+                                        FileOutputStream(outputFile).use { out ->
+                                            resultBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                        }
+
+                                        withContext(Dispatchers.Main) {
+                                            progressPercent = 100
+                                            delay(400) // Tahan dikit angka 100%
+                                            isLoading = false
+                                            Toast.makeText(context, "Upscale Sukses! Cek KytheraTools", Toast.LENGTH_LONG).show()
+                                        }
+                                    } else {
+                                        // Kalau engine ngeluarin error
+                                        withContext(Dispatchers.Main) {
+                                            isLoading = false
+                                            Toast.makeText(context, "Upscale Gagal, Cek Logcat!", Toast.LENGTH_LONG).show()
+                                            android.util.Log.e("Kythera_AI_UI", "Error dari engine: $errorLog")
+                                        }
                                     }
 
                                 } catch (e: Exception) {
                                     withContext(Dispatchers.Main) {
                                         isLoading = false
-                                        Toast.makeText(context, "Gagal memproses gambar: ${e.message}", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Aplikasi Error: ${e.message}", Toast.LENGTH_LONG).show()
                                     }
                                 }
                             }
@@ -195,7 +229,6 @@ fun EnhanceScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // Lingkaran Progress (Bisa muter ngikutin persen)
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             progress = progressPercent / 100f,
@@ -204,7 +237,6 @@ fun EnhanceScreen() {
                             modifier = Modifier.size(80.dp),
                             strokeWidth = 6.dp
                         )
-                        // Angka Persen di tengah lingkaran
                         Text(
                             text = "$progressPercent%", 
                             color = Color.White, 
@@ -213,9 +245,9 @@ fun EnhanceScreen() {
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text("AI sedang memproses gambar...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("AI RealSR sedang merender...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Menggunakan model RealESRGAN", color = TextDesc, fontSize = 11.sp)
+                    Text("Menggunakan GPU Vulkan NCNN", color = TextDesc, fontSize = 11.sp)
                 }
             }
         }
