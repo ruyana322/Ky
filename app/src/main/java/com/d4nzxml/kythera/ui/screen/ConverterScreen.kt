@@ -1,6 +1,11 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.widget.Toast
+import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,13 +31,17 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.arthenica.ffmpegkit.FFmpegKitConfig // Cuma butuh ini buat ambil real path
-import com.d4nzxml.kythera.service.FfmpegService // 🔥 IMPORT SERVICE LU
+import com.d4nzxml.kythera.service.FfmpegService
+import com.d4nzxml.kythera.service.GalleryService // 🔥 KURIR RESMI LU MASUK SINI
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -42,16 +51,34 @@ private val AccentCyan = Color(0xFF00CEC9)
 private val AccentPurple = Color(0xFF8A2BE2)
 private val InputBg = Color(0xFF1D1A31)
 
+// 🔥 Fungsi Ngakalin Error SAF & Moov Atom (Buat File Input)
+suspend fun copyUriToTempFile(context: Context, uri: android.net.Uri): String? = withContext(Dispatchers.IO) {
+    try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+        val tempFile = File(context.cacheDir, "temp_ffmpeg_in_${System.currentTimeMillis()}.mp4")
+        FileOutputStream(tempFile).use { outputStream ->
+            inputStream.copyTo(outputStream)
+        }
+        tempFile.absolutePath
+    } catch (e: Exception) {
+        null
+    }
+}
+
 @Composable
 fun ConverterScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // 🔥 Inisialisasi Service Lu
     val ffmpegService = remember { FfmpegService(context) }
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) } 
+    var isPreparing by remember { mutableStateOf(false) } 
     var progressPercent by remember { mutableIntStateOf(0) } 
+    
+    // 🔥 State buat Notif Premium
+    var toastMessage by remember { mutableStateOf<String?>(null) }
+    var isErrorToast by remember { mutableStateOf(false) }
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -109,8 +136,6 @@ fun ConverterScreen() {
                         Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(36.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("Video Siap Dikonversi!", color = AccentCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Tap untuk mengganti video", color = TextDesc, fontSize = 10.sp)
                     } else {
                         Box(
                             modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(AccentCyan.copy(alpha = 0.2f)),
@@ -120,8 +145,6 @@ fun ConverterScreen() {
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("Drop video atau klik upload", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("MP4, AVI, MKV, MOV, WEBM, GIF", color = TextDesc, fontSize = 10.sp)
                     }
                 }
             }
@@ -172,19 +195,16 @@ fun ConverterScreen() {
 
                 Spacer(modifier = Modifier.height(20.dp))
                 if (isCrfMode) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        SettingLabel("CRF Value (Semakin kecil semakin HD)")
-                        Text(crfValue.toInt().toString(), color = AccentCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
+                    SettingLabel("CRF Value (${crfValue.toInt()})")
                     Slider(
                         value = crfValue, onValueChange = { crfValue = it }, valueRange = 0f..51f,
                         colors = SliderDefaults.colors(thumbColor = AccentCyan, activeTrackColor = AccentCyan, inactiveTrackColor = InputBg)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
                 }
+                Spacer(modifier = Modifier.height(12.dp))
 
                 SettingLabel("Encoder Preset")
-                CustomDropdown(selectedPreset, listOf("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow")) { selectedPreset = it }
+                CustomDropdown(selectedPreset, listOf("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")) { selectedPreset = it }
                 Spacer(modifier = Modifier.height(20.dp))
                 SettingLabel("Resolution")
                 CustomDropdown(selectedResolution, listOf("Original", "1080p", "720p", "480p", "360p")) { selectedResolution = it }
@@ -192,20 +212,33 @@ fun ConverterScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL KONVERSI (PANGGIL FFMPEG SERVICE) ---
+            // --- TOMBOL KONVERSI ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
                         scope.launch {
+                            // 1. Loading Menyiapkan File
                             withContext(Dispatchers.Main) {
-                                progressPercent = 0
+                                isPreparing = true
                                 isLoading = true
                             }
                             
-                            val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
+                            // 2. Ngopi URI ke Cache biar anti error SAF
+                            val inputPath = copyUriToTempFile(context, selectedFileUri!!)
                             
+                            withContext(Dispatchers.Main) {
+                                isPreparing = false
+                                progressPercent = 0
+                            }
+
+                            if (inputPath == null) {
+                                toastMessage = "Gagal membaca file dari penyimpanan!"
+                                isErrorToast = true
+                                isLoading = false
+                                return@launch
+                            }
+
                             val ext = selectedFormat.lowercase()
-                            
                             val vCodec = when {
                                 ext == "gif" -> "gif"
                                 ext == "webm" && selectedCodec.contains("H.26") -> "libvpx-vp9"
@@ -217,10 +250,9 @@ fun ConverterScreen() {
                                     else -> "libx264"
                                 }
                             }
-                            
                             val modeString = if (isCrfMode) "CRF" else "CBR"
                             
-                            // Eksekusi pakai Service lu
+                            // 3. Eksekusi Engine FFMPEG Asli
                             val result = ffmpegService.convertVideoPro(
                                 inputPath = inputPath,
                                 targetFormat = ext,
@@ -228,26 +260,41 @@ fun ConverterScreen() {
                                 resolution = if (selectedResolution == "Original") "original" else selectedResolution.replace("p", ""),
                                 mode = modeString,
                                 crf = crfValue.toInt(),
-                                bitrateM = 3, // Default fallback
+                                bitrateM = 3, 
                                 preset = selectedPreset,
                                 onProgress = { percent ->
-                                    scope.launch(Dispatchers.Main) {
-                                        progressPercent = percent
-                                    }
+                                    scope.launch(Dispatchers.Main) { progressPercent = percent }
                                 }
                             )
 
-                            withContext(Dispatchers.Main) {
-                                isLoading = false
-                                if (result.success) {
-                                    Toast.makeText(context, "Selesai! Tersimpan di: ${result.outputPath}", Toast.LENGTH_LONG).show()
-                                } else {
-                                    Toast.makeText(context, "Gagal: ${result.errorMessage}", Toast.LENGTH_LONG).show()
+                            // 4. Hapus File Temp Input
+                            File(inputPath).delete()
+
+                            // 5. Panggil GalleryService buat nyimpen hasil Output ke Galeri
+                            if (result.success) {
+                                val savedToGallery = GalleryService.saveVideo(context, result.outputPath)
+                                
+                                withContext(Dispatchers.Main) {
+                                    isLoading = false
+                                    if (savedToGallery) {
+                                        toastMessage = "Selesai! Tersimpan di Galeri (Movies/Kythera)"
+                                        isErrorToast = false
+                                    } else {
+                                        toastMessage = "Selesai, tapi gagal masuk ke Galeri."
+                                        isErrorToast = true
+                                    }
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    isLoading = false
+                                    toastMessage = "Gagal Mengkonversi Video!"
+                                    isErrorToast = true
                                 }
                             }
                         }
                     } else {
-                        Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
+                        toastMessage = "Pilih video terlebih dahulu!"
+                        isErrorToast = true
                     }
                 },
                 modifier = Modifier.height(48.dp),
@@ -257,55 +304,62 @@ fun ConverterScreen() {
             ) {
                 Box(
                     modifier = Modifier
-                        .background(
-                            Brush.horizontalGradient(
-                                if (selectedFileUri != null) listOf(Color(0xFF4A3E85), Color(0xFF6C5CE7))
-                                else listOf(Color(0xFF3B414B), Color(0xFF3B414B))
-                            )
-                        )
+                        .background(Brush.horizontalGradient(if (selectedFileUri != null) listOf(Color(0xFF4A3E85), Color(0xFF6C5CE7)) else listOf(Color(0xFF3B414B), Color(0xFF3B414B))))
                         .padding(horizontal = 24.dp, vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Konversi Sekarang", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Text("Konversi Sekarang", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Spacer(modifier = Modifier.height(80.dp))
+            Spacer(modifier = Modifier.height(100.dp))
         }
 
-        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
+        // 🔥 OVERLAY LOADING 
         if (isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f))
-                    .clickable(enabled = false) {}, 
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = progressPercent / 100f,
-                            color = AccentPurple, 
-                            trackColor = CardSolidBg,
-                            modifier = Modifier.size(80.dp),
-                            strokeWidth = 6.dp
-                        )
-                        Text(
-                            text = "$progressPercent%", 
-                            color = Color.White, 
-                            fontWeight = FontWeight.ExtraBold, 
-                            fontSize = 18.sp
-                        )
+                    if (isPreparing) {
+                        CircularProgressIndicator(color = AccentPurple, modifier = Modifier.size(60.dp), strokeWidth = 5.dp)
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text("Menyiapkan File...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(progress = progressPercent / 100f, color = AccentPurple, trackColor = CardSolidBg, modifier = Modifier.size(80.dp), strokeWidth = 6.dp)
+                            Text("$progressPercent%", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text("Mengkonversi...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text("Sedang Mengkonversi Video...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Mohon jangan tutup aplikasi", color = TextDesc, fontSize = 11.sp)
                 }
+            }
+        }
+
+        // 🔥 CUSTOM NOTIFIKASI PREMIUM ALA COMPOSE
+        AnimatedVisibility(
+            visible = toastMessage != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isErrorToast) Color(0xFFE74C3C).copy(alpha = 0.95f) else Color(0xFF27AE60).copy(alpha = 0.95f))
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(toastMessage ?: "", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            }
+        }
+
+        // Timer buat ngilangin Notif otomatis
+        LaunchedEffect(toastMessage) {
+            if (toastMessage != null) {
+                delay(3500) // Ilang dalam 3.5 detik
+                toastMessage = null
             }
         }
     }
@@ -313,44 +367,12 @@ fun ConverterScreen() {
 
 // --- Komponen Pelengkap UI ---
 @Composable
-fun StepBadge(number: String, color: Color) {
-    Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(color.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
-        Text(number, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
-}
+fun StepBadge(number: String, color: Color) { Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(color.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) { Text(number, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold) } }
 @Composable
-fun SettingLabel(text: String) {
-    Text(text, color = TextDesc, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-}
+fun SettingLabel(text: String) { Text(text, color = TextDesc, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
 @Composable
-fun FormatButton(text: String, isSelected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier = modifier.height(40.dp).clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) AccentCyan.copy(alpha = 0.1f) else InputBg)
-            .border(1.dp, if (isSelected) AccentCyan else Color.Transparent, RoundedCornerShape(8.dp))
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) { Text(text, color = if (isSelected) AccentCyan else TextDesc, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-}
+fun FormatButton(text: String, isSelected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) { Box(modifier = modifier.height(40.dp).clip(RoundedCornerShape(8.dp)).background(if (isSelected) AccentCyan.copy(alpha = 0.1f) else InputBg).border(1.dp, if (isSelected) AccentCyan else Color.Transparent, RoundedCornerShape(8.dp)).clickable { onClick() }, contentAlignment = Alignment.Center) { Text(text, color = if (isSelected) AccentCyan else TextDesc, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) } }
 @Composable
-fun CustomDropdown(value: String, options: List<String>, onValueChange: (String) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(8.dp))
-                .background(InputBg).clickable { expanded = true }.padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(value, color = TextTitle, fontSize = 13.sp)
-            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = TextDesc)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.background(CardSolidBg)) {
-            options.forEach { selectionOption ->
-                DropdownMenuItem(
-                    text = { Text(selectionOption, color = TextTitle, fontSize = 13.sp) },
-                    onClick = { onValueChange(selectionOption); expanded = false }
-                )
-            }
-        }
-    }
-}
+fun CustomDropdown(value: String, options: List<String>, onValueChange: (String) -> Unit) { var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) { Row(modifier = Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(8.dp)).background(InputBg).clickable { expanded = true }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Text(value, color = TextTitle, fontSize = 13.sp); Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = TextDesc) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.background(CardSolidBg)) { options.forEach { selectionOption -> DropdownMenuItem(text = { Text(selectionOption, color = TextTitle, fontSize = 13.sp) }, onClick = { onValueChange(selectionOption); expanded = false }) } } } }
