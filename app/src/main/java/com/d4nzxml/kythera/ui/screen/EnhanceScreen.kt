@@ -1,5 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,12 +20,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// --- Palette Warna ---
-// Pakai 'private' biar aman dari error Conflicting Declarations!
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
 private val TextTitle = Color(0xFFF1F1F1)
@@ -33,14 +34,12 @@ private val ButtonDarkBg = Color(0xFF2D284B)
 
 @Composable
 fun EnhanceScreen() {
-    // Buat nyimpen data file (URI) yang udah dipilih
+    val context = LocalContext.current
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
-    // Ini mesin buat ngebuka Galeri / File Manager
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
-        // Pas user milih file, URI-nya disimpen ke sini
         selectedFileUri = uri
     }
 
@@ -51,14 +50,12 @@ fun EnhanceScreen() {
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        // --- HEADER ---
         Text("Kythera Upscale", color = TextTitle, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(modifier = Modifier.height(2.dp))
         Text("powered By AI", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // --- KOTAK UPLOAD DASHED ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -67,35 +64,29 @@ fun EnhanceScreen() {
                 .background(CardSolidBg.copy(alpha = 0.5f))
                 .drawBehind {
                     drawRoundRect(
-                        color = AccentCyan.copy(alpha = 0.4f), // Warna dashed cyan transparan
-                        style = Stroke(
-                            width = 4f,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)
-                        ),
+                        color = AccentCyan.copy(alpha = 0.4f),
+                        style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-                .clickable { filePickerLauncher.launch("image/*") }, // 🔥 KOMA YANG HILANG UDAH DITAMBAHIN DI SINI
+                .clickable { filePickerLauncher.launch("image/*") },
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AccentCyan.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Rounded.Image, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // 🔥 LOGIKA BARU: Teks berubah kalau foto udah kepilih
                 if (selectedFileUri != null) {
+                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text("Foto Siap Diproses!", color = AccentCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Tap untuk mengganti foto", color = TextDesc, fontSize = 10.sp)
                 } else {
+                    Box(
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(AccentCyan.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Image, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text("Upload Foto", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("JPG, PNG, WEBP", color = TextDesc, fontSize = 10.sp)
@@ -105,12 +96,16 @@ fun EnhanceScreen() {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // --- TOMBOL TINGKATKAN RESOLUSI ---
         Button(
-            onClick = { /* Eksekusi AI RealSR */ },
+            onClick = { 
+                if (selectedFileUri != null) {
+                    Toast.makeText(context, "Memulai AI Upscale...", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Harap pilih foto terlebih dahulu!", Toast.LENGTH_SHORT).show()
+                }
+            },
             modifier = Modifier.height(48.dp),
             colors = ButtonDefaults.buttonColors(
-                // Tombol nyala kalau udah ada foto yang dipilih
                 containerColor = if (selectedFileUri != null) AccentCyan else ButtonDarkBg,
                 contentColor = if (selectedFileUri != null) DashBg else TextDesc
             ),
@@ -122,7 +117,6 @@ fun EnhanceScreen() {
                 Text("Tingkatkan Resolusi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
-
         Spacer(modifier = Modifier.height(80.dp))
     }
 }
