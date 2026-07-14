@@ -1,6 +1,5 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,14 +28,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFmpegKitConfig
-import com.arthenica.ffmpegkit.FFprobeKit
-import com.arthenica.ffmpegkit.ReturnCode
+import com.arthenica.ffmpegkit.FFmpegKitConfig // Cuma butuh ini buat ambil real path
+import com.d4nzxml.kythera.service.FfmpegService // 🔥 IMPORT SERVICE LU
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -50,10 +46,12 @@ private val InputBg = Color(0xFF1D1A31)
 fun ConverterScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 🔥 Inisialisasi Service Lu
+    val ffmpegService = remember { FfmpegService(context) }
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) } 
-    var progressPercent by remember { mutableIntStateOf(0) }
+    var progressPercent by remember { mutableIntStateOf(0) } 
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -194,108 +192,57 @@ fun ConverterScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL KONVERSI (FFMPEG PINTAR ANTI-GAGAL) ---
+            // --- TOMBOL KONVERSI (PANGGIL FFMPEG SERVICE) ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
                         scope.launch {
-                            withContext(Dispatchers.IO) {
-                                try {
-                                    val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
-                                    
-                                    // Ambil durasi buat ngitung persen
-                                    val mediaInfo = FFprobeKit.getMediaInformation(inputPath)
-                                    val durationStr = mediaInfo?.mediaInformation?.duration
-                                    val totalDurationMs = durationStr?.toFloatOrNull()?.times(1000)?.toLong() ?: 0L
-
-                                    val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-                                    val kytheraDir = File(moviesDir, "KytheraTools")
-                                    if (!kytheraDir.exists()) kytheraDir.mkdirs()
-                                    
-                                    val ext = selectedFormat.lowercase()
-                                    val outputFile = File(kytheraDir, "Converter_${System.currentTimeMillis()}.$ext")
-                                    val outputPath = outputFile.absolutePath
-
-                                    // 🔥 1. MAPPING CODEC CERDAS BIAR GA CRASH
-                                    val vCodec = when {
-                                        ext == "gif" -> "gif"
-                                        ext == "webm" && selectedCodec.contains("H.26") -> "libvpx-vp9" // Paksa VP9 kalo user milih webm
-                                        else -> when (selectedCodec) {
-                                            "H.264 (AVC) - Compatible" -> "libx264"
-                                            "H.265 (HEVC) - High Compression" -> "libx265"
-                                            "VP9" -> "libvpx-vp9"
-                                            "AV1" -> "libaom-av1"
-                                            else -> "libx264"
-                                        }
+                            withContext(Dispatchers.Main) {
+                                progressPercent = 0
+                                isLoading = true
+                            }
+                            
+                            val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
+                            
+                            val ext = selectedFormat.lowercase()
+                            
+                            val vCodec = when {
+                                ext == "gif" -> "gif"
+                                ext == "webm" && selectedCodec.contains("H.26") -> "libvpx-vp9"
+                                else -> when (selectedCodec) {
+                                    "H.264 (AVC) - Compatible" -> "libx264"
+                                    "H.265 (HEVC) - High Compression" -> "libx265"
+                                    "VP9" -> "libvpx-vp9"
+                                    "AV1" -> "libaom-av1"
+                                    else -> "libx264"
+                                }
+                            }
+                            
+                            val modeString = if (isCrfMode) "CRF" else "CBR"
+                            
+                            // Eksekusi pakai Service lu
+                            val result = ffmpegService.convertVideoPro(
+                                inputPath = inputPath,
+                                targetFormat = ext,
+                                codec = vCodec,
+                                resolution = if (selectedResolution == "Original") "original" else selectedResolution.replace("p", ""),
+                                mode = modeString,
+                                crf = crfValue.toInt(),
+                                bitrateM = 3, // Default fallback
+                                preset = selectedPreset,
+                                onProgress = { percent ->
+                                    scope.launch(Dispatchers.Main) {
+                                        progressPercent = percent
                                     }
+                                }
+                            )
 
-                                    // 🔥 2. TARIK LOGIKA GIST DARI BRANKAS
-                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
-                                    val globalArgs = sharedPref.getString("conv_global", "-movflags +faststart") ?: "-movflags +faststart"
-                                    val crfExtra = sharedPref.getString("conv_crf_extra", "-bf 0") ?: "-bf 0"
-                                    
-                                    // GIF gak nerima audio, jadi kita kosongin biar ga error
-                                    val audioArgs = if (ext == "gif") "" else sharedPref.getString("conv_audio", "-c:a aac -b:a 192k") ?: "-c:a aac -b:a 192k"
-
-                                    // 🔥 3. MAPPING KUALITAS & RESOLUSI
-                                    val rateControl = if (isCrfMode) "-crf ${crfValue.toInt()} $crfExtra" else "-b:v 3M"
-                                    val resFilter = when (selectedResolution) {
-                                        "1080p" -> "-vf scale=-2:1080"
-                                        "720p" -> "-vf scale=-2:720"
-                                        "480p" -> "-vf scale=-2:480"
-                                        "360p" -> "-vf scale=-2:360"
-                                        else -> ""
-                                    }
-
-                                    // 🔥 4. BUILDER COMMAND ANTI-DOUBLE SPASI
-                                    val cmdBuilder = StringBuilder("-i \"$inputPath\" -c:v $vCodec ")
-                                    if (ext != "gif") {
-                                        cmdBuilder.append("$rateControl -preset $selectedPreset ")
-                                    }
-                                    if (resFilter.isNotEmpty()) {
-                                        cmdBuilder.append("$resFilter ")
-                                    }
-                                    if (audioArgs.isNotEmpty()) {
-                                        cmdBuilder.append("$audioArgs ")
-                                    }
-                                    cmdBuilder.append("$globalArgs -y \"$outputPath\"")
-
-                                    // Bersihin spasi dobel biar FFmpeg ga bingung
-                                    val command = cmdBuilder.toString().replace("  ", " ")
-
-                                    withContext(Dispatchers.Main) {
-                                        progressPercent = 0
-                                        isLoading = true
-                                    }
-
-                                    // Eksekusi Async FFmpeg
-                                    FFmpegKit.executeAsync(command, { session ->
-                                        val returnCode = session.returnCode
-                                        scope.launch(Dispatchers.Main) {
-                                            isLoading = false
-                                            if (ReturnCode.isSuccess(returnCode)) {
-                                                Toast.makeText(context, "Selesai! Disimpan di Movies/KytheraTools", Toast.LENGTH_LONG).show()
-                                            } else {
-                                                Toast.makeText(context, "Gagal Mengkonversi Video! Cek format.", Toast.LENGTH_LONG).show()
-                                                android.util.Log.e("Kythera_Convert", "FFmpeg Error Log: ${session.failStackTrace}")
-                                            }
-                                        }
-                                    }, { log -> 
-                                        // Abaikan
-                                    }, { statistics ->
-                                        if (totalDurationMs > 0) {
-                                            val timeMs = statistics.time.toFloat()
-                                            val percentage = ((timeMs / totalDurationMs) * 100).toInt()
-                                            scope.launch(Dispatchers.Main) {
-                                                progressPercent = percentage.coerceIn(0, 100)
-                                            }
-                                        }
-                                    })
-                                } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        isLoading = false
-                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-                                    }
+                            withContext(Dispatchers.Main) {
+                                isLoading = false
+                                if (result.success) {
+                                    Toast.makeText(context, "Selesai! Tersimpan di: ${result.outputPath}", Toast.LENGTH_LONG).show()
+                                } else {
+                                    Toast.makeText(context, "Gagal: ${result.errorMessage}", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
@@ -329,6 +276,7 @@ fun ConverterScreen() {
             Spacer(modifier = Modifier.height(80.dp))
         }
 
+        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
         if (isLoading) {
             Box(
                 modifier = Modifier
@@ -362,6 +310,7 @@ fun ConverterScreen() {
         }
     }
 }
+
 // --- Komponen Pelengkap UI ---
 @Composable
 fun StepBadge(number: String, color: Color) {
