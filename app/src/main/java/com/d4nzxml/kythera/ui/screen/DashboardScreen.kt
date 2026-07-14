@@ -22,10 +22,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // --- Palette Warna Khusus Dashboard ---
-val DashBg = Color(0xFF18152B) 
-val CardSolidBg = Color(0xFF26233E)
-val TextTitle = Color(0xFFF1F1F1)
-val TextDesc = Color(0xFFAAA8C2)
+private val DashBg = Color(0xFF18152B) 
+private val CardSolidBg = Color(0xFF26233E)
+private val TextTitle = Color(0xFFF1F1F1)
+private val TextDesc = Color(0xFFAAA8C2)
+
 
 @Composable
 fun DashboardScreen(onNavigate: (Int) -> Unit) {
