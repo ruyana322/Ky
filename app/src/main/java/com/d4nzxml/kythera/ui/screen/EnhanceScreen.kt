@@ -1,11 +1,10 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
-import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -54,6 +53,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -75,7 +76,7 @@ fun EnhanceScreen() {
     var inputBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var resultBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showPreview by remember { mutableStateOf(false) }
-    var pendingSavedUri by remember { mutableStateOf<Uri?>(null) } 
+    var pendingSavedPath by remember { mutableStateOf<String?>(null) } // 🔥 Simpan path aslinya
 
     // State buat Notifikasi
     var toastMessage by remember { mutableStateOf<String?>(null) }
@@ -87,14 +88,14 @@ fun EnhanceScreen() {
         selectedFileUri = uri
     }
 
-    // 🔥 LOGIKA PEMBERSIH RAM PINTAR (Jalan setelah animasi tutup selesai)
+    // Pembersih RAM Pintar
     LaunchedEffect(showPreview) {
         if (!showPreview) {
-            delay(500) // Tunggu setengah detik biar animasi fade-out beres
+            delay(500) 
             inputBitmap = null
             resultBitmap = null
-            pendingSavedUri = null
-            System.gc() // Suruh Android buang sampah RAM
+            pendingSavedPath = null
+            System.gc() 
         }
     }
 
@@ -200,32 +201,34 @@ fun EnhanceScreen() {
                                         
                                         System.gc() 
 
-                                        val uri = withContext(Dispatchers.IO) {
+                                        // 🔥 SILENT SAVE DIRECT KE DCIM PUBLIC STORAGE
+                                        val savedFilePath = withContext(Dispatchers.IO) {
                                             try {
-                                                val resolver = context.contentResolver
-                                                val values = ContentValues().apply {
-                                                    put(MediaStore.Images.Media.DISPLAY_NAME, "Kythera_x4_${System.currentTimeMillis()}.png")
-                                                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                                                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/kytheraImg")
-                                                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                                                val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+                                                // Masukin ke KytheraImg (bisa lu ganti jadi "RealSR" kalau mau persis aslinya)
+                                                val kytheraDir = File(dcimDir, "kytheraImg")
+                                                if (!kytheraDir.exists()) kytheraDir.mkdirs()
+
+                                                val outFile = File(kytheraDir, "Kythera_x4_${System.currentTimeMillis()}.png")
+                                                FileOutputStream(outFile).use { out ->
+                                                    resBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                                                 }
-                                                val newUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                                                if (newUri != null) {
-                                                    resolver.openOutputStream(newUri)?.use { out ->
-                                                        resBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                                    }
-                                                    values.clear()
-                                                    values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                                                    resolver.update(newUri, values, null, null)
-                                                }
-                                                newUri
+
+                                                // 🔥 Trigger Media Scanner (Biar galeri sadar ada foto baru)
+                                                MediaScannerConnection.scanFile(
+                                                    context,
+                                                    arrayOf(outFile.absolutePath),
+                                                    arrayOf("image/png")
+                                                ) { _, _ -> }
+
+                                                outFile.absolutePath
                                             } catch (e: Exception) { null }
                                         }
 
                                         withContext(Dispatchers.Main) {
                                             progressPercent = 100
                                             resultBitmap = resBitmap
-                                            pendingSavedUri = uri 
+                                            pendingSavedPath = savedFilePath 
                                             delay(200) 
                                             isLoading = false
                                             showPreview = true 
@@ -271,15 +274,21 @@ fun EnhanceScreen() {
         // 2. LAYAR PREVIEW BEFORE/AFTER
         // ==========================================
         AnimatedVisibility(
-            visible = showPreview, // Hapus pengecekan null di sini biar animasi ga kaget
+            visible = showPreview, 
             enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
         ) {
             val cancelPreview = {
                 scope.launch(Dispatchers.IO) {
-                    pendingSavedUri?.let { context.contentResolver.delete(it, null, null) }
+                    // Kalau user batal, kita hapus foto diam-diam yang ada di DCIM tadi
+                    pendingSavedPath?.let { path -> 
+                        val file = File(path)
+                        if (file.exists()) file.delete()
+                        // Update galeri biar fotonya ilang
+                        MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+                    }
                 }
-                showPreview = false // Cuma nutup layar, RAM dihapus otomatis sama LaunchedEffect
+                showPreview = false 
             }
 
             BackHandler { cancelPreview() }
@@ -287,7 +296,6 @@ fun EnhanceScreen() {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
                 var sliderPosition by remember { mutableFloatStateOf(0.5f) }
 
-                // 🔥 ANTI-NULL RENDERER (Kalau RAM udah dibersihin, biarin aja kosong ga usah digambar)
                 val currentInBmp = inputBitmap
                 val currentResBmp = resultBitmap
 
@@ -333,9 +341,10 @@ fun EnhanceScreen() {
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
                     ) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Batal", tint = Color.White) }
 
+                    // 🔥 TOMBOL SIMPAN (CUMA KASIH NOTIF KARENA UDAH DISIMPAN DIAM-DIAM)
                     Button(
                         onClick = {
-                            toastMessage = "Selesai! Tersimpan di Pictures/kytheraImg"
+                            toastMessage = "Selesai! Tersimpan di DCIM/kytheraImg"
                             isErrorToast = false
                             showPreview = false
                             selectedFileUri = null
@@ -368,7 +377,7 @@ fun EnhanceScreen() {
                         Text("$progressPercent%", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text(if (progressPercent > 90) "Membangun File PNG..." else "AI RealSR sedang bekerja...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(if (progressPercent > 90) "Menyimpan File PNG..." else "AI RealSR sedang bekerja...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Menggunakan GPU Vulkan NCNN", color = TextDesc, fontSize = 11.sp)
                 }
