@@ -1,5 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
 
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,8 +29,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.arthenica.ffmpegkit.FFprobeKit
+import com.arthenica.ffmpegkit.ReturnCode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -42,10 +49,11 @@ private val InputBg = Color(0xFF1D1A31)
 @Composable
 fun ConverterScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope() // 🔥 Buat jalanin loading di background
+    val scope = rememberCoroutineScope()
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    var isLoading by remember { mutableStateOf(false) } // 🔥 State loading
+    var isLoading by remember { mutableStateOf(false) } 
+    var progressPercent by remember { mutableIntStateOf(0) } // 🔥 State buat Persen
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -60,7 +68,6 @@ fun ConverterScreen() {
     var selectedPreset by remember { mutableStateOf("medium") }
     var selectedResolution by remember { mutableStateOf("Original") }
 
-    // 🔥 Pake Box di luar biar bisa numpuk layar loading
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -82,7 +89,7 @@ fun ConverterScreen() {
             
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Kotak Upload Dashed
+            // --- KOTAK UPLOAD DASHED ---
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -116,7 +123,7 @@ fun ConverterScreen() {
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("Drop video atau klik upload", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("MP4, AVI, MKV, MOV, WEBM, FLV", color = TextDesc, fontSize = 10.sp)
+                        Text("MP4, AVI, MKV, MOV, WEBM, GIF", color = TextDesc, fontSize = 10.sp)
                     }
                 }
             }
@@ -187,16 +194,92 @@ fun ConverterScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Tombol Konversi Sekarang
+            // --- TOMBOL KONVERSI (FFMPEG LOGIC) ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
-                        // 🔥 JALANIN LOADING PROSES
                         scope.launch {
-                            isLoading = true
-                            delay(3000) // Simulasi FFmpeg jalan 3 detik
-                            isLoading = false
-                            Toast.makeText(context, "Konversi Selesai!", Toast.LENGTH_SHORT).show()
+                            withContext(Dispatchers.IO) {
+                                try {
+                                    val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
+                                    
+                                    // 🔥 Ambil durasi buat ngitung persen
+                                    val mediaInfo = FFprobeKit.getMediaInformation(inputPath)
+                                    val durationStr = mediaInfo?.mediaInformation?.duration
+                                    val totalDurationMs = durationStr?.toFloatOrNull()?.times(1000)?.toLong() ?: 0L
+
+                                    val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                                    val kytheraDir = File(moviesDir, "KytheraTools")
+                                    if (!kytheraDir.exists()) kytheraDir.mkdirs()
+                                    
+                                    // Bikin nama file sesuai format yang dipilih user
+                                    val ext = selectedFormat.lowercase()
+                                    val outputFile = File(kytheraDir, "Converter_${System.currentTimeMillis()}.$ext")
+                                    val outputPath = outputFile.absolutePath
+
+                                    // Mapping Codec Video
+                                    val vCodec = when (selectedCodec) {
+                                        "H.264 (AVC) - Compatible" -> "libx264"
+                                        "H.265 (HEVC) - High Compression" -> "libx265"
+                                        "VP9" -> "libvpx-vp9"
+                                        "AV1" -> "libaom-av1"
+                                        else -> "libx264"
+                                    }
+
+                                    // Mapping Kualitas & Resolusi
+                                    val rateControl = if (isCrfMode) "-crf ${crfValue.toInt()}" else "-b:v 3M"
+                                    val resFilter = when (selectedResolution) {
+                                        "1080p" -> "-vf scale=-2:1080"
+                                        "720p" -> "-vf scale=-2:720"
+                                        "480p" -> "-vf scale=-2:480"
+                                        "360p" -> "-vf scale=-2:360"
+                                        else -> ""
+                                    }
+
+                                    // Tarik racikan global dari brankas (Gist)
+                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+                                    val globalArgs = sharedPref.getString("conv_global", "-movflags +faststart") ?: "-movflags +faststart"
+                                    val audioArgs = sharedPref.getString("conv_audio", "-c:a aac -b:a 192k") ?: "-c:a aac -b:a 192k"
+
+                                    // Susun Command FFmpeg!
+                                    val command = "-i \"$inputPath\" -c:v $vCodec $rateControl -preset $selectedPreset $resFilter $audioArgs $globalArgs -y \"$outputPath\""
+
+                                    // Mulai Loading
+                                    withContext(Dispatchers.Main) {
+                                        progressPercent = 0
+                                        isLoading = true
+                                    }
+
+                                    // Eksekusi Async FFmpeg
+                                    FFmpegKit.executeAsync(command, { session ->
+                                        val returnCode = session.returnCode
+                                        scope.launch(Dispatchers.Main) {
+                                            isLoading = false
+                                            if (ReturnCode.isSuccess(returnCode)) {
+                                                Toast.makeText(context, "Selesai! Disimpan di Movies/KytheraTools", Toast.LENGTH_LONG).show()
+                                            } else {
+                                                Toast.makeText(context, "Gagal Mengkonversi Video!", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }, { log -> 
+                                        // Abaikan log teks
+                                    }, { statistics ->
+                                        // 🔥 Update progress persentase realtime
+                                        if (totalDurationMs > 0) {
+                                            val timeMs = statistics.time.toFloat()
+                                            val percentage = ((timeMs / totalDurationMs) * 100).toInt()
+                                            scope.launch(Dispatchers.Main) {
+                                                progressPercent = percentage.coerceIn(0, 100)
+                                            }
+                                        }
+                                    })
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        isLoading = false
+                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
                         }
                     } else {
                         Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
@@ -228,23 +311,35 @@ fun ConverterScreen() {
             Spacer(modifier = Modifier.height(80.dp))
         }
 
-        // 🔥 TAMPILAN LOADING OVERLAY
+        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
         if (isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .clickable(enabled = false) {}, // Blokir klik di belakang layar
+                    .background(Color.Black.copy(alpha = 0.85f))
+                    .clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        color = AccentPurple, // 🔥 Loadingnya pake warna ungu
-                        modifier = Modifier.size(50.dp),
-                        strokeWidth = 4.dp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Mengkonversi Video...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = progressPercent / 100f,
+                            color = AccentPurple, // 🔥 Lingkaran warna Ungu
+                            trackColor = CardSolidBg,
+                            modifier = Modifier.size(80.dp),
+                            strokeWidth = 6.dp
+                        )
+                        Text(
+                            text = "$progressPercent%", 
+                            color = Color.White, 
+                            fontWeight = FontWeight.ExtraBold, 
+                            fontSize = 18.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text("Sedang Mengkonversi Video...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Mohon jangan tutup aplikasi", color = TextDesc, fontSize = 11.sp)
                 }
             }
         }
