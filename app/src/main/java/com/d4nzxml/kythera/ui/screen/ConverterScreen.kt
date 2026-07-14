@@ -53,7 +53,7 @@ fun ConverterScreen() {
     
     var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) } 
-    var progressPercent by remember { mutableIntStateOf(0) } // 🔥 State buat Persen
+    var progressPercent by remember { mutableIntStateOf(0) }
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -194,7 +194,7 @@ fun ConverterScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TOMBOL KONVERSI (FFMPEG LOGIC) ---
+            // --- TOMBOL KONVERSI (FFMPEG PINTAR ANTI-GAGAL) ---
             Button(
                 onClick = { 
                     if (selectedFileUri != null) {
@@ -203,7 +203,7 @@ fun ConverterScreen() {
                                 try {
                                     val inputPath = FFmpegKitConfig.getSafParameterForRead(context, selectedFileUri)
                                     
-                                    // 🔥 Ambil durasi buat ngitung persen
+                                    // Ambil durasi buat ngitung persen
                                     val mediaInfo = FFprobeKit.getMediaInformation(inputPath)
                                     val durationStr = mediaInfo?.mediaInformation?.duration
                                     val totalDurationMs = durationStr?.toFloatOrNull()?.times(1000)?.toLong() ?: 0L
@@ -212,22 +212,33 @@ fun ConverterScreen() {
                                     val kytheraDir = File(moviesDir, "KytheraTools")
                                     if (!kytheraDir.exists()) kytheraDir.mkdirs()
                                     
-                                    // Bikin nama file sesuai format yang dipilih user
                                     val ext = selectedFormat.lowercase()
                                     val outputFile = File(kytheraDir, "Converter_${System.currentTimeMillis()}.$ext")
                                     val outputPath = outputFile.absolutePath
 
-                                    // Mapping Codec Video
-                                    val vCodec = when (selectedCodec) {
-                                        "H.264 (AVC) - Compatible" -> "libx264"
-                                        "H.265 (HEVC) - High Compression" -> "libx265"
-                                        "VP9" -> "libvpx-vp9"
-                                        "AV1" -> "libaom-av1"
-                                        else -> "libx264"
+                                    // 🔥 1. MAPPING CODEC CERDAS BIAR GA CRASH
+                                    val vCodec = when {
+                                        ext == "gif" -> "gif"
+                                        ext == "webm" && selectedCodec.contains("H.26") -> "libvpx-vp9" // Paksa VP9 kalo user milih webm
+                                        else -> when (selectedCodec) {
+                                            "H.264 (AVC) - Compatible" -> "libx264"
+                                            "H.265 (HEVC) - High Compression" -> "libx265"
+                                            "VP9" -> "libvpx-vp9"
+                                            "AV1" -> "libaom-av1"
+                                            else -> "libx264"
+                                        }
                                     }
 
-                                    // Mapping Kualitas & Resolusi
-                                    val rateControl = if (isCrfMode) "-crf ${crfValue.toInt()}" else "-b:v 3M"
+                                    // 🔥 2. TARIK LOGIKA GIST DARI BRANKAS
+                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
+                                    val globalArgs = sharedPref.getString("conv_global", "-movflags +faststart") ?: "-movflags +faststart"
+                                    val crfExtra = sharedPref.getString("conv_crf_extra", "-bf 0") ?: "-bf 0"
+                                    
+                                    // GIF gak nerima audio, jadi kita kosongin biar ga error
+                                    val audioArgs = if (ext == "gif") "" else sharedPref.getString("conv_audio", "-c:a aac -b:a 192k") ?: "-c:a aac -b:a 192k"
+
+                                    // 🔥 3. MAPPING KUALITAS & RESOLUSI
+                                    val rateControl = if (isCrfMode) "-crf ${crfValue.toInt()} $crfExtra" else "-b:v 3M"
                                     val resFilter = when (selectedResolution) {
                                         "1080p" -> "-vf scale=-2:1080"
                                         "720p" -> "-vf scale=-2:720"
@@ -236,15 +247,22 @@ fun ConverterScreen() {
                                         else -> ""
                                     }
 
-                                    // Tarik racikan global dari brankas (Gist)
-                                    val sharedPref = context.getSharedPreferences("KytheraPrefs", android.content.Context.MODE_PRIVATE)
-                                    val globalArgs = sharedPref.getString("conv_global", "-movflags +faststart") ?: "-movflags +faststart"
-                                    val audioArgs = sharedPref.getString("conv_audio", "-c:a aac -b:a 192k") ?: "-c:a aac -b:a 192k"
+                                    // 🔥 4. BUILDER COMMAND ANTI-DOUBLE SPASI
+                                    val cmdBuilder = StringBuilder("-i \"$inputPath\" -c:v $vCodec ")
+                                    if (ext != "gif") {
+                                        cmdBuilder.append("$rateControl -preset $selectedPreset ")
+                                    }
+                                    if (resFilter.isNotEmpty()) {
+                                        cmdBuilder.append("$resFilter ")
+                                    }
+                                    if (audioArgs.isNotEmpty()) {
+                                        cmdBuilder.append("$audioArgs ")
+                                    }
+                                    cmdBuilder.append("$globalArgs -y \"$outputPath\"")
 
-                                    // Susun Command FFmpeg!
-                                    val command = "-i \"$inputPath\" -c:v $vCodec $rateControl -preset $selectedPreset $resFilter $audioArgs $globalArgs -y \"$outputPath\""
+                                    // Bersihin spasi dobel biar FFmpeg ga bingung
+                                    val command = cmdBuilder.toString().replace("  ", " ")
 
-                                    // Mulai Loading
                                     withContext(Dispatchers.Main) {
                                         progressPercent = 0
                                         isLoading = true
@@ -258,13 +276,13 @@ fun ConverterScreen() {
                                             if (ReturnCode.isSuccess(returnCode)) {
                                                 Toast.makeText(context, "Selesai! Disimpan di Movies/KytheraTools", Toast.LENGTH_LONG).show()
                                             } else {
-                                                Toast.makeText(context, "Gagal Mengkonversi Video!", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Gagal Mengkonversi Video! Cek format.", Toast.LENGTH_LONG).show()
+                                                android.util.Log.e("Kythera_Convert", "FFmpeg Error Log: ${session.failStackTrace}")
                                             }
                                         }
                                     }, { log -> 
-                                        // Abaikan log teks
+                                        // Abaikan
                                     }, { statistics ->
-                                        // 🔥 Update progress persentase realtime
                                         if (totalDurationMs > 0) {
                                             val timeMs = statistics.time.toFloat()
                                             val percentage = ((timeMs / totalDurationMs) * 100).toInt()
@@ -311,7 +329,6 @@ fun ConverterScreen() {
             Spacer(modifier = Modifier.height(80.dp))
         }
 
-        // 🔥 TAMPILAN LOADING OVERLAY DENGAN PERSENTASE
         if (isLoading) {
             Box(
                 modifier = Modifier
@@ -324,7 +341,7 @@ fun ConverterScreen() {
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             progress = progressPercent / 100f,
-                            color = AccentPurple, // 🔥 Lingkaran warna Ungu
+                            color = AccentPurple, 
                             trackColor = CardSolidBg,
                             modifier = Modifier.size(80.dp),
                             strokeWidth = 6.dp
@@ -345,7 +362,6 @@ fun ConverterScreen() {
         }
     }
 }
-
 // --- Komponen Pelengkap UI ---
 @Composable
 fun StepBadge(number: String, color: Color) {
