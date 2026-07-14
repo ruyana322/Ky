@@ -1,248 +1,105 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.d4nzxml.kythera.service.GalleryService
-import com.d4nzxml.kythera.service.RealSrEngine
-import com.d4nzxml.kythera.ui.components.*
-import com.d4nzxml.kythera.ui.theme.KColor
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+
+// --- Palette Warna ---
+// Pakai 'private' biar aman dari error Conflicting Declarations!
+private val DashBg = Color(0xFF18152B)
+private val CardSolidBg = Color(0xFF26233E)
+private val TextTitle = Color(0xFFF1F1F1)
+private val TextDesc = Color(0xFFAAA8C2)
+private val AccentCyan = Color(0xFF00CEC9)
+private val ButtonDarkBg = Color(0xFF2D284B)
 
 @Composable
 fun EnhanceScreen() {
-    val context      = LocalContext.current
-    val scope        = rememberCoroutineScope()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DashBg)
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp)
+    ) {
+        // --- HEADER ---
+        Text("Kythera Upscale", color = TextTitle, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text("powered By AI", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
-    var inputBitmap  by remember { mutableStateOf<Bitmap?>(null) }
-    var outputBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var fileName     by remember { mutableStateOf<String?>(null) }
-    var isProcessing by remember { mutableStateOf(false) }
-    var isSaving     by remember { mutableStateOf(false) }
-    var statusText   by remember { mutableStateOf("") }
-    var errorLog     by remember { mutableStateOf<String?>(null) }
-    
-    var elapsedTime  by remember { mutableStateOf(0L) }
+        Spacer(modifier = Modifier.height(32.dp))
 
-    LaunchedEffect(isProcessing) {
-        if (isProcessing) {
-            val startTime = System.currentTimeMillis()
-            while (true) {
-                elapsedTime = (System.currentTimeMillis() - startTime) / 1000L
-                delay(100L) 
-            }
-        } else {
-            elapsedTime = 0L
-        }
-    }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            scope.launch {
-                outputBitmap = null; errorLog = null
-                fileName = it.lastPathSegment ?: "image"
-                val bmp = withContext(Dispatchers.IO) {
-                    try { context.contentResolver.openInputStream(it)?.use { s -> BitmapFactory.decodeStream(s) } }
-                    catch (e: Exception) { null }
-                }
-                inputBitmap = bmp
-                statusText = if (bmp != null) "Siap diproses" else "Gagal membaca gambar!"
-            }
-        }
-    }
-
-    fun processImage() {
-        if (inputBitmap == null) return
-        scope.launch {
-            isProcessing = true; errorLog = null
-            statusText = "Memuat AI Engine..."
-            
-            val ready = withContext(Dispatchers.IO) { RealSrEngine.setup(context) }
-            if (!ready) {
-                statusText = "Gagal memuat engine!"; errorLog = "Initialization failed."
-                isProcessing = false; return@launch
-            }
-            
-            statusText = "Meningkatkan Resolusi..."
-            val (result, _) = withContext(Dispatchers.IO) { 
-                RealSrEngine.upscaleWithLog(context, inputBitmap!!) 
-            }
-            
-            if (result != null) {
-                outputBitmap = result
-            } else {
-                statusText = "❌ Proses Gagal!"
-                errorLog = "Engine Error"
-            }
-            isProcessing = false
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        if (outputBitmap == null) {
-            Text("Kythera Upscale", color = KColor.Text, fontSize = 24.sp, fontWeight = FontWeight.W800)
-            Text("powered By Ai ", color = KColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(16.dp))
-
-            GlassCard {
-                KDropZone(
-                    onTap = { picker.launch("image/*") },
-                    title = "Upload Foto",
-                    subtitle = "JPG, PNG, WEBP",
-                    icon = Icons.Rounded.Image,
-                    accentColor = KColor.Accent,
-                    selectedFileName = fileName
-                )
-                if (inputBitmap != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Image(bitmap = inputBitmap!!.asImageBitmap(), contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().height(220.dp), contentScale = ContentScale.Fit)
-                }
-            }
-            Spacer(modifier = Modifier.weight(1f))
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Bandingkan Hasil (HD)", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("← geser →", color = KColor.Text2, fontSize = 11.sp)
-            }
-            Spacer(Modifier.height(12.dp))
-            BeforeAfterSlider(
-                before = inputBitmap!!,
-                after  = outputBitmap!!,
-                modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, KColor.Border, RoundedCornerShape(16.dp))
-            )
-        }
-
-        if (errorLog != null) {
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp).background(Color(0x22FF0000), RoundedCornerShape(10.dp)).padding(10.dp)) {
-                Text("⚠️ Error: $errorLog", color = Color(0xFFFF4444), fontSize = 11.sp)
-            }
-        }
-
-        if (isProcessing) {
-            Spacer(Modifier.height(16.dp))
-            Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(KColor.Surface2).padding(16.dp)) {
-                Column {
-                    Text("⏳ $statusText", color = KColor.Accent, fontSize = 13.sp)
-                    Spacer(Modifier.height(10.dp))
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp), color = Color(0xFF3FB950))
-                    Spacer(Modifier.height(10.dp))
-                    Text("$elapsedTime Detik", color = KColor.Text, fontSize = 11.sp)
-                }
-            }
-        } else {
-            Spacer(Modifier.height(16.dp))
-            if (outputBitmap != null) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    KPrimaryButton(
-                        label = if (isSaving) "Menyimpan..." else "Simpan",
-                        icon = Icons.Rounded.Save,
-                        modifier = Modifier.weight(1f),
-                        enabled = !isSaving,
-                        onClick = { 
-                            scope.launch {
-                                isSaving = true
-                                Toast.makeText(context, "Proses menyimpan...", Toast.LENGTH_SHORT).show()
-                                withContext(Dispatchers.IO) {
-                                    GalleryService.saveBitmap(context, outputBitmap!!, "Kythera_HD_${System.currentTimeMillis()}.png")
-                                }
-                                Toast.makeText(context, "Tersimpan di Galeri! 🔥", Toast.LENGTH_SHORT).show()
-                                isSaving = false
-                            }
-                        }
-                    )
-                    KPrimaryButton(
-                        label = "Ulangi",
-                        icon = Icons.Rounded.Refresh,
-                        modifier = Modifier.weight(1f),
-                        enabled = !isSaving,
-                        onClick = { outputBitmap = null; inputBitmap = null }
+        // --- KOTAK UPLOAD DASHED ---
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardSolidBg.copy(alpha = 0.5f))
+                .drawBehind {
+                    drawRoundRect(
+                        color = AccentCyan.copy(alpha = 0.4f), // Warna dashed cyan transparan
+                        style = Stroke(
+                            width = 4f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-            } else {
-                KPrimaryButton(
-                    label = "Tingkatkan Resolusi",
-                    icon = Icons.Rounded.AutoAwesome,
-                    enabled = inputBitmap != null,
-                    onClick = ::processImage
-                )
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-    }
-}
-
-@Composable
-fun BeforeAfterSlider(before: Bitmap, after: Bitmap, modifier: Modifier = Modifier) {
-    var sliderPos by remember { mutableStateOf(0.5f) }
-    val beforeImg = remember(before) { before.asImageBitmap() }
-    val afterImg  = remember(after)  { after.asImageBitmap() }
-
-    BoxWithConstraints(modifier = modifier.background(KColor.Surface)) {
-        Canvas(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-            detectHorizontalDragGestures { change, _ ->
-                sliderPos = (change.position.x / size.width).coerceIn(0.02f, 0.98f)
-            }
-        }) {
-            val w = size.width; val h = size.height
-            val afterScale = minOf(w / afterImg.width, h / afterImg.height)
-            val beforeScale = minOf(w / beforeImg.width, h / beforeImg.height)
-
-            // 🔥 FIX: Tambahin pivot = Offset.Zero biar gambarnya gak terbang 🔥
-            withTransform({ 
-                translate((w - afterImg.width * afterScale) / 2f, (h - afterImg.height * afterScale) / 2f)
-                scale(afterScale, afterScale, pivot = Offset.Zero) 
-            }) { 
-                drawImage(afterImg) 
-            }
-            
-            clipRect(right = w * sliderPos) {
-                withTransform({ 
-                    translate((w - beforeImg.width * beforeScale) / 2f, (h - beforeImg.height * beforeScale) / 2f)
-                    scale(beforeScale, beforeScale, pivot = Offset.Zero) 
-                }) { 
-                    drawImage(beforeImg) 
+                .clickable { /* Aksi buka galeri / file manager */ },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AccentCyan.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Image, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Upload Foto", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("JPG, PNG, WEBP", color = TextDesc, fontSize = 10.sp)
             }
-            
-            drawLine(Color.White, Offset(w * sliderPos, 0f), Offset(w * sliderPos, h), strokeWidth = 5f)
-            drawCircle(KColor.Accent, radius = 20f, center = Offset(w * sliderPos, h / 2))
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- TOMBOL TINGKATKAN RESOLUSI ---
+        Button(
+            onClick = { /* Eksekusi AI RealSR */ },
+            modifier = Modifier.height(48.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = ButtonDarkBg),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = TextDesc, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Tingkatkan Resolusi", color = TextDesc, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(80.dp))
     }
 }
