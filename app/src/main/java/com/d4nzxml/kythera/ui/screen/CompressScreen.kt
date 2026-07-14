@@ -1,4 +1,6 @@
 package com.d4nzxml.kythera.ui.screen
+
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,11 +22,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// --- Palette Warna ---
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
 private val InputBg = Color(0xFF1D1A31)
@@ -33,18 +35,16 @@ private val TextDesc = Color(0xFFAAA8C2)
 private val AccentGreen = Color(0xFF1DD1A1)
 private val AccentOrange = Color(0xFFF39C12)
 
-
 @Composable
-fun CompressScreen() {// Buat nyimpen data file (URI) yang udah dipilih
-var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
-
-// Ini mesin buat ngebuka Galeri / File Manager
-val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
-) { uri ->
-    // Pas user milih file, URI-nya disimpen ke sini
-    selectedFileUri = uri
-}
+fun CompressScreen() {
+    val context = LocalContext.current
+    var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    
+    val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedFileUri = uri
+    }
 
     var selectedTarget by remember { mutableStateOf("60%") }
     var isAudioCompression by remember { mutableStateOf(true) }
@@ -58,14 +58,11 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        // Teks Deskripsi Atas
         Text("Compress Video", color = TextTitle, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "Kurangi ukuran file video dengan algoritma kompresi cerdas.",
-            color = TextDesc,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(bottom = 24.dp)
+            color = TextDesc, fontSize = 12.sp, modifier = Modifier.padding(bottom = 24.dp)
         )
 
         // --- KOTAK UPLOAD DASHED ---
@@ -77,83 +74,49 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
                 .background(CardSolidBg.copy(alpha = 0.5f))
                 .drawBehind {
                     drawRoundRect(
-                        color = Color(0xFF2B4752), // Warna dashed ijo gelap
-                        style = Stroke(
-                            width = 4f,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)
-                        ),
+                        color = Color(0xFF2B4752), 
+                        style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-                .clickable { 
-    filePickerLauncher.launch("video/*") 
-},
+                .clickable { filePickerLauncher.launch("video/*") },
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(AccentGreen.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, tint = AccentGreen)
+                if (selectedFileUri != null) {
+                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Video Siap Diccompress!", color = AccentGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Tap untuk mengganti video", color = TextDesc, fontSize = 10.sp)
+                } else {
+                    Box(
+                        modifier = Modifier.size(42.dp).clip(CircleShape).background(AccentGreen.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, tint = AccentGreen)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Drop video untuk compress", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Maksimal file 2GB per proses", color = TextDesc, fontSize = 10.sp)
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Drop video untuk compress", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Maksimal file 2GB per proses", color = TextDesc, fontSize = 10.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-
-        // --- TARGET KOMPRESI CARD ---
         Text("Target Kompresi", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            CompressionTargetCard(
-                percentage = "30%", title = "Light", desc = "Kualitas hampir sama",
-                accentColor = AccentGreen, isSelected = selectedTarget == "30%",
-                modifier = Modifier.weight(1f), onClick = { selectedTarget = "30%" }
-            )
-            CompressionTargetCard(
-                percentage = "60%", title = "Balanced", desc = "Recommended",
-                accentColor = AccentGreen, isSelected = selectedTarget == "60%",
-                modifier = Modifier.weight(1f), onClick = { selectedTarget = "60%" }
-            )
-            CompressionTargetCard(
-                percentage = "85%", title = "Aggressive", desc = "Ukuran minimal",
-                accentColor = AccentOrange, isSelected = selectedTarget == "85%",
-                modifier = Modifier.weight(1f), onClick = { selectedTarget = "85%" }
-            )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CompressionTargetCard("30%", "Light", "Kualitas hampir sama", AccentGreen, selectedTarget == "30%", Modifier.weight(1f)) { selectedTarget = "30%" }
+            CompressionTargetCard("60%", "Balanced", "Recommended", AccentGreen, selectedTarget == "60%", Modifier.weight(1f)) { selectedTarget = "60%" }
+            CompressionTargetCard("85%", "Aggressive", "Ukuran minimal", AccentOrange, selectedTarget == "85%", Modifier.weight(1f)) { selectedTarget = "85%" }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-
-        // --- SWITCH TOGGLES ---
-        SwitchSettingRow(
-            title = "Audio Compression",
-            desc = "Kompres juga track audio",
-            checked = isAudioCompression,
-            onCheckedChange = { isAudioCompression = it }
-        )
-        SwitchSettingRow(
-            title = "Remove Metadata",
-            desc = "Hapus data EXIF dan metadata",
-            checked = isRemoveMetadata,
-            onCheckedChange = { isRemoveMetadata = it }
-        )
-        SwitchSettingRow(
-            title = "Two-Pass Encoding",
-            desc = "Kualitas lebih baik, proses lebih lama",
-            checked = isTwoPass,
-            onCheckedChange = { isTwoPass = it }
-        )
+        SwitchSettingRow("Audio Compression", "Kompres juga track audio", isAudioCompression) { isAudioCompression = it }
+        SwitchSettingRow("Remove Metadata", "Hapus data EXIF dan metadata", isRemoveMetadata) { isRemoveMetadata = it }
+        SwitchSettingRow("Two-Pass Encoding", "Kualitas lebih baik, proses lebih lama", isTwoPass) { isTwoPass = it }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -166,38 +129,17 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(CardSolidBg)
-                .padding(20.dp)
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardSolidBg).padding(20.dp)
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Estimasi Output", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text("Pengurangan $selectedTarget", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Custom Progress Bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(CircleShape)
-                    .background(InputBg)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(reductionFraction)
-                        .fillMaxHeight()
-                        .clip(CircleShape)
-                        .background(AccentGreen)
-                )
+            Box(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(InputBg)) {
+                Box(modifier = Modifier.fillMaxWidth(reductionFraction).fillMaxHeight().clip(CircleShape).background(AccentGreen))
             }
-
             Spacer(modifier = Modifier.height(8.dp))
-
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("0 MB", color = TextDesc, fontSize = 10.sp)
                 Text("$selectedTarget size reduction", color = AccentGreen.copy(alpha = 0.7f), fontSize = 10.sp)
@@ -209,7 +151,13 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
 
         // --- TOMBOL COMPRESS ---
         Button(
-            onClick = { /* Eksekusi FFmpeg */ },
+            onClick = { 
+                if (selectedFileUri != null) {
+                    Toast.makeText(context, "Memulai Proses Kompresi...", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Pilih video terlebih dahulu!", Toast.LENGTH_SHORT).show()
+                }
+            },
             modifier = Modifier.height(48.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
             contentPadding = PaddingValues(),
@@ -217,7 +165,12 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
         ) {
             Box(
                 modifier = Modifier
-                    .background(Brush.horizontalGradient(listOf(Color(0xFF00CEC9), AccentGreen)))
+                    .background(
+                        Brush.horizontalGradient(
+                            if (selectedFileUri != null) listOf(Color(0xFF00CEC9), AccentGreen) 
+                            else listOf(Color(0xFF3B414B), Color(0xFF3B414B))
+                        )
+                    )
                     .padding(horizontal = 24.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -228,13 +181,11 @@ val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityRe
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(80.dp))
     }
 }
 
-// --- Komponen Pelengkap UI ---
-
+// --- Komponen Pelengkap ---
 @Composable
 fun CompressionTargetCard(
     percentage: String, title: String, desc: String, 
@@ -246,27 +197,15 @@ fun CompressionTargetCard(
             .height(100.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(if (isSelected) accentColor.copy(alpha = 0.1f) else CardSolidBg)
-            .border(
-                width = 1.dp,
-                color = if (isSelected) accentColor else Color.Transparent,
-                shape = RoundedCornerShape(12.dp)
-            )
+            .border(1.dp, if (isSelected) accentColor else Color.Transparent, RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .padding(8.dp)
     ) {
         if (isSelected) {
-            Icon(
-                Icons.Rounded.CheckCircle, 
-                contentDescription = null, 
-                tint = accentColor, 
-                modifier = Modifier.align(Alignment.TopEnd).size(14.dp)
-            )
+            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = accentColor, modifier = Modifier.align(Alignment.TopEnd).size(14.dp))
         }
-
         Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
         ) {
             Text(percentage, color = accentColor, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(modifier = Modifier.height(4.dp))
@@ -280,27 +219,19 @@ fun CompressionTargetCard(
 @Composable
 fun SwitchSettingRow(title: String, desc: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(2.dp))
             Text(desc, color = TextDesc, fontSize = 11.sp)
         }
-
         Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
+            checked = checked, onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF3498DB), // Warna biru pas nyala
-                uncheckedThumbColor = TextDesc,
-                uncheckedTrackColor = InputBg,
-                uncheckedBorderColor = Color.Transparent
+                checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF3498DB),
+                uncheckedThumbColor = TextDesc, uncheckedTrackColor = InputBg, uncheckedBorderColor = Color.Transparent
             )
         )
     }
