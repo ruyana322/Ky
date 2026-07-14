@@ -35,7 +35,17 @@ private val AccentOrange = Color(0xFFF39C12)
 
 
 @Composable
-fun CompressScreen() {
+fun CompressScreen() {// Buat nyimpen data file (URI) yang udah dipilih
+var selectedFileUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+// Ini mesin buat ngebuka Galeri / File Manager
+val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+) { uri ->
+    // Pas user milih file, URI-nya disimpen ke sini
+    selectedFileUri = uri
+}
+
     var selectedTarget by remember { mutableStateOf("60%") }
     var isAudioCompression by remember { mutableStateOf(true) }
     var isRemoveMetadata by remember { mutableStateOf(false) }
@@ -75,7 +85,9 @@ fun CompressScreen() {
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx())
                     )
                 }
-                .clickable { /* Aksi buka file manager */ },
+                .clickable { 
+    filePickerLauncher.launch("video/*") 
+},
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -152,7 +164,7 @@ fun CompressScreen() {
             "85%" -> 0.85f
             else -> 0.5f
         }
-        
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -164,9 +176,9 @@ fun CompressScreen() {
                 Text("Estimasi Output", color = TextTitle, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text("Pengurangan $selectedTarget", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // Custom Progress Bar
             Box(
                 modifier = Modifier
@@ -183,9 +195,9 @@ fun CompressScreen() {
                         .background(AccentGreen)
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("0 MB", color = TextDesc, fontSize = 10.sp)
                 Text("$selectedTarget size reduction", color = AccentGreen.copy(alpha = 0.7f), fontSize = 10.sp)
@@ -250,7 +262,7 @@ fun CompressionTargetCard(
                 modifier = Modifier.align(Alignment.TopEnd).size(14.dp)
             )
         }
-        
+
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -279,7 +291,7 @@ fun SwitchSettingRow(title: String, desc: String, checked: Boolean, onCheckedCha
             Spacer(modifier = Modifier.height(2.dp))
             Text(desc, color = TextDesc, fontSize = 11.sp)
         }
-        
+
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
