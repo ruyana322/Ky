@@ -423,17 +423,12 @@ private suspend fun runSmartPipeline(
             inputFile.outputStream().use { ins.copyTo(it) }
         } ?: return@withContext null
 
-        // 🔥 2. Smart Logic: Tentukan Mode
-                // 🔥 2. Smart Logic: Tentukan Mode (Disesuaikan persis dengan Web)
         val maxRes = max(videoWidth, videoHeight)
         
-        // Cukup cek apakah dia MP4, persis kayak di main_2.js
         val isMp4 = mimeType.contains("mp4", ignoreCase = true) || 
                     sourceUri.toString().endsWith(".mp4", ignoreCase = true)
         
-        // Jika lebih besar dari 1080p atau bukan MP4, baru Re-encode!
         val needsReencode = maxRes > 1920 || !isMp4
-
 
         FFmpegKitConfig.enableStatisticsCallback { stats ->
             if (durationMs > 0) {
@@ -446,21 +441,19 @@ private suspend fun runSmartPipeline(
             }
         }
 
-        // 🔥 MESIN KUALITAS DEWA (CRF 20) TAPI WAKTU LEBIH WARAS
         val cmd = if (needsReencode) {
             "-y -i \"${inputFile.absolutePath}\" " +
-            "-threads 0 " + // 🔥 Gaspol semua core CPU
-            "-c:v libx264 -preset veryfast -crf 20 " + // 🔥 Titik tengah: Kualitas tetep tajam ala CRF 20, tapi speed jauh lebih ngebut dari 'fast'
+            "-threads 0 " + 
+            "-c:v libx264 -preset veryfast -crf 20 " + 
             "-bf 0 -movflags +faststart " +
-            "-c:a copy " + // 🔥 Audio numpang lewat aja (wajib!)
+            "-c:a copy " + 
             "-metadata copyright=\"By Kythera\" " +
             "-metadata artist=\"D4nzxml\" " +
             "\"${encFile.absolutePath}\""
         } else {
-
             "-y -i \"${inputFile.absolutePath}\" " +
-            "-threads 0 " + // Aktifkan semua core CPU
-            "-c copy " + // Remux super kilat
+            "-threads 0 " + 
+            "-c copy " + 
             "-movflags +faststart " +
             "\"${encFile.absolutePath}\""
         }
@@ -524,17 +517,35 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// JS SNIPPETS (pisah biar onPageFinished ringan)
+// JS SNIPPETS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// 🔥 Critical JS: hook fetch/XHR + viewport fix — inject segera setelah page finish
+// 🔥 Critical JS: Anti-Zoom, Anti-Loncat, Desktop Fix, Tapi Bebas Digeser
 private val JS_CRITICAL = """
     (function() {
+        // 🔥 Buang initial-scale biar ga loncat pas diklik
+        var vpContent = 'width=1280, user-scalable=no';
         var meta = document.querySelector('meta[name="viewport"]');
-        if (meta) { meta.setAttribute('content','width=1280'); }
-        else { var m=document.createElement('meta'); m.name='viewport'; m.content='width=1280'; document.head.appendChild(m); }
-        document.body.style.overflow='auto';
-        document.documentElement.style.overflow='auto';
+        
+        if (meta) { 
+            meta.setAttribute('content', vpContent); 
+        } else { 
+            var m=document.createElement('meta'); 
+            m.name='viewport'; 
+            m.content=vpContent; 
+            document.head.appendChild(m); 
+        }
+        
+        // 🔥 INJEKSI CSS SAKTI: 
+        // 1. font-size: 16px maksa Android mikir teks udah gede, jadi ga bakal auto-zoom
+        // 2. touch-action: pan-y ngunci layar cuma bisa digeser atas-bawah, anti cubit/zoom
+        var style = document.createElement('style');
+        style.innerHTML = 'input, textarea, [contenteditable] { font-size: 16px !important; } body, html { touch-action: pan-y !important; }';
+        document.head.appendChild(style);
+        
+        // Paksa scroll nyala
+        document.body.style.overflowY='scroll';
+        document.documentElement.style.overflowY='scroll';
     })();
 
     (function() {
@@ -618,15 +629,21 @@ fun TikTokScreen() {
     var progressVal         by remember { mutableStateOf(0) }
     var isProcessing        by remember { mutableStateOf(false) }
 
-    // 🔥 WebView dibikin lebih awal (preload) — bukan di dalam factory AndroidView
+    // 🔥 WebView dibikin lebih awal (preload)
     val webView = remember {
         WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            // 🔥 Hardware acceleration eksplisit
+            
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+            
+            // 🔥 Setup scroll mandiri buat nahan layar biar gak patah-patah
+            isVerticalScrollBarEnabled = true
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = android.view.View.OVER_SCROLL_NEVER
+
             settings.apply {
                 javaScriptEnabled          = true
                 domStorageEnabled          = true
@@ -636,19 +653,19 @@ fun TikTokScreen() {
                 userAgentString            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 useWideViewPort            = true
                 loadWithOverviewMode       = true
-                setSupportZoom(true)
-                builtInZoomControls        = true
+                
+                // 🔥 KUNCI ZOOM: Dibikin false semua biar aman
+                setSupportZoom(false)
+                builtInZoomControls        = false
                 displayZoomControls        = false
-                // 🔥 Cache: pakai cache disk bawaan browser
+                
                 cacheMode                  = WebSettings.LOAD_DEFAULT
-                // 🔥 Prioritas render tinggi
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
                 mediaPlaybackRequiresUserGesture = false
             }
         }
     }
 
-    // 🔥 Preload URL segera saat composable masuk — WebView udah siap sebelum keliatan
     LaunchedEffect(Unit) {
         webView.loadUrl("https://www.tiktok.com/upload")
     }
@@ -659,7 +676,6 @@ fun TikTokScreen() {
             statusMsg    = "Menyiapkan Kythera Engine..."
             progressVal  = 0
 
-            // 🛑 Pause WebView selama proses encoding
             webView.onPause()
             webView.pauseTimers()
 
@@ -673,7 +689,6 @@ fun TikTokScreen() {
                 isProcessing = false
                 dismissNotif(context)
 
-                // ▶️ Resume WebView setelah selesai
                 webView.onResume()
                 webView.resumeTimers()
 
@@ -692,7 +707,6 @@ fun TikTokScreen() {
         }
     }
 
-    // 🔥 Setup client sekali — pisah dari factory biar gak bikin WebView baru tiap recompose
     DisposableEffect(webView) {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -709,9 +723,7 @@ fun TikTokScreen() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                // 🔥 Inject critical hook SEGERA
                 view?.evaluateJavascript(JS_CRITICAL, null)
-                // 🎨 Toast delay 600ms — kosmetik, gak rush
                 view?.postDelayed({ view.evaluateJavascript(JS_TOAST, null) }, 600)
             }
         }
@@ -736,13 +748,12 @@ fun TikTokScreen() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 🔥 AndroidView pakai instance preload — factory cuma attach, bukan init ulang
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory  = { webView }
         )
 
-        // ── Processing Overlay (Hologram Full Block) ──
+        // ── Processing Overlay ──
         if (isProcessing) {
             Box(
                 modifier = Modifier
