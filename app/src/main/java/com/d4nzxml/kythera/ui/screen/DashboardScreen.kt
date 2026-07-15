@@ -1,4 +1,5 @@
 package com.d4nzxml.kythera.ui.screen
+import androidx.compose.ui.text.style.TextAlign
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
