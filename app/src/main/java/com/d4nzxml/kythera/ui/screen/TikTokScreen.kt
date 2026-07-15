@@ -535,16 +535,11 @@ private val JS_CRITICAL = """
             document.head.appendChild(m); 
         }
         
-        // 🔥 CSS: font-size 16px biar Android ga auto-zoom pas klik inputan
-        // + fix overflow supaya cover modal render penuh & bisa di-scroll/drag
+        // 🔥 INJEKSI CSS DI-NERF: 
+        // Cuma ngatur font-size jadi 16px biar Android ga auto-zoom pas klik inputan.
+        // touch-action dihapus biar slider 'Edit Sampul' TikTok gak nge-hang.
         var style = document.createElement('style');
-        style.innerHTML = [
-            'input, textarea, [contenteditable] { font-size: 16px !important; }',
-            // Fix cover editor: pastikan container gak di-clip
-            'body, html { overflow-x: hidden !important; }',
-            // Cover modal biasanya pakai position:fixed — pastikan width 100vw bukan 1280px
-            '[class*="cover"],[class*="Cover"],[class*="sampul"],[class*="Sampul"] { max-width: 100% !important; width: 100% !important; }'
-        ].join(' ');
+        style.innerHTML = 'input, textarea, [contenteditable] { font-size: 16px !important; }';
         document.head.appendChild(style);
     })();
 
@@ -647,17 +642,11 @@ fun TikTokScreen() {
             isHorizontalScrollBarEnabled = false
             overScrollMode = android.view.View.OVER_SCROLL_NEVER
 
-            // 🔒 Lock initial scale supaya WebView gak auto-zoom saat modal muncul
-            setInitialScale(1)
-
             settings.apply {
                 javaScriptEnabled          = true
                 domStorageEnabled          = true
                 databaseEnabled            = true
-                allowFileAccess                    = true
-                allowContentAccess                 = true
-                @Suppress("SetJavaScriptEnabled")
-                allowUniversalAccessFromFileURLs   = true
+                allowFileAccess            = true
                 mixedContentMode           = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 userAgentString            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 useWideViewPort            = true
@@ -671,6 +660,7 @@ fun TikTokScreen() {
                 cacheMode                  = WebSettings.LOAD_DEFAULT
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
                 mediaPlaybackRequiresUserGesture = false
+                setSupportMultipleWindows(true)
             }
         }
     }
@@ -749,6 +739,30 @@ fun TikTokScreen() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
+
+            // 🔑 Grant semua permission yang diminta (termasuk media playback di cover editor)
+            override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+                request?.grant(request.resources)
+            }
+
+            // 🪟 Izinkan TikTok buka window baru (dipakai cover editor & musik picker)
+            override fun onCreateWindow(
+                view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?
+            ): Boolean {
+                val newWebView = WebView(view!!.context).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mediaPlaybackRequiresUserGesture = false
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
+                newWebView.webViewClient = WebViewClient()
+                newWebView.webChromeClient = this
+                val transport = resultMsg?.obj as? WebView.WebViewTransport
+                transport?.webView = newWebView
+                resultMsg?.sendToTarget()
+                return true
+            }
+
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
