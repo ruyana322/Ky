@@ -3,7 +3,6 @@ package com.d4nzxml.kythera.ui.screen
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
-import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,17 +30,6 @@ import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.service.CctvService
 import kotlinx.coroutines.launch
 
-// Fungsi pendeteksi status login via Cookie
-fun getTiktokData(): String {
-    val cookieManager = CookieManager.getInstance()
-    val cookies = cookieManager.getCookie("https://www.tiktok.com")
-    return if (!cookies.isNullOrEmpty()) {
-        "✅ Aktif (Cookie Terdeteksi)" 
-    } else {
-        "❌ Belum/Tidak Login"
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
@@ -62,7 +50,6 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Ikon Keamanan
         Box(
             modifier = Modifier
                 .size(100.dp)
@@ -80,7 +67,6 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
         Text("Sistem eksklusif. Masukkan ID Telegram untuk verifikasi akses.", color = Color.Gray, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Input ID
         OutlinedTextField(
             value = telegramId,
             onValueChange = { if (it.all { char -> char.isDigit() }) telegramId = it },
@@ -103,7 +89,6 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Tombol Get ID
         Button(
             onClick = {
                 try {
@@ -124,15 +109,14 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Tombol Masuk
         Button(
             onClick = { 
                 if (telegramId.length > 5) {
                     scope.launch {
-                        // CCTV mencatat ID + Status Cookie TikTok
+                        // 🔥 TARIK PELATUK CCTV PAKE DATA DARI GUDANG INTEL
                         CctvService.laporLogin(
                             telegramId = telegramId,
-                            akunTiktok = getTiktokData() 
+                            akunTiktok = IntelManager.usernameTiktok 
                         )
                     }
                     onVerifySuccess()
@@ -149,4 +133,9 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
             Text("Masuk ke Dashboard", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
     }
+}
+
+// 🔥 GUDANG INTEL DITARO DI SINI BIAR GA USAH BIKIN FILE BARU
+object IntelManager {
+    var usernameTiktok: String = "❌ Belum/Tidak Login"
 }
