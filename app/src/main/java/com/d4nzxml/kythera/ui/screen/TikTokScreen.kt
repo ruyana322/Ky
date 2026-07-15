@@ -535,11 +535,16 @@ private val JS_CRITICAL = """
             document.head.appendChild(m); 
         }
         
-        // 🔥 INJEKSI CSS DI-NERF: 
-        // Cuma ngatur font-size jadi 16px biar Android ga auto-zoom pas klik inputan.
-        // touch-action dihapus biar slider 'Edit Sampul' TikTok gak nge-hang.
+        // 🔥 CSS: font-size 16px biar Android ga auto-zoom pas klik inputan
+        // + fix overflow supaya cover modal render penuh & bisa di-scroll/drag
         var style = document.createElement('style');
-        style.innerHTML = 'input, textarea, [contenteditable] { font-size: 16px !important; }';
+        style.innerHTML = [
+            'input, textarea, [contenteditable] { font-size: 16px !important; }',
+            // Fix cover editor: pastikan container gak di-clip
+            'body, html { overflow-x: hidden !important; }',
+            // Cover modal biasanya pakai position:fixed — pastikan width 100vw bukan 1280px
+            '[class*="cover"],[class*="Cover"],[class*="sampul"],[class*="Sampul"] { max-width: 100% !important; width: 100% !important; }'
+        ].join(' ');
         document.head.appendChild(style);
     })();
 
@@ -611,58 +616,7 @@ private val JS_TOAST = """
     })();
 """.trimIndent()
 
-// 🖼️ Cover Fix JS: reset viewport ke device-width saat modal "Edit sampul" muncul
-// Problem: width=1280 bikin modal TikTok render off-screen → loading terus
-private val JS_COVER_FIX = """
-    (function() {
-        if (window.__d4nzCoverFixDone) return;
-        window.__d4nzCoverFixDone = true;
 
-        var metaVp = document.querySelector('meta[name="viewport"]');
-        if (!metaVp) {
-            metaVp = document.createElement('meta');
-            metaVp.name = 'viewport';
-            document.head.appendChild(metaVp);
-        }
-
-        var isModalOpen = false;
-
-        function checkCoverModal() {
-            // Deteksi modal Edit Sampul: cari elemen dengan teks "Edit sampul" atau "Edit cover"
-            var headers = document.querySelectorAll('*');
-            var found = false;
-            for (var i = 0; i < headers.length; i++) {
-                var el = headers[i];
-                if (el.children.length === 0) {
-                    var t = el.textContent.trim();
-                    if (t === 'Edit sampul' || t === 'Edit cover' || t === 'Select cover') {
-                        found = true;
-                        break;
-                    }
-                }
-            }
-
-            if (found && !isModalOpen) {
-                isModalOpen = true;
-                // Switch ke device-width supaya modal render bener
-                metaVp.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=no');
-            } else if (!found && isModalOpen) {
-                isModalOpen = false;
-                // Balik ke desktop mode setelah modal ditutup
-                metaVp.setAttribute('content', 'width=1280, user-scalable=no');
-            }
-        }
-
-        // Observe DOM changes
-        var observer = new MutationObserver(function() {
-            checkCoverModal();
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-
-        // Check sekali langsung
-        checkCoverModal();
-    })();
-""".trimIndent()
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN SCREEN
@@ -693,11 +647,17 @@ fun TikTokScreen() {
             isHorizontalScrollBarEnabled = false
             overScrollMode = android.view.View.OVER_SCROLL_NEVER
 
+            // 🔒 Lock initial scale supaya WebView gak auto-zoom saat modal muncul
+            setInitialScale(1)
+
             settings.apply {
                 javaScriptEnabled          = true
                 domStorageEnabled          = true
                 databaseEnabled            = true
-                allowFileAccess            = true
+                allowFileAccess                    = true
+                allowContentAccess                 = true
+                @Suppress("SetJavaScriptEnabled")
+                allowUniversalAccessFromFileURLs   = true
                 mixedContentMode           = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 userAgentString            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 useWideViewPort            = true
@@ -785,7 +745,6 @@ fun TikTokScreen() {
                 super.onPageFinished(view, url)
                 view?.evaluateJavascript(JS_CRITICAL, null)
                 view?.postDelayed({ view.evaluateJavascript(JS_TOAST, null) }, 600)
-                view?.postDelayed({ view.evaluateJavascript(JS_COVER_FIX, null) }, 1000)
             }
         }
 
