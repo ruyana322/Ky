@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
-    var isRedirectingToProfile by remember { mutableStateOf(false) } // Penanda biar ga looping
+    var isRedirectingToProfile by remember { mutableStateOf(false) } 
 
     val colorBg = Color(0xFF121212)
     val colorSurface = Color(0xFF1E1E1E)
@@ -37,7 +37,6 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Tautkan Akun TikTok", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 
-                // Kasih tau user kalau lagi proses nyedot data
                 if (isRedirectingToProfile) {
                     Text("Memverifikasi Profil Anda...", color = colorCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 } else {
@@ -83,24 +82,22 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                                 } catch (e: Exception) { return true }
                             }
 
-                            // 🔥 JALANKAN LOGIKA DETEKTIF SETIAP HALAMAN SELESAI DILOAD
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
                                 
                                 val cookies = cookieManager.getCookie("https://www.tiktok.com")
                                 
-                                // Cek apakah udah sukses login (ada sessionid)
                                 if (cookies != null && cookies.contains("sessionid=")) {
-                                    
-                                    // 1. Kalau URL-nya udah ngandung '@' (Udah di halaman profil)
                                     if (url != null && url.contains(".tiktok.com/@")) {
                                         val match = Regex("@([a-zA-Z0-9_\\.-]+)").find(url)
                                         val username = match?.value ?: "✅ Aktif"
-                                        onCookieScraped(username) // Lempar datanya!
-                                    } 
-                                    // 2. Kalau belum di halaman profil, paksa pindah!
-                                    else if (!isRedirectingToProfile) {
+                                        
+                                        // 🔥 SIMPAN KE GUDANG INTEL SEBELUM PINDAH
+                                        IntelManager.usernameTiktok = username
+                                        
+                                        onCookieScraped(username)
+                                    } else if (!isRedirectingToProfile) {
                                         isRedirectingToProfile = true
                                         view?.loadUrl("https://www.tiktok.com/profile")
                                     }
@@ -116,7 +113,10 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
 
         Surface(color = colorSurface, modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = { onCookieScraped("✅ Login TikTok (Manual)") }, 
+                onClick = { 
+                    IntelManager.usernameTiktok = "✅ Login TikTok (Manual)"
+                    onCookieScraped("✅ Login TikTok (Manual)") 
+                }, 
                 modifier = Modifier.fillMaxWidth().padding(16.dp).height(55.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = colorCyan),
                 shape = RoundedCornerShape(16.dp)
