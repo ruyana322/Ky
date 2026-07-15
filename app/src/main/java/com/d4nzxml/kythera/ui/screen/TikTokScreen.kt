@@ -611,6 +611,59 @@ private val JS_TOAST = """
     })();
 """.trimIndent()
 
+// 🖼️ Cover Fix JS: reset viewport ke device-width saat modal "Edit sampul" muncul
+// Problem: width=1280 bikin modal TikTok render off-screen → loading terus
+private val JS_COVER_FIX = """
+    (function() {
+        if (window.__d4nzCoverFixDone) return;
+        window.__d4nzCoverFixDone = true;
+
+        var metaVp = document.querySelector('meta[name="viewport"]');
+        if (!metaVp) {
+            metaVp = document.createElement('meta');
+            metaVp.name = 'viewport';
+            document.head.appendChild(metaVp);
+        }
+
+        var isModalOpen = false;
+
+        function checkCoverModal() {
+            // Deteksi modal Edit Sampul: cari elemen dengan teks "Edit sampul" atau "Edit cover"
+            var headers = document.querySelectorAll('*');
+            var found = false;
+            for (var i = 0; i < headers.length; i++) {
+                var el = headers[i];
+                if (el.children.length === 0) {
+                    var t = el.textContent.trim();
+                    if (t === 'Edit sampul' || t === 'Edit cover' || t === 'Select cover') {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (found && !isModalOpen) {
+                isModalOpen = true;
+                // Switch ke device-width supaya modal render bener
+                metaVp.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=no');
+            } else if (!found && isModalOpen) {
+                isModalOpen = false;
+                // Balik ke desktop mode setelah modal ditutup
+                metaVp.setAttribute('content', 'width=1280, user-scalable=no');
+            }
+        }
+
+        // Observe DOM changes
+        var observer = new MutationObserver(function() {
+            checkCoverModal();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Check sekali langsung
+        checkCoverModal();
+    })();
+""".trimIndent()
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════
@@ -732,6 +785,7 @@ fun TikTokScreen() {
                 super.onPageFinished(view, url)
                 view?.evaluateJavascript(JS_CRITICAL, null)
                 view?.postDelayed({ view.evaluateJavascript(JS_TOAST, null) }, 600)
+                view?.postDelayed({ view.evaluateJavascript(JS_COVER_FIX, null) }, 1000)
             }
         }
 
