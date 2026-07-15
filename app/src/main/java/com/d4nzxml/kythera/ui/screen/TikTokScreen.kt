@@ -520,10 +520,9 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 // JS SNIPPETS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// 🔥 Critical JS: Anti-Zoom, Anti-Loncat, Desktop Fix, Tapi Bebas Digeser
+// 🔥 Critical JS: Anti-Zoom (Lebih Aman), Desktop Fix
 private val JS_CRITICAL = """
     (function() {
-        // 🔥 Buang initial-scale biar ga loncat pas diklik
         var vpContent = 'width=1280, user-scalable=no';
         var meta = document.querySelector('meta[name="viewport"]');
         
@@ -536,16 +535,12 @@ private val JS_CRITICAL = """
             document.head.appendChild(m); 
         }
         
-        // 🔥 INJEKSI CSS SAKTI: 
-        // 1. font-size: 16px maksa Android mikir teks udah gede, jadi ga bakal auto-zoom
-        // 2. touch-action: pan-y ngunci layar cuma bisa digeser atas-bawah, anti cubit/zoom
+        // 🔥 INJEKSI CSS DI-NERF: 
+        // Cuma ngatur font-size jadi 16px biar Android ga auto-zoom pas klik inputan.
+        // touch-action dihapus biar slider 'Edit Sampul' TikTok gak nge-hang.
         var style = document.createElement('style');
-        style.innerHTML = 'input, textarea, [contenteditable] { font-size: 16px !important; } body, html { touch-action: pan-y !important; }';
+        style.innerHTML = 'input, textarea, [contenteditable] { font-size: 16px !important; }';
         document.head.appendChild(style);
-        
-        // Paksa scroll nyala
-        document.body.style.overflowY='scroll';
-        document.documentElement.style.overflowY='scroll';
     })();
 
     (function() {
@@ -596,6 +591,7 @@ private val JS_CRITICAL = """
         };
     })();
 """.trimIndent()
+
 
 // 🎨 Toast JS: kosmetik, delay 600ms biar gak block render awal
 private val JS_TOAST = """
