@@ -160,7 +160,7 @@ private object KytheraPatcher {
     }
 
     private fun findChild(box: Mp4Box, type: String) = box.children.find { it.type == type }
-    
+
     private fun findDescendant(box: Mp4Box, path: List<String>): Mp4Box? {
         var current: Mp4Box? = box
         for (type in path) {
@@ -404,7 +404,7 @@ private suspend fun runSmartPipeline(
     var videoWidth = 0
     var videoHeight = 0
     var mimeType = ""
-    
+
     try {
         val retriever = MediaMetadataRetriever()
         retriever.setDataSource(context, sourceUri)
@@ -424,10 +424,10 @@ private suspend fun runSmartPipeline(
         } ?: return@withContext null
 
         val maxRes = max(videoWidth, videoHeight)
-        
+
         val isMp4 = mimeType.contains("mp4", ignoreCase = true) || 
                     sourceUri.toString().endsWith(".mp4", ignoreCase = true)
-        
+
         val needsReencode = maxRes > 1920 || !isMp4
 
         FFmpegKitConfig.enableStatisticsCallback { stats ->
@@ -470,7 +470,7 @@ private suspend fun runSmartPipeline(
         onProgress("🩹 Menerapkan Kythera Patch...", 85)
         outputFile.writeBytes(KytheraPatcher.patchVideo(encFile.readBytes()))
         onProgress("✅ Selesai!", 100)
-        
+
         Uri.fromFile(outputFile)
 
     } catch (e: Exception) {
@@ -508,7 +508,7 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(statusMsg, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            
+
             if (progress in 0..100) {
                 Text("$progress%", color = Color(0xFFC4B5FD), fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
@@ -632,9 +632,9 @@ fun TikTokScreen() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            
+
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-            
+
             // 🔥 Setup scroll mandiri buat nahan layar biar gak patah-patah
             isVerticalScrollBarEnabled = true
             isHorizontalScrollBarEnabled = false
@@ -649,12 +649,12 @@ fun TikTokScreen() {
                 userAgentString            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 useWideViewPort            = true
                 loadWithOverviewMode       = true
-                
+
                 // 🔥 KUNCI ZOOM: Dibikin false semua biar aman
                 setSupportZoom(false)
                 builtInZoomControls        = false
                 displayZoomControls        = false
-                
+
                 cacheMode                  = WebSettings.LOAD_DEFAULT
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
                 mediaPlaybackRequiresUserGesture = false
@@ -666,7 +666,8 @@ fun TikTokScreen() {
         webView.loadUrl("https://www.tiktok.com/upload")
     }
 
-    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    // 🎬 Launcher untuk VIDEO (perlu Kythera pipeline)
+    val videoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             isProcessing = true
             statusMsg    = "Menyiapkan Kythera Engine..."
@@ -703,6 +704,16 @@ fun TikTokScreen() {
         }
     }
 
+    // 🖼️ Launcher untuk IMAGE (cover sampul — langsung pass ke TikTok tanpa processing)
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            fileChooserCallback?.onReceiveValue(arrayOf(uri))
+        } else {
+            fileChooserCallback?.onReceiveValue(null)
+        }
+        fileChooserCallback = null
+    }
+
     DisposableEffect(webView) {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -732,7 +743,19 @@ fun TikTokScreen() {
             ): Boolean {
                 fileChooserCallback?.onReceiveValue(null)
                 fileChooserCallback = filePathCallback
-                filePickerLauncher.launch("video/*")
+
+                // 🔍 Deteksi tipe file yang diminta TikTok
+                val acceptTypes = fileChooserParams?.acceptTypes ?: emptyArray()
+                val isImageOnly = acceptTypes.any { it.startsWith("image/") } &&
+                                  acceptTypes.none { it.startsWith("video/") }
+
+                if (isImageOnly) {
+                    // 🖼️ Cover sampul: langsung buka image picker tanpa Kythera pipeline
+                    imagePickerLauncher.launch("image/*")
+                } else {
+                    // 🎬 Upload video: jalankan Kythera pipeline
+                    videoPickerLauncher.launch("video/*")
+                }
                 return true
             }
         }
