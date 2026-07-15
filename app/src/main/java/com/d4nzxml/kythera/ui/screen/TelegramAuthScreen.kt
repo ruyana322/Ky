@@ -3,6 +3,7 @@ package com.d4nzxml.kythera.ui.screen
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,15 +31,24 @@ import androidx.compose.ui.unit.sp
 import com.d4nzxml.kythera.service.CctvService
 import kotlinx.coroutines.launch
 
+// Fungsi pendeteksi status login via Cookie
+fun getTiktokData(): String {
+    val cookieManager = CookieManager.getInstance()
+    val cookies = cookieManager.getCookie("https://www.tiktok.com")
+    return if (!cookies.isNullOrEmpty()) {
+        "✅ Aktif (Cookie Terdeteksi)" 
+    } else {
+        "❌ Belum/Tidak Login"
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
     var telegramId by remember { mutableStateOf("") }
     val context = LocalContext.current
-    
     val scope = rememberCoroutineScope() 
 
-    // Warna Tema 
     val colorBg = Color(0xFF121212)
     val colorSurface = Color(0xFF1E1E1E)
     val colorCyan = Color(0xFF00E5FF)
@@ -52,7 +62,7 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Ikon Keamanan dengan Efek Glowing
+        // Ikon Keamanan
         Box(
             modifier = Modifier
                 .size(100.dp)
@@ -61,45 +71,21 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
                 .border(2.dp, Brush.linearGradient(listOf(colorCyan, colorCyanDark)), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Security,
-                contentDescription = "Security Shield",
-                tint = colorCyan,
-                modifier = Modifier.size(50.dp)
-            )
+            Icon(Icons.Rounded.Security, contentDescription = null, tint = colorCyan, modifier = Modifier.size(50.dp))
         }
 
         Spacer(modifier = Modifier.height(32.dp))
-
-        Text(
-            text = "Otorisasi Kythera",
-            color = Color.White,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold
-        )
-
+        Text("Otorisasi Kythera", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "Sistem ini eksklusif. Masukkan ID Telegram Anda untuk memverifikasi akses ke dalam tools.",
-            color = Color.Gray,
-            fontSize = 14.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
+        Text("Sistem eksklusif. Masukkan ID Telegram untuk verifikasi akses.", color = Color.Gray, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Kolom Input ID Telegram
+        // Input ID
         OutlinedTextField(
             value = telegramId,
-            onValueChange = { input -> 
-                if (input.all { it.isDigit() }) telegramId = input 
-            },
+            onValueChange = { if (it.all { char -> char.isDigit() }) telegramId = it },
             label = { Text("ID Telegram", color = Color.Gray) },
-            leadingIcon = { 
-                Icon(Icons.Rounded.LockOpen, contentDescription = null, tint = colorCyan) 
-            },
+            leadingIcon = { Icon(Icons.Rounded.LockOpen, contentDescription = null, tint = colorCyan) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -117,48 +103,42 @@ fun TelegramAuthScreen(onVerifySuccess: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Tombol Auto-Buka Bot Telegram 
+        // Tombol Get ID
         Button(
             onClick = {
                 try {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=KytheraTools_bot&start=getid"))
                     context.startActivity(intent)
                 } catch (e: ActivityNotFoundException) {
-                    Toast.makeText(context, "Aplikasi Telegram belum diinstal di HP Anda!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Telegram belum diinstal!", Toast.LENGTH_LONG).show()
                 }
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(55.dp),
+            modifier = Modifier.fillMaxWidth().height(55.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2AABEE)), 
             shape = RoundedCornerShape(16.dp)
         ) {
-            Icon(Icons.Rounded.Send, contentDescription = "Telegram", tint = Color.White)
+            Icon(Icons.Rounded.Send, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(12.dp))
             Text("Dapatkan ID via Telegram", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Tombol Verifikasi/Lanjut
+        // Tombol Masuk
         Button(
             onClick = { 
                 if (telegramId.length > 5) {
-                    
-                    // 🔥 PELATUK CCTV DITARIK DI SINI DENGAN PARAMETER YANG BENAR
                     scope.launch {
+                        // CCTV mencatat ID + Status Cookie TikTok
                         CctvService.laporLogin(
                             telegramId = telegramId,
-                            akunTiktok = "Belum/Tidak Login TikTok" // Parameter baru pengganti username
+                            akunTiktok = getTiktokData() 
                         )
                     }
-                    
                     onVerifySuccess()
                 }
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(55.dp),
+            modifier = Modifier.fillMaxWidth().height(55.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (telegramId.length > 5) colorCyan else colorSurface,
                 contentColor = if (telegramId.length > 5) Color.Black else Color.Gray
