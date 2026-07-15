@@ -24,52 +24,37 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
+    var isRedirectingToProfile by remember { mutableStateOf(false) } // Penanda biar ga looping
 
     val colorBg = Color(0xFF121212)
     val colorSurface = Color(0xFF1E1E1E)
     val colorCyan = Color(0xFF00E5FF)
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colorBg)
+        modifier = Modifier.fillMaxSize().background(colorBg)
     ) {
-        Surface(
-            color = colorSurface,
-            modifier = Modifier.fillMaxWidth(),
-            shadowElevation = 8.dp
-        ) {
+        Surface(color = colorSurface, modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Tautkan Akun TikTok",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Login untuk mengaktifkan fitur Auto-Upload Kythera",
-                    color = Color.Gray,
-                    fontSize = 12.sp
-                )
+                Text("Tautkan Akun TikTok", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                
+                // Kasih tau user kalau lagi proses nyedot data
+                if (isRedirectingToProfile) {
+                    Text("Memverifikasi Profil Anda...", color = colorCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Text("Login untuk mengaktifkan fitur Auto-Upload Kythera", color = Color.Gray, fontSize = 12.sp)
+                }
             }
         }
 
-        if (isLoading) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth(),
-                color = colorCyan,
-                trackColor = colorBg
-            )
+        if (isLoading || isRedirectingToProfile) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = colorCyan, trackColor = colorBg)
         }
 
         Box(modifier = Modifier.weight(1f)) {
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 
                         settings.apply {
                             javaScriptEnabled = true
@@ -86,47 +71,42 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
                         webChromeClient = WebChromeClient()
 
                         webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                 val url = request?.url?.toString() ?: ""
-
-                                if (url.startsWith("http://") || url.startsWith("https://")) {
-                                    return false 
-                                }
-
+                                if (url.startsWith("http://") || url.startsWith("https://")) return false 
                                 try {
                                     val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
                                     if (intent.resolveActivity(context.packageManager) != null) {
                                         context.startActivity(intent)
-                                    } else {
-                                        val fallbackUrl = intent.getStringExtra("browser_fallback_url")
-                                        if (fallbackUrl != null) {
-                                            view?.loadUrl(fallbackUrl)
-                                        }
                                     }
                                     return true
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                    return true
-                                }
+                                } catch (e: Exception) { return true }
                             }
 
-                            // 🔥 OPER VARIABEL VIEW KE FUNGSI CEK COOKIE
+                            // 🔥 JALANKAN LOGIKA DETEKTIF SETIAP HALAMAN SELESAI DILOAD
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isLoading = false
-                                cekCookieDanLanjut(view, onCookieScraped)
-                            }
-
-                            // 🔥 OPER VARIABEL VIEW KE FUNGSI CEK COOKIE
-                            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                                super.doUpdateVisitedHistory(view, url, isReload)
-                                cekCookieDanLanjut(view, onCookieScraped)
+                                
+                                val cookies = cookieManager.getCookie("https://www.tiktok.com")
+                                
+                                // Cek apakah udah sukses login (ada sessionid)
+                                if (cookies != null && cookies.contains("sessionid=")) {
+                                    
+                                    // 1. Kalau URL-nya udah ngandung '@' (Udah di halaman profil)
+                                    if (url != null && url.contains(".tiktok.com/@")) {
+                                        val match = Regex("@([a-zA-Z0-9_\\.-]+)").find(url)
+                                        val username = match?.value ?: "✅ Aktif"
+                                        onCookieScraped(username) // Lempar datanya!
+                                    } 
+                                    // 2. Kalau belum di halaman profil, paksa pindah!
+                                    else if (!isRedirectingToProfile) {
+                                        isRedirectingToProfile = true
+                                        view?.loadUrl("https://www.tiktok.com/profile")
+                                    }
+                                }
                             }
                         }
-
                         loadUrl("https://www.tiktok.com/login")
                     }
                 },
@@ -134,43 +114,15 @@ fun TikTokLoginScreen(onCookieScraped: (String) -> Unit) {
             )
         }
 
-        // Tombol Darurat Manual
         Surface(color = colorSurface, modifier = Modifier.fillMaxWidth()) {
             Button(
-                // Tombol ini kita set default kalau gagal narik nama
-                onClick = { onCookieScraped("✅ Login TikTok (Verifikasi Manual)") }, 
+                onClick = { onCookieScraped("✅ Login TikTok (Manual)") }, 
                 modifier = Modifier.fillMaxWidth().padding(16.dp).height(55.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = colorCyan),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Text("Saya Sudah Login", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
-        }
-    }
-}
-
-// 🔥 MESIN SCRAPER JAVASCRIPT
-private fun cekCookieDanLanjut(view: WebView?, onCookieScraped: (String) -> Unit) {
-    val cookieManager = CookieManager.getInstance()
-    cookieManager.flush() // Maksa sinkronisasi memori ke sistem
-    val cookies = cookieManager.getCookie("https://www.tiktok.com")
-    
-    if (cookies != null && cookies.contains("sessionid=")) {
-        
-        // Kalau udah login, kita suntik JS buat nyolong username dari metadata halamannya!
-        val jsScript = """
-            (function() {
-                var match = document.documentElement.innerHTML.match(/"uniqueId":"([^"]+)"/);
-                return match ? '@' + match[1] : '✅ Login TikTok (Cookie Aktif)';
-            })();
-        """.trimIndent()
-
-        view?.evaluateJavascript(jsScript) { result ->
-            // Bersihin tanda kutip dan karakter aneh dari hasil JS
-            val cleanResult = result?.replace("\"", "")?.replace("\\", "") ?: "✅ Login TikTok (Cookie Aktif)"
-            
-            // 🔥 Lempar hasil akhirnya (username TikTok) ke fungsi Callback!
-            onCookieScraped(cleanResult)
         }
     }
 }
