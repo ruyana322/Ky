@@ -18,7 +18,7 @@ set_target_properties(mnn_opencl_runtime PROPERTIES
 add_library(
     kythera_mnn
     SHARED
-    MnnVideoBridge.cpp
+    cpp/MnnVideoBridge.cpp
 )
 
 # Include MNN headers (download MNN source, ambil include/ folder)
