@@ -9,13 +9,16 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,12 +34,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
-import com.d4nzxml.kythera.service.RealSrEngine
+import com.d4nzxml.kythera.service.MnnVideoBridge
+import com.d4nzxml.kythera.service.MnnVideoBridge.Accelerator
+import com.d4nzxml.kythera.service.MnnVideoBridge.VideoScale
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
 import kotlinx.coroutines.Dispatchers
@@ -46,191 +52,131 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
-// ─── Enums & Data Classes ─────────────────────────────────────────────────────
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
-enum class UpscaleMode(val label: String, val desc: String, val icon: String) {
-    AI_ENHANCE(
-        label = "AI Enhance",
-        desc  = "Real-ESRGAN x4 upscale tiap frame",
-        icon  = "🤖"
-    ),
-    FAST_HD(
-        label = "Fast HD",
-        desc  = "Lanczos scale only, no AI",
-        icon  = "⚡"
-    )
+enum class EnhanceMode(val label: String, val emoji: String, val desc: String) {
+    AI_QUALITY("AI Quality", "✨", "Frame-by-frame AI enhancement"),
+    FAST_HD("Fast HD", "⚡", "Instant scale, no AI")
 }
 
-enum class UpscalePreset(
-    val label: String,
-    val desc: String,
-    val sharpen: String,
-    val bitrate: String
+enum class HdPreset(val label: String, val desc: String, val vf: String, val bitrate: String) {
+    SHARP(  "Tajam",  "Lanczos + unsharp ringan", "scale=%s:flags=lanczos,unsharp=3:3:0.8:3:3:0",                                 "12M"),
+    ULTRA(  "Ultra",  "Lanczos + sharpen kuat",   "scale=%s:flags=lanczos,unsharp=5:5:1.2:5:5:0,eq=contrast=1.03:saturation=1.1","18M"),
+    SMOOTH( "Smooth", "Lanczos + denoise",         "scale=%s:flags=lanczos,hqdn3d=1:1:3:3",                                       "15M"),
+    TIKTOK( "TikTok", "Optimized untuk upload",    "scale=%s:flags=lanczos,unsharp=3:3:1.0:3:3:0,eq=saturation=1.2",             "8M")
+}
+
+data class VidInfo(
+    val width: Int, val height: Int,
+    val rotation: Int, val durationMs: Long
 ) {
-    SHARP_FAST(
-        label   = "Tajam & Cepet",
-        desc    = "Lanczos + unsharp ringan",
-        sharpen = "unsharp=3:3:0.8:3:3:0.0",
-        bitrate = "12M"
-    ),
-    ULTRA_SHARP(
-        label   = "Ultra Tajam",
-        desc    = "Lanczos + sharpen kuat + color boost",
-        sharpen = "unsharp=5:5:1.2:5:5:0.0,eq=contrast=1.03:saturation=1.1:brightness=0.01",
-        bitrate = "18M"
-    ),
-    SMOOTH_HD(
-        label   = "Smooth HD",
-        desc    = "Lanczos + denoise ringan, natural look",
-        sharpen = "hqdn3d=1:1:3:3",
-        bitrate = "15M"
-    ),
-    TIKTOK_READY(
-        label   = "TikTok Ready",
-        desc    = "Optimized buat upload TikTok",
-        sharpen = "unsharp=3:3:1.0:3:3:0.0,eq=saturation=1.2",
-        bitrate = "8M"
-    )
+    val isPortrait:  Boolean get() = if (rotation == 90 || rotation == 270) true else height > width
+    val scaleTarget: String  get() = if (isPortrait) "1080:-2" else "1920:-2"
+    val displayRes:  String  get() = "${width}×${height}"
+    val displayDur:  String  get() { val s = durationMs/1000; return "${s/60}m ${s%60}s" }
 }
 
-data class VideoInfo(val width: Int, val height: Int, val rotation: Int) {
-    val isPortrait: Boolean get() =
-        if (rotation == 90 || rotation == 270) width < height
-        else height > width
-    val resolution: String get() = "${width}x${height}"
-}
+private fun probeVideo(ctx: android.content.Context, uri: Uri): VidInfo = try {
+    val r   = MediaMetadataRetriever().apply { setDataSource(ctx, uri) }
+    val w   = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()    ?: 1080
+    val h   = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()   ?: 1920
+    val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+    val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()      ?: 0L
+    r.release()
+    VidInfo(w, h, rot, dur)
+} catch (e: Exception) { VidInfo(1080, 1920, 0, 0L) }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-fun getVideoInfo(context: android.content.Context, uri: Uri): VideoInfo {
-    return try {
-        val r = MediaMetadataRetriever()
-        r.setDataSource(context, uri)
-        val w   = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1080
-        val h   = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1920
-        val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-        val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        r.release()
-        VideoInfo(w, h, rot)
-    } catch (e: Exception) { VideoInfo(1080, 1920, 0) }
-}
-
-fun getVideoDurationMs(context: android.content.Context, uri: Uri): Long {
-    return try {
-        val r = MediaMetadataRetriever()
-        r.setDataSource(context, uri)
-        val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        r.release()
-        dur
-    } catch (e: Exception) { 0L }
-}
-
-fun buildVf(info: VideoInfo, preset: UpscalePreset): String {
-    val scaleFilter = if (info.isPortrait) "scale=1080:-2:flags=lanczos"
-                      else                 "scale=1920:-2:flags=lanczos"
-    return "$scaleFilter,${preset.sharpen}"
-}
-
-fun estimateTime(durationMs: Long, frameCount: Int): String {
-    // ~300ms per frame on mid-range GPU (realsr-ncnn)
-    val aiMs    = frameCount * 300L
-    val mergeMs = durationMs / 10
-    val totalMs = aiMs + mergeMs
-    val mins    = totalMs / 60000
-    val secs    = (totalMs % 60000) / 1000
-    return if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
-}
-
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 @Composable
 fun VideoEnhanceScreen() {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
 
-    // State
-    var inputUriString  by rememberSaveable { mutableStateOf<String?>(null) }
-    var isProcessing    by rememberSaveable { mutableStateOf(false) }
-    var statusText      by rememberSaveable { mutableStateOf("") }
-    var errorLog        by rememberSaveable { mutableStateOf<String?>(null) }
-    var isSuccess       by rememberSaveable { mutableStateOf(false) }
-    var savedVideoUri   by remember { mutableStateOf<Uri?>(null) }
-    var selectedPreset  by remember { mutableStateOf(UpscalePreset.SHARP_FAST) }
-    var selectedMode    by remember { mutableStateOf(UpscaleMode.AI_ENHANCE) }
-    var videoInfo       by remember { mutableStateOf<VideoInfo?>(null) }
-    var progressText    by remember { mutableStateOf("") }
-    var progressFloat   by remember { mutableStateOf(0f) }
-    var aiReady         by remember { mutableStateOf(false) }
-    var totalFrames     by remember { mutableStateOf(0) }
-    var doneFrames      by remember { mutableStateOf(0) }
+    var inputUriStr  by rememberSaveable { mutableStateOf<String?>(null) }
+    var vidInfo      by remember { mutableStateOf<VidInfo?>(null) }
+    var engineReady  by remember { mutableStateOf(false) }
+    var mode         by remember { mutableStateOf(EnhanceMode.AI_QUALITY) }
+    var accelerator  by remember { mutableStateOf(Accelerator.GPU) }
+    var videoScale   by remember { mutableStateOf(VideoScale.X4) }
+    var hdPreset     by remember { mutableStateOf(HdPreset.SHARP) }
 
-    val inputUri = inputUriString?.let { Uri.parse(it) }
+    var isProcessing by rememberSaveable { mutableStateOf(false) }
+    var isCancelled  by remember { mutableStateOf(false) }
+    var statusMsg    by remember { mutableStateOf("") }
+    var progressPct  by remember { mutableStateOf(0f) }
+    var doneFrames   by remember { mutableStateOf(0) }
+    var totalFrames  by remember { mutableStateOf(0) }
+    var processFps   by remember { mutableStateOf(0f) }
 
-    // Setup RealSR engine saat screen pertama dibuka
+    var isSuccess    by rememberSaveable { mutableStateOf(false) }
+    var outputUri    by remember { mutableStateOf<Uri?>(null) }
+    var errorLog     by remember { mutableStateOf<String?>(null) }
+
+    val inputUri = inputUriStr?.let { Uri.parse(it) }
+
+    // Init MNN engine
     LaunchedEffect(Unit) {
-        aiReady = RealSrEngine.setup(context)
-        statusText = if (aiReady) "✅ AI Engine siap (Real-ESRGAN x4)"
-                     else "⚠️ AI Engine gagal setup — hanya Fast HD tersedia"
+        statusMsg   = "Memuat engine..."
+        engineReady = MnnVideoBridge.setup(context, VideoScale.X4)
+        statusMsg   = if (engineReady) "" else "Fast HD aktif (AI tidak tersedia)"
+        if (!engineReady) mode = EnhanceMode.FAST_HD
     }
 
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // Switch scale kalau user ganti
+    LaunchedEffect(videoScale) {
+        if (engineReady) {
+            engineReady = false
+            statusMsg   = "Memuat model ${videoScale.label}..."
+            engineReady = MnnVideoBridge.switchScale(context, videoScale)
+            statusMsg   = if (engineReady) "" else "Gagal load model"
+        }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
-            inputUriString = it.toString()
-            errorLog       = null
-            isSuccess      = false
-            savedVideoUri  = null
+            inputUriStr = it.toString()
+            isSuccess = false; outputUri = null; errorLog = null
             scope.launch(Dispatchers.IO) {
-                val info = getVideoInfo(context, it)
+                val info = probeVideo(context, it)
                 withContext(Dispatchers.Main) {
-                    videoInfo  = info
-                    statusText = "✅ Video siap! ${info.resolution} rot=${info.rotation}° " +
-                                 "(${if (info.isPortrait) "Portrait" else "Landscape"})"
+                    vidInfo   = info
+                    statusMsg = "${info.displayRes} · ${info.displayDur}"
                 }
             }
         }
     }
 
-    // ─── Process: AI Mode (RealSR per-frame) ──────────────────────────────────
+    // ─── AI Process (MNN) ─────────────────────────────────────────────────────
     fun processAI() {
-        if (inputUri == null) return
+        val uri = inputUri ?: return
         scope.launch {
-            isProcessing  = true
-            isSuccess     = false
-            errorLog      = null
-            savedVideoUri = null
-            progressFloat = 0f
+            isProcessing = true; isCancelled = false; isSuccess = false
+            outputUri = null; errorLog = null
+            doneFrames = 0; totalFrames = 0; progressPct = 0f; processFps = 0f
 
-            val info = withContext(Dispatchers.IO) {
-                videoInfo ?: getVideoInfo(context, inputUri)
-            }
-
-            // 1. Setup dirs
-            val cacheDir   = File(context.cacheDir, "ai_frames_${System.currentTimeMillis()}")
-            val framesIn   = File(cacheDir, "in").also { it.mkdirs() }
-            val framesOut  = File(cacheDir, "out").also { it.mkdirs() }
-            val safUrl     = FFmpegKitConfig.getSafParameterForRead(context, inputUri)
-            val outputName = "Kythera_AI_${System.currentTimeMillis()}.mp4"
-            val outPath    = File(context.getExternalFilesDir(null), outputName).absolutePath
+            val cacheRoot = File(context.cacheDir, "ky_${System.currentTimeMillis()}")
+            val framesIn  = File(cacheRoot, "in").also  { it.mkdirs() }
+            val framesOut = File(cacheRoot, "out").also { it.mkdirs() }
+            val safUrl    = FFmpegKitConfig.getSafParameterForRead(context, uri)
+            val outName   = "Kythera_${System.currentTimeMillis()}.mp4"
+            val outFile   = File(context.getExternalFilesDir(null), outName)
 
             try {
-                // ── Step 1: Extract frames ─────────────────────────────────
-                statusText    = "⏳ Step 1/3: Ekstrak frames..."
-                progressText  = "Extracting..."
-                progressFloat = 0.05f
+                // Step 1: Extract frames
+                statusMsg = "Menganalisa video..."
+                progressPct = 0.03f
 
-                val extractCmd = "-y -i \"$safUrl\" " +
-                    "-vf \"fps=source_fps\" " +
-                    "-q:v 1 \"${framesIn.absolutePath}/frame_%05d.png\""
-
-                val extractSession = withContext(Dispatchers.IO) {
-                    FFmpegKit.execute(extractCmd)
+                val extract = withContext(Dispatchers.IO) {
+                    FFmpegKit.execute(
+                        "-y -i \"$safUrl\" -q:v 1 \"${framesIn.absolutePath}/frame_%05d.png\""
+                    )
                 }
-
-                if (!ReturnCode.isSuccess(extractSession.returnCode)) {
-                    errorLog     = extractSession.allLogsAsString
-                    statusText   = "❌ Gagal ekstrak frames"
+                if (!ReturnCode.isSuccess(extract.returnCode)) {
+                    errorLog = extract.allLogsAsString
+                    statusMsg = "Gagal membaca video"
                     isProcessing = false
-                    cacheDir.deleteRecursively()
+                    cacheRoot.deleteRecursively()
                     return@launch
                 }
 
@@ -238,520 +184,507 @@ fun VideoEnhanceScreen() {
                     framesIn.listFiles { f -> f.extension == "png" }
                         ?.sortedBy { it.name } ?: emptyList()
                 }
-                totalFrames   = frames.size
-                progressFloat = 0.1f
-                statusText    = "✅ ${totalFrames} frames diekstrak"
+                totalFrames = frames.size
+                progressPct = 0.08f
 
-                // ── Step 2: AI Upscale tiap frame ─────────────────────────
-                statusText   = "🤖 Step 2/3: AI upscale (Real-ESRGAN x4)..."
-                doneFrames   = 0
+                if (totalFrames == 0) {
+                    errorLog = "Tidak ada frame yang diekstrak"
+                    statusMsg = "Gagal"
+                    isProcessing = false
+                    cacheRoot.deleteRecursively()
+                    return@launch
+                }
+
+                // Step 2: MNN enhance tiap frame
+                statusMsg = "Memproses..."
+                val startTime = System.currentTimeMillis()
 
                 withContext(Dispatchers.IO) {
                     frames.forEachIndexed { index, frameFile ->
-                        val outFile = File(framesOut, frameFile.name)
-                        val bitmap  = BitmapFactory.decodeFile(frameFile.absolutePath)
+                        if (isCancelled) return@forEachIndexed
 
-                        if (bitmap != null) {
-                            val (upscaled, err) = RealSrEngine.upscaleWithLog(context, bitmap)
-                            bitmap.recycle()
+                        val outFrame = File(framesOut, frameFile.name)
+                        val bmp = BitmapFactory.decodeFile(frameFile.absolutePath)
 
-                            if (upscaled != null) {
-                                FileOutputStream(outFile).use { fos ->
-                                    upscaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, fos)
+                        if (bmp != null) {
+                            // Pakai MnnVideoBridge — model .mnn khusus video
+                            val enhanced = MnnVideoBridge.enhance(bmp, accelerator)
+                            bmp.recycle()
+                            if (enhanced != null) {
+                                FileOutputStream(outFrame).use { fos ->
+                                    enhanced.compress(
+                                        android.graphics.Bitmap.CompressFormat.PNG, 100, fos
+                                    )
                                 }
-                                upscaled.recycle()
+                                enhanced.recycle()
                             } else {
-                                // Fallback: copy frame asli kalau AI gagal
-                                frameFile.copyTo(outFile, overwrite = true)
+                                frameFile.copyTo(outFrame, overwrite = true)
                             }
                         } else {
-                            frameFile.copyTo(outFile, overwrite = true)
+                            frameFile.copyTo(outFrame, overwrite = true)
                         }
 
                         withContext(Dispatchers.Main) {
-                            doneFrames    = index + 1
-                            progressFloat = 0.1f + (0.7f * doneFrames / totalFrames)
-                            progressText  = "Frame $doneFrames / $totalFrames"
-                            statusText    = "🤖 AI: $progressText"
+                            doneFrames  = index + 1
+                            progressPct = 0.08f + (0.72f * doneFrames / totalFrames)
+                            val elapsed = System.currentTimeMillis() - startTime
+                            processFps  = if (elapsed > 0) doneFrames * 1000f / elapsed else 0f
                         }
                     }
                 }
 
-                progressFloat = 0.8f
-
-                // ── Step 3: Merge frames → video ──────────────────────────
-                statusText   = "🎬 Step 3/3: Merge frames → video..."
-                progressText = "Encoding..."
-
-                // Ambil FPS asli
-                val fpsProbe = withContext(Dispatchers.IO) {
-                    val r = MediaMetadataRetriever()
-                    r.setDataSource(context, inputUri)
-                    val dur   = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
-                    r.release()
-                    if (dur > 0 && totalFrames > 0) (totalFrames * 1000.0 / dur).toFloat() else 30f
+                if (isCancelled) {
+                    statusMsg = "Dibatalkan"
+                    isProcessing = false
+                    cacheRoot.deleteRecursively()
+                    return@launch
                 }
 
-                val mergeCmd = "-y " +
-                    "-framerate $fpsProbe " +
-                    "-i \"${framesOut.absolutePath}/frame_%05d.png\" " +
-                    "-i \"$safUrl\" " +
-                    "-map 0:v -map 1:a " +
-                    "-c:v libx264 -preset ultrafast -crf 18 " +
-                    "-c:a aac -b:a 192k " +
-                    "-movflags +faststart " +
-                    "-shortest \"$outPath\""
+                progressPct = 0.82f
+                statusMsg = "Menyusun video..."
 
-                val mergeSession = withContext(Dispatchers.IO) {
-                    FFmpegKit.execute(mergeCmd)
-                }
+                val info = vidInfo
+                val fps = if (info != null && info.durationMs > 0 && totalFrames > 0)
+                    (totalFrames * 1000.0 / info.durationMs).toFloat() else 30f
 
-                if (!ReturnCode.isSuccess(mergeSession.returnCode)) {
-                    // Fallback merge tanpa audio kalau ada masalah
-                    val mergeNoAudio = "-y " +
-                        "-framerate $fpsProbe " +
+                val merge = withContext(Dispatchers.IO) {
+                    FFmpegKit.execute(
+                        "-y -framerate $fps " +
                         "-i \"${framesOut.absolutePath}/frame_%05d.png\" " +
+                        "-i \"$safUrl\" " +
+                        "-map 0:v -map 1:a " +
                         "-c:v libx264 -preset ultrafast -crf 18 " +
-                        "-movflags +faststart \"$outPath\""
-                    val fallbackSession = withContext(Dispatchers.IO) {
-                        FFmpegKit.execute(mergeNoAudio)
+                        "-c:a aac -b:a 192k " +
+                        "-movflags +faststart -shortest " +
+                        "\"${outFile.absolutePath}\""
+                    )
+                }
+                val finalSession = if (!ReturnCode.isSuccess(merge.returnCode)) {
+                    withContext(Dispatchers.IO) {
+                        FFmpegKit.execute(
+                            "-y -framerate $fps " +
+                            "-i \"${framesOut.absolutePath}/frame_%05d.png\" " +
+                            "-c:v libx264 -preset ultrafast -crf 18 " +
+                            "-movflags +faststart \"${outFile.absolutePath}\""
+                        )
                     }
-                    if (!ReturnCode.isSuccess(fallbackSession.returnCode)) {
-                        errorLog     = mergeSession.allLogsAsString
-                        statusText   = "❌ Gagal merge frames"
-                        isProcessing = false
-                        cacheDir.deleteRecursively()
-                        return@launch
-                    }
+                } else merge
+
+                if (!ReturnCode.isSuccess(finalSession.returnCode)) {
+                    errorLog = finalSession.allLogsAsString
+                    statusMsg = "Gagal menyusun video"
+                    isProcessing = false
+                    cacheRoot.deleteRecursively()
+                    return@launch
                 }
 
-                progressFloat = 0.95f
+                progressPct = 0.95f
 
-                // ── Simpan ke Gallery ──────────────────────────────────────
-                val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, outputName)
+                val cv = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, outName)
                     put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                     put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
                 }
-                val destUri = context.contentResolver.insert(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
+                val savedUri = context.contentResolver.insert(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv
                 )
-                destUri?.let { uri ->
-                    context.contentResolver.openOutputStream(uri)?.use { out ->
-                        FileInputStream(File(outPath)).use { it.copyTo(out) }
+                savedUri?.let { dest ->
+                    context.contentResolver.openOutputStream(dest)?.use { os ->
+                        FileInputStream(outFile).use { it.copyTo(os) }
                     }
-                    File(outPath).delete()
-                    savedVideoUri = uri
+                    outFile.delete()
+                    outputUri = dest
                 }
 
-                // Cleanup cache
-                withContext(Dispatchers.IO) { cacheDir.deleteRecursively() }
-
-                progressFloat = 1f
-                isSuccess     = true
-                statusText    = "✅ AI Enhance selesai! ${totalFrames} frames diproses"
+                withContext(Dispatchers.IO) { cacheRoot.deleteRecursively() }
+                progressPct = 1f
+                isSuccess   = true
+                statusMsg   = "Selesai! $totalFrames frame diproses"
 
             } catch (e: Exception) {
-                errorLog     = "EXCEPTION: ${e.message}\n${e.stackTraceToString().take(800)}"
-                statusText   = "❌ Error: ${e.message}"
-                withContext(Dispatchers.IO) { cacheDir.deleteRecursively() }
+                errorLog  = "${e.javaClass.simpleName}: ${e.message}"
+                statusMsg = "Terjadi kesalahan"
+                withContext(Dispatchers.IO) { cacheRoot.deleteRecursively() }
             }
-
             isProcessing = false
         }
     }
 
-    // ─── Process: Fast HD Mode (FFmpeg only) ──────────────────────────────────
+    // ─── Fast HD Process ──────────────────────────────────────────────────────
     fun processFastHD() {
-        if (inputUri == null) return
+        val uri  = inputUri ?: return
+        val info = vidInfo  ?: return
         scope.launch {
-            isProcessing  = true
-            isSuccess     = false
-            errorLog      = null
-            savedVideoUri = null
-            progressFloat = 0f
+            isProcessing = true; isSuccess = false; outputUri = null; errorLog = null
+            val outName = "Kythera_${System.currentTimeMillis()}.mp4"
+            val outFile = File(context.getExternalFilesDir(null), outName)
+            val safUrl  = FFmpegKitConfig.getSafParameterForRead(context, uri)
+            val vf      = hdPreset.vf.format(info.scaleTarget)
+            statusMsg   = "Memproses..."; progressPct = 0.4f
 
-            val info = withContext(Dispatchers.IO) {
-                videoInfo ?: getVideoInfo(context, inputUri)
+            val session = withContext(Dispatchers.IO) {
+                FFmpegKit.execute(
+                    "-hide_banner -y -i \"$safUrl\" " +
+                    "-vf \"$vf\" -c:v libx264 -preset ultrafast -crf 23 " +
+                    "-b:v ${hdPreset.bitrate} -c:a aac -b:a 192k " +
+                    "-movflags +faststart \"${outFile.absolutePath}\""
+                )
             }
-
-            val fileName = "Kythera_HD_${System.currentTimeMillis()}.mp4"
-            val outPath  = File(context.getExternalFilesDir(null), fileName).absolutePath
-            val safUrl   = FFmpegKitConfig.getSafParameterForRead(context, inputUri)
-            val preset   = selectedPreset
-            val vf       = buildVf(info, preset)
-
-            statusText    = "⚡ Rendering: ${preset.label}..."
-            progressFloat = 0.3f
-
-            val command = "-hide_banner -y -i \"$safUrl\" " +
-                "-threads 0 -vf \"$vf\" " +
-                "-c:v libx264 -preset ultrafast -crf 23 " +
-                "-c:a aac -b:a 192k -ar 44100 " +
-                "-movflags +faststart \"$outPath\""
-
-            val session = withContext(Dispatchers.IO) { FFmpegKit.execute(command) }
-
             if (ReturnCode.isSuccess(session.returnCode)) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                val cv = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, outName)
                     put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                     put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
                 }
-                val uri = context.contentResolver.insert(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
-                )
-                uri?.let { destUri ->
-                    context.contentResolver.openOutputStream(destUri)?.use { out ->
-                        FileInputStream(File(outPath)).use { it.copyTo(out) }
+                val dest = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
+                dest?.let {
+                    context.contentResolver.openOutputStream(it)?.use { os ->
+                        FileInputStream(outFile).use { fis -> fis.copyTo(os) }
                     }
-                    File(outPath).delete()
-                    savedVideoUri = destUri
+                    outFile.delete(); outputUri = it
                 }
-                progressFloat = 1f
-                isSuccess     = true
-                statusText    = "✅ Berhasil! Tersimpan di Galeri/Kythera"
+                progressPct = 1f; isSuccess = true; statusMsg = "Selesai!"
             } else {
-                statusText = "❌ Gagal!"
-                errorLog   = session.allLogsAsString
+                errorLog = session.allLogsAsString; statusMsg = "Gagal"
             }
             isProcessing = false
         }
     }
 
-    fun startProcess() = if (selectedMode == UpscaleMode.AI_ENHANCE && aiReady) processAI()
-                         else processFastHD()
+    fun onProcess() = if (mode == EnhanceMode.AI_QUALITY && engineReady) processAI() else processFastHD()
 
     // ─── UI ───────────────────────────────────────────────────────────────────
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
 
         // Header
-        Text(
-            "Video Enhance",
-            color      = KColor.Text,
-            fontSize   = 24.sp,
-            fontWeight = FontWeight.W800
-        )
-        Text(
-            "Real-ESRGAN AI · Lanczos HD · Auto Portrait/Landscape",
-            color      = KColor.Accent,
-            fontSize   = 12.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // AI Engine Status Badge
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    if (aiReady) Color(0x1500C853) else Color(0x15FF6D00)
-                )
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(if (aiReady) "🤖" else "⚠️", fontSize = 14.sp)
-            Column {
-                Text(
-                    if (aiReady) "Real-ESRGAN Engine Ready" else "AI Engine Tidak Tersedia",
-                    color      = if (aiReady) Color(0xFF00C853) else Color(0xFFFF6D00),
-                    fontSize   = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    if (aiReady) "NCNN · Vulkan GPU · SRVGGNet x4"
-                    else         "Gunakan mode Fast HD",
-                    color    = KColor.Text2,
-                    fontSize = 10.sp
-                )
-            }
+        Column {
+            Text("Video Enhance", color = KColor.Text, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text("by D4nzxml Studio", color = KColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
-
-        Spacer(Modifier.height(14.dp))
 
         // Drop Zone
         GlassCard {
             KDropZone(
-                onTap       = { videoPicker.launch("video/*") },
+                onTap       = { picker.launch("video/*") },
                 title       = if (inputUri != null) "Ganti Video" else "Pilih Video",
-                subtitle    = "MP4, MOV, AVI — Auto detect orientasi",
+                subtitle    = if (vidInfo != null)
+                    "${vidInfo!!.displayRes} · ${vidInfo!!.displayDur}"
+                    else "MP4, MOV, AVI · Auto deteksi orientasi",
                 icon        = Icons.Rounded.Movie,
                 accentColor = KColor.Accent
             )
-            if (statusText.isNotEmpty() && !isProcessing && errorLog == null) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    statusText,
-                    color    = if (isSuccess) Color(0xFF00C853) else KColor.Text2,
-                    fontSize = 12.sp
-                )
-            }
         }
-
-        Spacer(Modifier.height(14.dp))
 
         // Mode Selector
         GlassCard {
-            Text("Mode Enhance", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
+            Text("Mode", color = KColor.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                UpscaleMode.entries.forEach { mode ->
-                    val isActive = selectedMode == mode
-                    val canUse   = mode != UpscaleMode.AI_ENHANCE || aiReady
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                EnhanceMode.entries.forEach { m ->
+                    val active = mode == m
+                    val canUse = m != EnhanceMode.AI_QUALITY || engineReady
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isActive) KColor.Accent.copy(0.15f)
-                                else Color(0x0AFFFFFF)
-                            )
-                            .border(
-                                1.dp,
-                                if (isActive) KColor.Accent.copy(0.5f) else Color(0x22FFFFFF),
-                                RoundedCornerShape(12.dp)
-                            )
+                            .background(if (active) KColor.Accent.copy(0.14f) else Color.White.copy(0.04f))
+                            .border(1.dp,
+                                if (active) KColor.Accent.copy(0.5f) else Color.White.copy(0.1f),
+                                RoundedCornerShape(12.dp))
+                            .clickable(enabled = canUse) { mode = m }
                             .padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(mode.icon, fontSize = 22.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            mode.label,
-                            color      = if (isActive) KColor.Accent else if (canUse) KColor.Text else KColor.Text2,
-                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                            fontSize   = 12.sp
-                        )
-                        Text(mode.desc, color = KColor.Text2, fontSize = 10.sp,
-                            lineHeight = 13.sp)
-                        if (!canUse) {
-                            Text("Butuh setup", color = Color(0xFFFF6D00), fontSize = 9.sp)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        RadioButton(
-                            selected = isActive,
-                            enabled  = canUse,
-                            onClick  = { if (canUse) selectedMode = mode },
-                            colors   = RadioButtonDefaults.colors(selectedColor = KColor.Accent)
-                        )
+                        Text(m.emoji, fontSize = 24.sp)
+                        Text(m.label,
+                            color      = if (active) KColor.Accent else if (canUse) KColor.Text else KColor.Text2,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                            fontSize   = 13.sp)
+                        Text(m.desc, color = KColor.Text2, fontSize = 10.sp,
+                            textAlign = TextAlign.Center, lineHeight = 13.sp)
+                        if (!canUse) Text("Tidak tersedia", color = Color(0xFFFF6D00), fontSize = 9.sp)
                     }
                 }
             }
         }
 
-        // Preset (hanya tampil kalau Fast HD)
+        // AI Settings (GPU/CPU + Scale)
         AnimatedVisibility(
-            visible = selectedMode == UpscaleMode.FAST_HD,
-            enter   = fadeIn(),
-            exit    = fadeOut()
+            visible = mode == EnhanceMode.AI_QUALITY && engineReady,
+            enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()
         ) {
-            Column {
+            GlassCard {
+                // Scale selector (2x / 4x)
+                Text("Kualitas", color = KColor.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    VideoScale.entries.forEach { s ->
+                        val active = videoScale == s
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (active) KColor.Accent.copy(0.14f) else Color.White.copy(0.04f))
+                                .border(1.dp,
+                                    if (active) KColor.Accent.copy(0.5f) else Color.White.copy(0.1f),
+                                    RoundedCornerShape(10.dp))
+                                .clickable { videoScale = s }
+                                .padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(s.label,
+                                color      = if (active) KColor.Accent else KColor.Text,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                fontSize   = 13.sp)
+                            Text(
+                                if (s == VideoScale.X2) "Lebih cepat" else "Kualitas max",
+                                color = KColor.Text2, fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(14.dp))
-                GlassCard {
-                    Text("Pilih Preset", color = KColor.Text, fontWeight = FontWeight.W600, fontSize = 14.sp)
-                    Spacer(Modifier.height(10.dp))
-                    UpscalePreset.entries.forEach { preset ->
-                        val isActive = selectedPreset == preset
+
+                // Akselerasi GPU / CPU
+                Text("Akselerasi", color = KColor.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Accelerator.entries.forEach { acc ->
+                        val active = accelerator == acc
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (active) KColor.Accent.copy(0.12f) else Color.White.copy(0.04f))
+                                .border(1.dp,
+                                    if (active) KColor.Accent.copy(0.45f) else Color.White.copy(0.08f),
+                                    RoundedCornerShape(10.dp))
+                                .clickable { accelerator = acc }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            RadioButton(selected = active, onClick = { accelerator = acc },
+                                colors = RadioButtonDefaults.colors(selectedColor = KColor.Accent))
+                            Column {
+                                Text(acc.label,
+                                    color      = if (active) KColor.Accent else KColor.Text,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize   = 12.sp)
+                                Text(acc.desc, color = KColor.Text2, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+
+                // CPU Warning
+                AnimatedVisibility(visible = accelerator == Accelerator.CPU) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x22FF9800))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⚠️", fontSize = 14.sp)
+                        Text("CPU mode lebih lambat ~3-5x. Gunakan GPU jika HP mendukung OpenCL.",
+                            color = Color(0xFFFF9800), fontSize = 11.sp, lineHeight = 15.sp)
+                    }
+                }
+            }
+        }
+
+        // Preset Fast HD
+        AnimatedVisibility(
+            visible = mode == EnhanceMode.FAST_HD,
+            enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()
+        ) {
+            GlassCard {
+                Text("Preset", color = KColor.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HdPreset.entries.forEach { p ->
+                        val active = hdPreset == p
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isActive) KColor.Accent.copy(0.12f) else Color.Transparent)
-                                .border(
-                                    if (isActive) 1.dp else 0.dp,
-                                    if (isActive) KColor.Accent.copy(0.4f) else Color.Transparent,
-                                    RoundedCornerShape(10.dp)
-                                )
+                                .background(if (active) KColor.Accent.copy(0.12f) else Color.Transparent)
+                                .border(if (active) 1.dp else 0.dp,
+                                    if (active) KColor.Accent.copy(0.4f) else Color.Transparent,
+                                    RoundedCornerShape(10.dp))
+                                .clickable { hdPreset = p }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment     = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(
-                                    preset.label,
-                                    color      = if (isActive) KColor.Accent else KColor.Text,
-                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize   = 13.sp
-                                )
-                                Text(preset.desc, color = KColor.Text2, fontSize = 11.sp)
+                                Text(p.label,
+                                    color = if (active) KColor.Accent else KColor.Text,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp)
+                                Text(p.desc, color = KColor.Text2, fontSize = 11.sp)
                             }
-                            RadioButton(
-                                selected = isActive,
-                                onClick  = { selectedPreset = preset },
-                                colors   = RadioButtonDefaults.colors(selectedColor = KColor.Accent)
-                            )
+                            RadioButton(selected = active, onClick = { hdPreset = p },
+                                colors = RadioButtonDefaults.colors(selectedColor = KColor.Accent))
                         }
                     }
                 }
             }
         }
 
-        // AI Info Card (kalau mode AI dipilih)
-        AnimatedVisibility(
-            visible = selectedMode == UpscaleMode.AI_ENHANCE && aiReady,
-            enter   = fadeIn(),
-            exit    = fadeOut()
-        ) {
-            Column {
-                Spacer(Modifier.height(14.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(Color(0x207C4DFF), Color(0x2000BCD4))
-                            )
-                        )
-                        .border(1.dp, Color(0x407C4DFF), RoundedCornerShape(12.dp))
-                        .padding(14.dp)
+        // Processing UI — style Speedkythera
+        AnimatedVisibility(visible = isProcessing, enter = fadeIn(), exit = fadeOut()) {
+            GlassCard {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("ℹ️ Info AI Mode", color = KColor.Accent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("• Engine: Real-ESRGAN SRVGGNet (NCNN Vulkan)", color = KColor.Text2, fontSize = 11.sp)
-                        Text("• Scale: 4x per frame → di-downscale ke 1080p", color = KColor.Text2, fontSize = 11.sp)
-                        Text("• GPU: Vulkan (fallback CPU otomatis)", color = KColor.Text2, fontSize = 11.sp)
-                        Text("• Estimasi: ~5-15 menit per menit video", color = Color(0xFFFF9800), fontSize = 11.sp)
-                        if (totalFrames > 0 && videoInfo != null) {
-                            val dur = 0L // placeholder
-                            Text(
-                                "• Total frames: $totalFrames",
-                                color    = KColor.Text2,
-                                fontSize = 11.sp
-                            )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth().height(200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x22FFFFFF)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (totalFrames > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(90.dp).clip(CircleShape)
+                                    .background(Brush.radialGradient(
+                                        listOf(KColor.Accent.copy(0.3f), KColor.Accent.copy(0.1f))
+                                    ))
+                                    .border(2.dp, KColor.Accent.copy(0.6f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("$doneFrames\n/$totalFrames",
+                                    color = Color.White, fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center, lineHeight = 20.sp)
+                            }
+                        } else {
+                            CircularProgressIndicator(color = KColor.Accent)
                         }
                     }
+
+                    if (vidInfo != null && totalFrames > 0) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Total frames: $totalFrames", color = KColor.Text2, fontSize = 11.sp)
+                            if (processFps > 0) Text("%.1f fps".format(processFps),
+                                color = KColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Durasi: ${vidInfo!!.displayDur}", color = KColor.Text2, fontSize = 11.sp)
+                            Text(videoScale.label, color = KColor.Accent, fontSize = 11.sp)
+                        }
+                    }
+
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (progressPct > 0f) {
+                            LinearProgressIndicator(
+                                progress = { progressPct },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = KColor.Accent, trackColor = Color.White.copy(0.1f)
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = KColor.Accent, trackColor = Color.White.copy(0.1f)
+                            )
+                        }
+                        Text(
+                            if (totalFrames > 0) "Enhancing quality...${(progressPct * 100).toInt()}%"
+                            else statusMsg,
+                            color = KColor.Text, fontSize = 13.sp,
+                            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "Please DON'T lock the screen or switch to other apps during processing.",
+                            color = Color(0xFFEF5350), fontSize = 11.sp,
+                            textAlign = TextAlign.Center, lineHeight = 15.sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = { isCancelled = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF5350))
+                    ) { Text("Cancel", fontWeight = FontWeight.Bold) }
                 }
             }
         }
 
         // Error Log
-        if (errorLog != null) {
-            Spacer(Modifier.height(14.dp))
+        AnimatedVisibility(visible = errorLog != null && !isProcessing) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 220.dp)
-                    .border(1.dp, Color(0xFFFF4444), RoundedCornerShape(10.dp))
-                    .background(Color(0x22FF0000), RoundedCornerShape(10.dp))
-                    .padding(14.dp)
+                    .fillMaxWidth().heightIn(max = 200.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .border(1.dp, Color(0xFFEF5350).copy(0.5f), RoundedCornerShape(10.dp))
+                    .background(Color(0x15EF5350))
+                    .padding(12.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text("⚠️ ERROR LOG", color = Color(0xFFFF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    errorLog!!,
-                    color      = Color(0xFFFFAAAA),
-                    fontSize   = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    lineHeight = 14.sp
-                )
+                Text("Log", color = Color(0xFFEF5350), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(errorLog ?: "", color = Color(0xFFFFAB91),
+                    fontSize = 10.sp, fontFamily = FontFamily.Monospace, lineHeight = 14.sp)
             }
         }
 
-        // Progress UI
-        if (isProcessing) {
-            Spacer(Modifier.height(16.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(KColor.Surface)
-                    .padding(16.dp)
-            ) {
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment     = Alignment.CenterVertically
-                    ) {
-                        Text(statusText, color = KColor.Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        if (selectedMode == UpscaleMode.AI_ENHANCE && totalFrames > 0) {
-                            Text(
-                                "$doneFrames/$totalFrames",
-                                color    = KColor.Text2,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    if (progressFloat > 0f) {
-                        LinearProgressIndicator(
-                            progress = { progressFloat },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color    = KColor.Accent
-                        )
-                    } else {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color    = KColor.Accent
-                        )
-                    }
-                    if (progressText.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(progressText, color = KColor.Text2, fontSize = 10.sp)
-                    }
-                }
-            }
+        // Status idle
+        AnimatedVisibility(visible = statusMsg.isNotEmpty() && !isProcessing) {
+            Text(statusMsg,
+                color = if (isSuccess) Color(0xFF69F0AE) else KColor.Text2,
+                fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth())
         }
-
-        Spacer(Modifier.height(20.dp))
 
         // Action Buttons
-        if (isSuccess && savedVideoUri != null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                KPrimaryButton(
-                    label    = "Tonton",
-                    icon     = Icons.Rounded.PlayArrow,
-                    modifier = Modifier.weight(1f),
-                    onClick  = {
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(savedVideoUri, "video/mp4")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (!isProcessing) {
+            if (isSuccess && outputUri != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    KPrimaryButton(
+                        label = "Tonton", icon = Icons.Rounded.PlayArrow,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(outputUri, "video/mp4")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            })
                         }
-                        context.startActivity(intent)
-                    }
-                )
+                    )
+                    KPrimaryButton(
+                        label = "Reset", icon = Icons.Rounded.Refresh,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            inputUriStr = null; vidInfo = null; isSuccess = false
+                            outputUri = null; errorLog = null; statusMsg = ""
+                            doneFrames = 0; totalFrames = 0; progressPct = 0f; processFps = 0f
+                        }
+                    )
+                }
+            } else {
                 KPrimaryButton(
-                    label    = "Reset",
-                    icon     = Icons.Rounded.Refresh,
-                    modifier = Modifier.weight(1f),
-                    onClick  = {
-                        inputUriString = null
-                        isSuccess      = false
-                        statusText     = if (aiReady) "✅ AI Engine siap" else "⚠️ Gunakan Fast HD"
-                        savedVideoUri  = null
-                        videoInfo      = null
-                        totalFrames    = 0
-                        doneFrames     = 0
-                        progressFloat  = 0f
-                        progressText   = ""
-                        errorLog       = null
-                    }
+                    label   = if (mode == EnhanceMode.AI_QUALITY && engineReady) "✨ Mulai Enhance" else "⚡ Fast HD",
+                    icon    = Icons.Rounded.AutoAwesome,
+                    enabled = inputUri != null,
+                    onClick = ::onProcess
                 )
             }
-        } else {
-            KPrimaryButton(
-                label   = when (selectedMode) {
-                    UpscaleMode.AI_ENHANCE -> "🤖 Proses AI Sekarang!"
-                    UpscaleMode.FAST_HD    -> "⚡ Fast HD Sekarang!"
-                },
-                icon    = Icons.Rounded.AutoAwesome,
-                enabled = inputUri != null && !isProcessing,
-                onClick = ::startProcess
-            )
         }
 
         Spacer(Modifier.height(24.dp))
