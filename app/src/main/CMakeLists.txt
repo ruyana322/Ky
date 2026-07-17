@@ -5,13 +5,13 @@ project("kythera_mnn")
 add_library(MNN SHARED IMPORTED)
 set_target_properties(MNN PROPERTIES
     IMPORTED_LOCATION
-    ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libMNN.so
+    ${CMAKE_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libMNN.so
 )
 
 add_library(mnn_opencl_runtime SHARED IMPORTED)
 set_target_properties(mnn_opencl_runtime PROPERTIES
     IMPORTED_LOCATION
-    ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libMNN_CL.so
+    ${CMAKE_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libMNN_CL.so
 )
 
 # ── JNI Bridge ────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ add_library(
 
 # Include MNN headers (download MNN source, ambil include/ folder)
 target_include_directories(kythera_mnn PRIVATE
-    ${CMAKE_SOURCE_DIR}/include/MNN
+    ${CMAKE_SOURCE_DIR}/cpp/include/MNN
 )
 
 # Link libraries
