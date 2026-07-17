@@ -36,6 +36,12 @@ android {
         compose = true
     }
 
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/CMakeLists.txt")
+        }
+    }
+
     // 🔥 BRANKAS KEYSTORE: Ngebaca file hasil decode dan password rahasia GitHub Actions
     signingConfigs {
         create("release") {
@@ -54,7 +60,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 🔥 ARAHKAN KE BRANKAS RELEASE (Bukan debug lagi)
             signingConfig = signingConfigs.getByName("release")
         }
     }
