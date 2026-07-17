@@ -23,7 +23,7 @@ add_library(
 
 # Include MNN headers (download MNN source, ambil include/ folder)
 target_include_directories(kythera_mnn PRIVATE
-    ${CMAKE_SOURCE_DIR}/cpp/include/MNN
+    ${CMAKE_SOURCE_DIR}/cpp/include/
 )
 
 # Link libraries
