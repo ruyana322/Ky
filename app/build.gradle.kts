@@ -14,6 +14,11 @@ android {
         targetSdk = 28
         versionCode = 1
         versionName = "1.0.1"
+
+        // 🔥 BLOKIR X86: Paksa Gradle cuma nge-build buat arsitektur HP asli (ARM)
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+        }
     }
 
     // 🔥 PELURU BIUS: Bungkam satpam Lint Google biar lolos targetSdk 28
