@@ -14,6 +14,11 @@ android {
         targetSdk = 28
         versionCode = 1
         versionName = "1.0.1"
+
+        // 🔥 BLOKIR X86: Paksa Gradle cuma nge-build buat arsitektur HP asli (ARM)
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+        }
     }
 
     // 🔥 PELURU BIUS: Bungkam satpam Lint Google biar lolos targetSdk 28
@@ -36,6 +41,12 @@ android {
         compose = true
     }
 
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/CMakeLists.txt")
+        }
+    }
+
     // 🔥 BRANKAS KEYSTORE: Ngebaca file hasil decode dan password rahasia GitHub Actions
     signingConfigs {
         create("release") {
@@ -54,7 +65,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 🔥 ARAHKAN KE BRANKAS RELEASE (Bukan debug lagi)
             signingConfig = signingConfigs.getByName("release")
         }
     }
