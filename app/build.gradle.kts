@@ -15,9 +15,10 @@ android {
         versionCode = 1
         versionName = "1.0.1"
 
-        // 🔥 BLOKIR X86: Paksa Gradle cuma nge-build buat arsitektur HP asli (ARM)
+        // 🔥 KUNCI BUILD: Cukup buat 64-bit (arm64-v8a) aja biar APK nggak bengkak!
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            abiFilters.clear()
+            abiFilters.add("arm64-v8a")
         }
     }
 
@@ -73,6 +74,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "lib/x86/**"
+            excludes += "lib/armeabi-v7a/**" // 🔥 Sapu bersih folder 32-bit dari APK
         }
     }
 }
