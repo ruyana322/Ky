@@ -20,8 +20,8 @@ static int g_totalFrames = 0;
 static double g_fps      = 30.0;
 static int g_width       = 0;
 static int g_height      = 0;
-static int g_out_width   = 0;  // Penyelamat 1: Simpan lebar target
-static int g_out_height  = 0;  // Penyelamat 2: Simpan tinggi target
+static int g_out_width   = 0;  
+static int g_out_height  = 0;  
 
 // ─── Helper: Mat → Bitmap ─────────────────────────────────────────────────────
 static jobject matToBitmap(JNIEnv* env, const cv::Mat& mat) {
@@ -39,11 +39,13 @@ static jobject matToBitmap(JNIEnv* env, const cv::Mat& mat) {
     void* pixels = nullptr;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return nullptr;
 
-    // BGR (OpenCV) → RGBA (Android)
-    cv::Mat rgba;
-    cv::cvtColor(mat, rgba, cv::COLOR_BGR2RGBA);
+    AndroidBitmapInfo info;
+    AndroidBitmap_getInfo(env, bitmap, &info);
 
-    memcpy(pixels, rgba.data, (size_t)(w * h * 4));
+    // 🔥 FIX 1: Tulis langsung ke memori Bitmap dengan memperhatikan stride (padding)
+    cv::Mat dst(info.height, info.width, CV_8UC4, pixels, info.stride);
+    cv::cvtColor(mat, dst, cv::COLOR_BGR2RGBA);
+
     AndroidBitmap_unlockPixels(env, bitmap);
     return bitmap;
 }
@@ -56,14 +58,12 @@ static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
     void* pixels = nullptr;
     AndroidBitmap_lockPixels(env, bitmap, &pixels);
 
-    // RGBA → BGR
-    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels);
+    // 🔥 FIX 2: Baca memori Bitmap dengan memperhatikan stride biar nggak kesemutan
+    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels, info.stride);
     cv::Mat bgr;
     cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
 
     AndroidBitmap_unlockPixels(env, bitmap);
-    
-    // Gak usah pakai .clone() lagi biar gak boros RAM dan menghindari OOM
     return bgr;
 }
 
@@ -131,7 +131,6 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
 
     if (g_writer.isOpened()) g_writer.release();
 
-    // 🔥 PROTEKSI 1: Paksa resolusi jadi angka Genap biar MediaCodec gak ngamuk
     if (width % 2 != 0) width -= 1;
     if (height % 2 != 0) height -= 1;
 
@@ -147,8 +146,6 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
         g_writer.open(mjpgPath, fourcc, g_fps, cv::Size(g_out_width, g_out_height));
     }
 
-    LOGI("Writer opened: %dx%d @ %.2f fps → %s",
-         g_out_width, g_out_height, g_fps, pathStr.c_str());
     return (jboolean)g_writer.isOpened();
 }
 
@@ -161,8 +158,6 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
     cv::Mat mat = bitmapToMat(env, bitmap);
     
     if (!mat.empty()) {
-        // 🔥 PROTEKSI 2: Kunci rapat dimensi memori! 
-        // Kalau AI ngasih gambar dengan ukuran gak sesuai, paksa resize biar gak Segfault
         if (mat.cols != g_out_width || mat.rows != g_out_height) {
             cv::resize(mat, mat, cv::Size(g_out_width, g_out_height));
         }
