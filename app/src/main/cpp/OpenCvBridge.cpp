@@ -105,7 +105,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
 // ─── JNI: readFrame ───────────────────────────────────────────────────────────
 // Baca satu frame, return sebagai Bitmap
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrameNative(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
         JNIEnv* env, jobject) {
 
     if (!g_cap.isOpened()) return nullptr;
@@ -149,7 +149,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
 // ─── JNI: writeFrame ──────────────────────────────────────────────────────────
 // Tulis satu frame (Bitmap) ke output video
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrameNative(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
         JNIEnv* env, jobject, jobject bitmap) {
 
     if (!g_writer.isOpened()) return;
@@ -159,7 +159,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrameNative(
 
 // ─── JNI: closeAll ────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAllNative(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAll(
         JNIEnv*, jobject) {
 
     if (g_cap.isOpened())    g_cap.release();
@@ -170,10 +170,10 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAllNative(
 
 // ─── JNI: getTotalFrames ──────────────────────────────────────────────────────
 extern "C" JNIEXPORT jint JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_getTotalFramesNative(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_getTotalFrames(
         JNIEnv*, jobject) { return (jint)g_totalFrames; }
 
 // ─── JNI: getFps ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_getFpsNative(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_getFps(
         JNIEnv*, jobject) { return (jdouble)g_fps; }
