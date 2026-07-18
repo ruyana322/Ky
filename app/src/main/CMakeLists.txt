@@ -1,35 +1,27 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("kythera_mnn")
+project("kythera_native")
 
-# ── Import libMNN.so dari assets (dikopi ke jniLibs saat build) ──────────────
+# ─── Paths ────────────────────────────────────────────────────────────────────
+set(JNI_LIBS_DIR ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI})
+
+# ─── Import libMNN.so ─────────────────────────────────────────────────────────
 add_library(MNN SHARED IMPORTED)
 set_target_properties(MNN PROPERTIES
-    IMPORTED_LOCATION
-    ${CMAKE_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libMNN.so
+    IMPORTED_LOCATION ${JNI_LIBS_DIR}/libMNN.so
 )
 
-add_library(mnn_opencl_runtime SHARED IMPORTED)
-set_target_properties(mnn_opencl_runtime PROPERTIES
-    IMPORTED_LOCATION
-    ${CMAKE_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libMNN_CL.so
+# ─── Import libopencv_java4.so ────────────────────────────────────────────────
+add_library(opencv_java4 SHARED IMPORTED)
+set_target_properties(opencv_java4 PROPERTIES
+    IMPORTED_LOCATION ${JNI_LIBS_DIR}/libopencv_java4.so
 )
 
-# ── JNI Bridge ────────────────────────────────────────────────────────────────
-add_library(
-    kythera_mnn
-    SHARED
-    cpp/MnnVideoBridge.cpp
-)
+# ─── MNN Video Bridge ─────────────────────────────────────────────────────────
+add_library(kythera_mnn SHARED MnnVideoBridge.cpp)
+target_include_directories(kythera_mnn PRIVATE ${CMAKE_SOURCE_DIR}/include/MNN)
+target_link_libraries(kythera_mnn MNN android jnigraphics log)
 
-# Include MNN headers (download MNN source, ambil include/ folder)
-target_include_directories(kythera_mnn PRIVATE
-    ${CMAKE_SOURCE_DIR}/cpp/include/
-)
-
-# Link libraries
-target_link_libraries(kythera_mnn
-    MNN
-    android
-    jnigraphics   # untuk AndroidBitmap
-    log
-)
+# ─── OpenCV Video Bridge ──────────────────────────────────────────────────────
+add_library(kythera_cv SHARED OpenCvBridge.cpp)
+target_include_directories(kythera_cv PRIVATE ${CMAKE_SOURCE_DIR}/include/opencv4)
+target_link_libraries(kythera_cv opencv_java4 android jnigraphics log)
