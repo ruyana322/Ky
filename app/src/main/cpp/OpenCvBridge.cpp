@@ -131,6 +131,15 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
 
     if (g_writer.isOpened()) g_writer.release();
 
+    // 🔥 IDE JENIUS LU: Paksa Downgrade ke Resolusi Asli / Max 1080p
+    // Kalau Kotlin minta ukuran raksasa (lebih dari 1920), kita balikin ke g_width/g_height asli!
+    if (width > 1920 || height > 1920) {
+        width = g_width;
+        height = g_height;
+        LOGI("Resolusi kebesaran! Paksa downgrade ke ukuran asli: %dx%d", width, height);
+    }
+
+    // Pastikan tetap genap
     if (width % 2 != 0) width -= 1;
     if (height % 2 != 0) height -= 1;
 
@@ -158,12 +167,16 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
     cv::Mat mat = bitmapToMat(env, bitmap);
     
     if (!mat.empty()) {
+        // 🔥 Proses Downscale Otomatis
+        // Karena g_out_width udah dikunci ke max 1080p, gambar AI yang raksasa bakal dipress di sini
         if (mat.cols != g_out_width || mat.rows != g_out_height) {
-            cv::resize(mat, mat, cv::Size(g_out_width, g_out_height));
+            // Pakai metode INTER_AREA: algoritma terbaik OpenCV buat ngecilin gambar biar tetep tajam!
+            cv::resize(mat, mat, cv::Size(g_out_width, g_out_height), 0, 0, cv::INTER_AREA);
         }
         g_writer.write(mat);
     }
 }
+
 
 // ─── JNI: closeAll ────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
