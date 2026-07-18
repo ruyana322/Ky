@@ -69,7 +69,6 @@ extern "C" JNIEXPORT jintArray JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
         JNIEnv* env, jobject, jstring videoPath) {
 
-
     const char* path = env->GetStringUTFChars(videoPath, nullptr);
     std::string pathStr(path);
     env->ReleaseStringUTFChars(videoPath, path);
@@ -106,7 +105,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
 // ─── JNI: readFrame ───────────────────────────────────────────────────────────
 // Baca satu frame, return sebagai Bitmap
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrameNative(
         JNIEnv* env, jobject) {
 
     if (!g_cap.isOpened()) return nullptr;
@@ -120,7 +119,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
 // ─── JNI: openWriter ──────────────────────────────────────────────────────────
 // Buka VideoWriter untuk output
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriter(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
         JNIEnv* env, jobject,
         jstring outputPath,
         jint width, jint height) {
@@ -150,7 +149,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriter(
 // ─── JNI: writeFrame ──────────────────────────────────────────────────────────
 // Tulis satu frame (Bitmap) ke output video
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrameNative(
         JNIEnv* env, jobject, jobject bitmap) {
 
     if (!g_writer.isOpened()) return;
@@ -160,7 +159,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
 
 // ─── JNI: closeAll ────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAll(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAllNative(
         JNIEnv*, jobject) {
 
     if (g_cap.isOpened())    g_cap.release();
@@ -171,10 +170,10 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAll(
 
 // ─── JNI: getTotalFrames ──────────────────────────────────────────────────────
 extern "C" JNIEXPORT jint JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_getTotalFrames(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_getTotalFramesNative(
         JNIEnv*, jobject) { return (jint)g_totalFrames; }
 
 // ─── JNI: getFps ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_getFps(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_getFpsNative(
         JNIEnv*, jobject) { return (jdouble)g_fps; }
