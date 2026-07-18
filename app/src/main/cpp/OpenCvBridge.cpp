@@ -20,6 +20,8 @@ static int g_totalFrames = 0;
 static double g_fps      = 30.0;
 static int g_width       = 0;
 static int g_height      = 0;
+static int g_out_width   = 0;  // Penyelamat 1: Simpan lebar target
+static int g_out_height  = 0;  // Penyelamat 2: Simpan tinggi target
 
 // ─── Helper: Mat → Bitmap ─────────────────────────────────────────────────────
 static jobject matToBitmap(JNIEnv* env, const cv::Mat& mat) {
@@ -60,11 +62,12 @@ static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
     cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
 
     AndroidBitmap_unlockPixels(env, bitmap);
-    return bgr.clone();
+    
+    // Gak usah pakai .clone() lagi biar gak boros RAM dan menghindari OOM
+    return bgr;
 }
 
 // ─── JNI: openVideo ───────────────────────────────────────────────────────────
-// Buka video, return [totalFrames, fps*1000, width, height] sebagai int array
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
         JNIEnv* env, jobject, jstring videoPath) {
@@ -94,7 +97,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
     jintArray result = env->NewIntArray(4);
     jint vals[4] = {
         g_totalFrames,
-        (jint)(g_fps * 1000),  // fps * 1000 biar ga lose precision
+        (jint)(g_fps * 1000), 
         g_width,
         g_height
     };
@@ -103,7 +106,6 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
 }
 
 // ─── JNI: readFrame ───────────────────────────────────────────────────────────
-// Baca satu frame, return sebagai Bitmap
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
         JNIEnv* env, jobject) {
@@ -117,7 +119,6 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
 }
 
 // ─── JNI: openWriter ──────────────────────────────────────────────────────────
-// Buka VideoWriter untuk output
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
         JNIEnv* env, jobject,
@@ -130,31 +131,43 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
 
     if (g_writer.isOpened()) g_writer.release();
 
-    // H264 encoder via OpenCV
+    // 🔥 PROTEKSI 1: Paksa resolusi jadi angka Genap biar MediaCodec gak ngamuk
+    if (width % 2 != 0) width -= 1;
+    if (height % 2 != 0) height -= 1;
+
+    g_out_width = width;
+    g_out_height = height;
+
     int fourcc = cv::VideoWriter::fourcc('H','2','6','4');
-    g_writer.open(pathStr, fourcc, g_fps, cv::Size(width, height));
+    g_writer.open(pathStr, fourcc, g_fps, cv::Size(g_out_width, g_out_height));
 
     if (!g_writer.isOpened()) {
-        // Fallback: MJPG
         fourcc = cv::VideoWriter::fourcc('M','J','P','G');
         std::string mjpgPath = pathStr.substr(0, pathStr.rfind('.')) + "_raw.avi";
-        g_writer.open(mjpgPath, fourcc, g_fps, cv::Size(width, height));
+        g_writer.open(mjpgPath, fourcc, g_fps, cv::Size(g_out_width, g_out_height));
     }
 
     LOGI("Writer opened: %dx%d @ %.2f fps → %s",
-         width, height, g_fps, pathStr.c_str());
+         g_out_width, g_out_height, g_fps, pathStr.c_str());
     return (jboolean)g_writer.isOpened();
 }
 
 // ─── JNI: writeFrame ──────────────────────────────────────────────────────────
-// Tulis satu frame (Bitmap) ke output video
 extern "C" JNIEXPORT void JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
         JNIEnv* env, jobject, jobject bitmap) {
 
     if (!g_writer.isOpened()) return;
     cv::Mat mat = bitmapToMat(env, bitmap);
-    if (!mat.empty()) g_writer.write(mat);
+    
+    if (!mat.empty()) {
+        // 🔥 PROTEKSI 2: Kunci rapat dimensi memori! 
+        // Kalau AI ngasih gambar dengan ukuran gak sesuai, paksa resize biar gak Segfault
+        if (mat.cols != g_out_width || mat.rows != g_out_height) {
+            cv::resize(mat, mat, cv::Size(g_out_width, g_out_height));
+        }
+        g_writer.write(mat);
+    }
 }
 
 // ─── JNI: closeAll ────────────────────────────────────────────────────────────
@@ -165,6 +178,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAll(
     if (g_cap.isOpened())    g_cap.release();
     if (g_writer.isOpened()) g_writer.release();
     g_totalFrames = 0; g_fps = 30.0; g_width = g_height = 0;
+    g_out_width = g_out_height = 0;
     LOGI("OpenCV resources released");
 }
 
