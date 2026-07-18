@@ -20,6 +20,8 @@ static int g_totalFrames = 0;
 static double g_fps      = 30.0;
 static int g_width       = 0;
 static int g_height      = 0;
+static int g_out_width   = 0;  
+static int g_out_height  = 0;  
 
 // ─── Helper: Mat → Bitmap ─────────────────────────────────────────────────────
 static jobject matToBitmap(JNIEnv* env, const cv::Mat& mat) {
@@ -37,11 +39,13 @@ static jobject matToBitmap(JNIEnv* env, const cv::Mat& mat) {
     void* pixels = nullptr;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return nullptr;
 
-    // BGR (OpenCV) → RGBA (Android)
-    cv::Mat rgba;
-    cv::cvtColor(mat, rgba, cv::COLOR_BGR2RGBA);
+    AndroidBitmapInfo info;
+    AndroidBitmap_getInfo(env, bitmap, &info);
 
-    memcpy(pixels, rgba.data, (size_t)(w * h * 4));
+    // 🔥 FIX 1: Tulis langsung ke memori Bitmap dengan memperhatikan stride (padding)
+    cv::Mat dst(info.height, info.width, CV_8UC4, pixels, info.stride);
+    cv::cvtColor(mat, dst, cv::COLOR_BGR2RGBA);
+
     AndroidBitmap_unlockPixels(env, bitmap);
     return bitmap;
 }
@@ -54,19 +58,18 @@ static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
     void* pixels = nullptr;
     AndroidBitmap_lockPixels(env, bitmap, &pixels);
 
-    // RGBA → BGR
-    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels);
+    // 🔥 FIX 2: Baca memori Bitmap dengan memperhatikan stride biar nggak kesemutan
+    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels, info.stride);
     cv::Mat bgr;
     cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
 
     AndroidBitmap_unlockPixels(env, bitmap);
-    return bgr.clone();
+    return bgr;
 }
 
 // ─── JNI: openVideo ───────────────────────────────────────────────────────────
-// Buka video, return [totalFrames, fps*1000, width, height] sebagai int array
 extern "C" JNIEXPORT jintArray JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
         JNIEnv* env, jobject, jstring videoPath) {
 
     const char* path = env->GetStringUTFChars(videoPath, nullptr);
@@ -94,7 +97,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
     jintArray result = env->NewIntArray(4);
     jint vals[4] = {
         g_totalFrames,
-        (jint)(g_fps * 1000),  // fps * 1000 biar ga lose precision
+        (jint)(g_fps * 1000), 
         g_width,
         g_height
     };
@@ -103,7 +106,6 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
 }
 
 // ─── JNI: readFrame ───────────────────────────────────────────────────────────
-// Baca satu frame, return sebagai Bitmap
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
         JNIEnv* env, jobject) {
@@ -117,9 +119,8 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
 }
 
 // ─── JNI: openWriter ──────────────────────────────────────────────────────────
-// Buka VideoWriter untuk output
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriter(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
         JNIEnv* env, jobject,
         jstring outputPath,
         jint width, jint height) {
@@ -130,32 +131,52 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriter(
 
     if (g_writer.isOpened()) g_writer.release();
 
-    // H264 encoder via OpenCV
-    int fourcc = cv::VideoWriter::fourcc('H','2','6','4');
-    g_writer.open(pathStr, fourcc, g_fps, cv::Size(width, height));
-
-    if (!g_writer.isOpened()) {
-        // Fallback: MJPG
-        fourcc = cv::VideoWriter::fourcc('M','J','P','G');
-        std::string mjpgPath = pathStr.substr(0, pathStr.rfind('.')) + "_raw.avi";
-        g_writer.open(mjpgPath, fourcc, g_fps, cv::Size(width, height));
+    // 🔥 IDE JENIUS LU: Paksa Downgrade ke Resolusi Asli / Max 1080p
+    // Kalau Kotlin minta ukuran raksasa (lebih dari 1920), kita balikin ke g_width/g_height asli!
+    if (width > 1920 || height > 1920) {
+        width = g_width;
+        height = g_height;
+        LOGI("Resolusi kebesaran! Paksa downgrade ke ukuran asli: %dx%d", width, height);
     }
 
-    LOGI("Writer opened: %dx%d @ %.2f fps → %s",
-         width, height, g_fps, pathStr.c_str());
+    // Pastikan tetap genap
+    if (width % 2 != 0) width -= 1;
+    if (height % 2 != 0) height -= 1;
+
+    g_out_width = width;
+    g_out_height = height;
+
+    int fourcc = cv::VideoWriter::fourcc('H','2','6','4');
+    g_writer.open(pathStr, fourcc, g_fps, cv::Size(g_out_width, g_out_height));
+
+    if (!g_writer.isOpened()) {
+        fourcc = cv::VideoWriter::fourcc('M','J','P','G');
+        std::string mjpgPath = pathStr.substr(0, pathStr.rfind('.')) + "_raw.avi";
+        g_writer.open(mjpgPath, fourcc, g_fps, cv::Size(g_out_width, g_out_height));
+    }
+
     return (jboolean)g_writer.isOpened();
 }
 
 // ─── JNI: writeFrame ──────────────────────────────────────────────────────────
-// Tulis satu frame (Bitmap) ke output video
 extern "C" JNIEXPORT void JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
         JNIEnv* env, jobject, jobject bitmap) {
 
     if (!g_writer.isOpened()) return;
     cv::Mat mat = bitmapToMat(env, bitmap);
-    if (!mat.empty()) g_writer.write(mat);
+    
+    if (!mat.empty()) {
+        // 🔥 Proses Downscale Otomatis
+        // Karena g_out_width udah dikunci ke max 1080p, gambar AI yang raksasa bakal dipress di sini
+        if (mat.cols != g_out_width || mat.rows != g_out_height) {
+            // Pakai metode INTER_AREA: algoritma terbaik OpenCV buat ngecilin gambar biar tetep tajam!
+            cv::resize(mat, mat, cv::Size(g_out_width, g_out_height), 0, 0, cv::INTER_AREA);
+        }
+        g_writer.write(mat);
+    }
 }
+
 
 // ─── JNI: closeAll ────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
@@ -165,6 +186,7 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAll(
     if (g_cap.isOpened())    g_cap.release();
     if (g_writer.isOpened()) g_writer.release();
     g_totalFrames = 0; g_fps = 30.0; g_width = g_height = 0;
+    g_out_width = g_out_height = 0;
     LOGI("OpenCV resources released");
 }
 
