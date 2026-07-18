@@ -66,8 +66,9 @@ static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
 // ─── JNI: openVideo ───────────────────────────────────────────────────────────
 // Buka video, return [totalFrames, fps*1000, width, height] sebagai int array
 extern "C" JNIEXPORT jintArray JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
         JNIEnv* env, jobject, jstring videoPath) {
+
 
     const char* path = env->GetStringUTFChars(videoPath, nullptr);
     std::string pathStr(path);
