@@ -112,19 +112,17 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     int inW = 0, inH = 0;
     if (!bitmapToRGBA(env, inputBitmap, inputRGBA, inW, inH)) return nullptr;
 
-    // ── DEBUG: bypass MNN, return frame asli ─────────────────────────────────
     if (DEBUG_BYPASS_MNN) {
-        LOGI("DEBUG: returning original frame %dx%d", inW, inH);
+        LOGI("DEBUG: bypass mode ON");
         return rgbaToBitmap(env, inputRGBA.data(), inW, inH);
     }
 
-    // ── REAL MNN inference ────────────────────────────────────────────────────
     if (!g_net || !g_session) return nullptr;
 
     auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
     bool isNhwc = (inputTensor->getDimensionType() == MNN::Tensor::TENSORFLOW);
 
-    // 🔥 FIX 1: Dinamis Resize Tensor sesuai input gambar asli
+    // 1. Sesuaikan ukuran input
     if (isNhwc) {
         g_net->resizeTensor(inputTensor, {1, inH, inW, 3});
     } else {
@@ -132,70 +130,92 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     }
     g_net->resizeSession(g_session);
 
-    // 🔥 FIX 2: Konversi RGBA (4 channel) jadi RGB (3 channel) buat dimakan AI
-    std::vector<uint8_t> inputRGB(inW * inH * 3);
-    if (isNhwc) {
+    // 🔥 FIX 1: BIARKAN MNN BIKIN WADAH MEMORI INPUT SENDIRI BIAR PAS!
+    auto* hostIn = new MNN::Tensor(inputTensor, inputTensor->getDimensionType());
+
+    // Masukin nilai RGBA asli (0-255) ke memori MNN
+    if (hostIn->getType().code == halide_type_float) {
+        float* ptr = hostIn->host<float>();
         for (int i = 0; i < inW * inH; i++) {
-            inputRGB[i*3 + 0] = inputRGBA[i*4 + 0]; // R
-            inputRGB[i*3 + 1] = inputRGBA[i*4 + 1]; // G
-            inputRGB[i*3 + 2] = inputRGBA[i*4 + 2]; // B
+            if (isNhwc) {
+                ptr[i*3+0] = (float)inputRGBA[i*4+0]; // R
+                ptr[i*3+1] = (float)inputRGBA[i*4+1]; // G
+                ptr[i*3+2] = (float)inputRGBA[i*4+2]; // B
+            } else {
+                ptr[0*inW*inH + i] = (float)inputRGBA[i*4+0]; // R
+                ptr[1*inW*inH + i] = (float)inputRGBA[i*4+1]; // G
+                ptr[2*inW*inH + i] = (float)inputRGBA[i*4+2]; // B
+            }
         }
     } else {
+        uint8_t* ptr = hostIn->host<uint8_t>();
         for (int i = 0; i < inW * inH; i++) {
-            inputRGB[0 * inW * inH + i] = inputRGBA[i*4 + 0]; // R
-            inputRGB[1 * inW * inH + i] = inputRGBA[i*4 + 1]; // G
-            inputRGB[2 * inW * inH + i] = inputRGBA[i*4 + 2]; // B
+            if (isNhwc) {
+                ptr[i*3+0] = inputRGBA[i*4+0]; // R
+                ptr[i*3+1] = inputRGBA[i*4+1]; // G
+                ptr[i*3+2] = inputRGBA[i*4+2]; // B
+            } else {
+                ptr[0*inW*inH + i] = inputRGBA[i*4+0]; // R
+                ptr[1*inW*inH + i] = inputRGBA[i*4+1]; // G
+                ptr[2*inW*inH + i] = inputRGBA[i*4+2]; // B
+            }
         }
     }
-    
-    // Siapkan input memori & eksekusi AI
-    std::vector<int> inDims = isNhwc ? std::vector<int>{1, inH, inW, 3} : std::vector<int>{1, 3, inH, inW};
-    auto* hostIn = MNN::Tensor::create<uint8_t>(inDims, inputRGB.data(), inputTensor->getDimensionType());
+
     inputTensor->copyFromHostTensor(hostIn);
     delete hostIn;
 
-    // RUN THE AI ENGINE!
+    // RUN AI ENGINE
     g_net->runSession(g_session);
 
     // ─── AMBIL OUTPUT ───
     auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
     if (!outTensor) return nullptr;
 
+    // 🔥 FIX 2: BIARKAN MNN BIKIN WADAH OUTPUT SENDIRI (ANTI FORCE CLOSE!)
+    auto* hostOut = new MNN::Tensor(outTensor, outTensor->getDimensionType());
+    outTensor->copyToHostTensor(hostOut); // Sekarang dijamin 100% aman!
+
     auto shape = outTensor->shape();
-    if (shape.size() < 4) return nullptr;
-
     bool isOutNhwc = (outTensor->getDimensionType() == MNN::Tensor::TENSORFLOW);
-
-    // 🔥 FIX 3: Baca dimensi yang TEPAT biar memori gak meledak!
     int outC = isOutNhwc ? shape[3] : shape[1];
     int outH = isOutNhwc ? shape[1] : shape[2];
     int outW = isOutNhwc ? shape[2] : shape[3];
 
-    // Siapkan wadah memori (RGB) seukuran dimensi asli output dari AI
-    std::vector<uint8_t> outRGB(outH * outW * outC);
-    auto* hostOut = MNN::Tensor::create<uint8_t>(shape, outRGB.data(), outTensor->getDimensionType());
-    
-    // Tarik datanya dari AI (Sekarang dijamin gak bakal bocor/Force Close!)
-    outTensor->copyToHostTensor(hostOut);
-    delete hostOut;
-
-    // 🔥 FIX 4: Konversi balik RGB (3 channel) jadi RGBA (4 channel) buat nulis Bitmap Android
+    // Konversi hasil AI jadi gambar Android
     std::vector<uint8_t> finalRGBA(outW * outH * 4);
-    if (isOutNhwc) {
+    
+    if (hostOut->getType().code == halide_type_float) {
+        float* ptr = hostOut->host<float>();
         for (int i = 0; i < outW * outH; i++) {
-            finalRGBA[i*4 + 0] = outRGB[i*outC + 0]; // R
-            finalRGBA[i*4 + 1] = outRGB[i*outC + 1]; // G
-            finalRGBA[i*4 + 2] = outRGB[i*outC + 2]; // B
-            finalRGBA[i*4 + 3] = 255;                // Alpha
+            if (isOutNhwc) {
+                finalRGBA[i*4+0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+0]));
+                finalRGBA[i*4+1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+1]));
+                finalRGBA[i*4+2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+2]));
+            } else {
+                finalRGBA[i*4+0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[0*outW*outH+i]));
+                finalRGBA[i*4+1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[1*outW*outH+i]));
+                finalRGBA[i*4+2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[2*outW*outH+i]));
+            }
+            finalRGBA[i*4+3] = 255;
         }
     } else {
+        uint8_t* ptr = hostOut->host<uint8_t>();
         for (int i = 0; i < outW * outH; i++) {
-            finalRGBA[i*4 + 0] = outRGB[0 * outW * outH + i]; // R
-            finalRGBA[i*4 + 1] = outRGB[1 * outW * outH + i]; // G
-            finalRGBA[i*4 + 2] = outRGB[2 * outW * outH + i]; // B
-            finalRGBA[i*4 + 3] = 255;                         // Alpha
+            if (isOutNhwc) {
+                finalRGBA[i*4+0] = ptr[i*outC+0];
+                finalRGBA[i*4+1] = ptr[i*outC+1];
+                finalRGBA[i*4+2] = ptr[i*outC+2];
+            } else {
+                finalRGBA[i*4+0] = ptr[0*outW*outH+i];
+                finalRGBA[i*4+1] = ptr[1*outW*outH+i];
+                finalRGBA[i*4+2] = ptr[2*outW*outH+i];
+            }
+            finalRGBA[i*4+3] = 255;
         }
     }
+
+    delete hostOut; // Bersihkan memori output MNN
 
     return rgbaToBitmap(env, finalRGBA.data(), outW, outH);
 }
