@@ -18,7 +18,7 @@ static MNN::Session*     g_session = nullptr;
 static std::string       g_modelPath;
 
 // ─── DEBUG MODE: bypass MNN, return input as-is ──────────────────────────────
-// Set ke false kalau mau pakai MNN beneran
+// 🔥 SAKLAR ON! AI SEKARANG HIDUP!
 static bool DEBUG_BYPASS_MNN = false;
 
 // ─── Bitmap → RGBA bytes ─────────────────────────────────────────────────────
@@ -121,52 +121,84 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     // ── REAL MNN inference ────────────────────────────────────────────────────
     if (!g_net || !g_session) return nullptr;
 
-    // 🔥 FIX 1: TILE RESIZE! AI lu cuma kuat nelen kotak 1024x1024
-    // (Berdasarkan temuan Claude dari file libenhance.so asli)
-    int tile_size = 1024;
     auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
-    
-    // Pastikan tensor AI-nya siap di ukuran 1024x1024
-    g_net->resizeTensor(inputTensor, {1, 3, tile_size, tile_size});
+    bool isNhwc = (inputTensor->getDimensionType() == MNN::Tensor::TENSORFLOW);
+
+    // 🔥 FIX 1: Dinamis Resize Tensor sesuai input gambar asli
+    if (isNhwc) {
+        g_net->resizeTensor(inputTensor, {1, inH, inW, 3});
+    } else {
+        g_net->resizeTensor(inputTensor, {1, 3, inH, inW});
+    }
     g_net->resizeSession(g_session);
 
-    // 🔥 FIX 2: UBAH INPUT JADI BYTE (UINT8), BUKAN FLOAT [0-1]
-    int n = inW * inH;
+    // 🔥 FIX 2: Konversi RGBA (4 channel) jadi RGB (3 channel) buat dimakan AI
+    std::vector<uint8_t> inputRGB(inW * inH * 3);
+    if (isNhwc) {
+        for (int i = 0; i < inW * inH; i++) {
+            inputRGB[i*3 + 0] = inputRGBA[i*4 + 0]; // R
+            inputRGB[i*3 + 1] = inputRGBA[i*4 + 1]; // G
+            inputRGB[i*3 + 2] = inputRGBA[i*4 + 2]; // B
+        }
+    } else {
+        for (int i = 0; i < inW * inH; i++) {
+            inputRGB[0 * inW * inH + i] = inputRGBA[i*4 + 0]; // R
+            inputRGB[1 * inW * inH + i] = inputRGBA[i*4 + 1]; // G
+            inputRGB[2 * inW * inH + i] = inputRGBA[i*4 + 2]; // B
+        }
+    }
     
-    // Kita set bentuk datanya jadi Byte (UINT8) biar AI-nya ngerespon dengan bener!
-    auto* hostIn = MNN::Tensor::create<uint8_t>({1, 3, inH, inW}, inputRGBA.data(), MNN::Tensor::TENSORFLOW); // TENSORFLOW = NHWC (RGBA format)
-    
+    // Siapkan input memori & eksekusi AI
+    std::vector<int> inDims = isNhwc ? std::vector<int>{1, inH, inW, 3} : std::vector<int>{1, 3, inH, inW};
+    auto* hostIn = MNN::Tensor::create<uint8_t>(inDims, inputRGB.data(), inputTensor->getDimensionType());
     inputTensor->copyFromHostTensor(hostIn);
     delete hostIn;
 
     // RUN THE AI ENGINE!
     g_net->runSession(g_session);
 
+    // ─── AMBIL OUTPUT ───
     auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
+    if (!outTensor) return nullptr;
+
     auto shape = outTensor->shape();
     if (shape.size() < 4) return nullptr;
 
-    int outH = shape[1], outW = shape[2]; // Ambil size dari output NHWC
+    bool isOutNhwc = (outTensor->getDimensionType() == MNN::Tensor::TENSORFLOW);
+
+    // 🔥 FIX 3: Baca dimensi yang TEPAT biar memori gak meledak!
+    int outC = isOutNhwc ? shape[3] : shape[1];
+    int outH = isOutNhwc ? shape[1] : shape[2];
+    int outW = isOutNhwc ? shape[2] : shape[3];
+
+    // Siapkan wadah memori (RGB) seukuran dimensi asli output dari AI
+    std::vector<uint8_t> outRGB(outH * outW * outC);
+    auto* hostOut = MNN::Tensor::create<uint8_t>(shape, outRGB.data(), outTensor->getDimensionType());
     
-    // 🔥 FIX 3: OUTPUT JUGA LANGSUNG BACA SEBAGAI BYTE (UINT8)
-    std::vector<uint8_t> outRGBA((size_t)(outW * outH * 4));
-    auto* hostOut = MNN::Tensor::create<uint8_t>({1, outH, outW, 3}, outRGBA.data(), MNN::Tensor::TENSORFLOW);
-    
+    // Tarik datanya dari AI (Sekarang dijamin gak bakal bocor/Force Close!)
     outTensor->copyToHostTensor(hostOut);
     delete hostOut;
-    
-    // Karena hasil outputnya cuma RGB (3 channel), kita paksa bikin jadi RGBA (4 channel) buat bitmap
-    std::vector<uint8_t> finalRGBA((size_t)(outW * outH * 4));
-    for (int i = 0; i < outW * outH; i++) {
-        finalRGBA[i*4+0] = outRGBA[i*3+0]; // R
-        finalRGBA[i*4+1] = outRGBA[i*3+1]; // G
-        finalRGBA[i*4+2] = outRGBA[i*3+2]; // B
-        finalRGBA[i*4+3] = 255;            // A (Opacity 100%)
+
+    // 🔥 FIX 4: Konversi balik RGB (3 channel) jadi RGBA (4 channel) buat nulis Bitmap Android
+    std::vector<uint8_t> finalRGBA(outW * outH * 4);
+    if (isOutNhwc) {
+        for (int i = 0; i < outW * outH; i++) {
+            finalRGBA[i*4 + 0] = outRGB[i*outC + 0]; // R
+            finalRGBA[i*4 + 1] = outRGB[i*outC + 1]; // G
+            finalRGBA[i*4 + 2] = outRGB[i*outC + 2]; // B
+            finalRGBA[i*4 + 3] = 255;                // Alpha
+        }
+    } else {
+        for (int i = 0; i < outW * outH; i++) {
+            finalRGBA[i*4 + 0] = outRGB[0 * outW * outH + i]; // R
+            finalRGBA[i*4 + 1] = outRGB[1 * outW * outH + i]; // G
+            finalRGBA[i*4 + 2] = outRGB[2 * outW * outH + i]; // B
+            finalRGBA[i*4 + 3] = 255;                         // Alpha
+        }
     }
 
     return rgbaToBitmap(env, finalRGBA.data(), outW, outH);
 }
-
 
 // ─── JNI: release ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
