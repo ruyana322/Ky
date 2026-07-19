@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 
 enum class EnhanceMode(val label: String, val emoji: String, val desc: String) {
     AI_QUALITY("AI Quality", "✨", "Frame-by-frame AI enhancement"),
@@ -151,7 +152,9 @@ fun VideoEnhanceScreen() {
             doneFrames = 0; progressPct = 0f; processFps = 0f
 
             val outName = "Kythera_${System.currentTimeMillis()}.mp4"
-            val rawOut  = File(context.cacheDir, "ky_raw_${System.currentTimeMillis()}.mp4")
+            // 🔥 HAPUS RAWOUT OPENCV, GANTI PAKE FOLDER PENAMPUNG FRAME
+            val tempDir = File(context.cacheDir, "ky_frames_${System.currentTimeMillis()}")
+            tempDir.mkdirs() 
             val outFile = File(context.getExternalFilesDir(null), outName)
 
             try {
@@ -165,26 +168,16 @@ fun VideoEnhanceScreen() {
                     errorLog = "Gagal buka video"; isProcessing = false; return@launch
                 }
 
-                // Width/height sudah di-swap oleh OpenCvBridge sesuai rotation
                 val scaleFactor = if (videoScale == VideoScale.X2) 2 else 4
                 val rawW = openedMeta.width  * scaleFactor
                 val rawH = openedMeta.height * scaleFactor
 
-                // Limit max 1080p
                 val (finalW, finalH) = if (openedMeta.isPortrait) {
                     val h = minOf(rawH, 1920); val w = (rawW * h / rawH) / 2 * 2
                     Pair(w, h)
                 } else {
                     val w = minOf(rawW, 1920); val h = (rawH * w / rawW) / 2 * 2
                     Pair(w, h)
-                }
-
-                val writerOk = withContext(Dispatchers.IO) {
-                    OpenCvBridge.openWriter(rawOut.absolutePath, finalW, finalH)
-                }
-                if (!writerOk) {
-                    errorLog = "Gagal buka writer"; isProcessing = false
-                    OpenCvBridge.close(); return@launch
                 }
 
                 statusMsg = "Memproses..."; progressPct = 0.05f
@@ -196,12 +189,21 @@ fun VideoEnhanceScreen() {
                         if (isCancelled) break
                         val frame = OpenCvBridge.readFrame() ?: break
                         val enhanced = MnnVideoBridge.enhance(frame, accelerator)
-                        frame.recycle()
 
+                        // 🔥 BUG FIXED: Recycle frame asli HARUS setelah toWrite dibuat!
                         val toWrite = enhanced ?: android.graphics.Bitmap.createScaledBitmap(
                             frame, finalW, finalH, true
                         )
-                        OpenCvBridge.writeFrame(toWrite)
+                        frame.recycle()
+
+                        // 🔥 SIMPAN KE JPEG (Bypass OpenCV VideoWriter)
+                        val frameFile = File(tempDir, String.format("frame_%05d.jpg", frameIdx))
+                        val outStream = FileOutputStream(frameFile)
+                        // Compress pakai quality 97 biar HD mirip PNG tapi ringan
+                        toWrite.compress(android.graphics.Bitmap.CompressFormat.JPEG, 97, outStream)
+                        outStream.flush()
+                        outStream.close()
+
                         if (toWrite != enhanced) toWrite.recycle()
                         enhanced?.recycle()
 
@@ -218,46 +220,60 @@ fun VideoEnhanceScreen() {
                 withContext(Dispatchers.IO) { OpenCvBridge.close() }
 
                 if (isCancelled) {
-                    statusMsg = "Dibatalkan"; isProcessing = false; rawOut.delete(); return@launch
+                    statusMsg = "Dibatalkan"; isProcessing = false; tempDir.deleteRecursively(); return@launch
                 }
 
-                progressPct = 0.87f; statusMsg = "Menambahkan audio..."
+                progressPct = 0.87f; statusMsg = "Menjahit video..."
 
-                // Merge audio
+                // Merge audio & Jahit Frame
                 val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
+                // Bersihin string FPS biar dapet angka bersih (contoh "30 fps" jadi "30")
+                val fpsStr = openedMeta.displayFps.replace(Regex("[^0-9.]"), "")
+                val fps = if (fpsStr.isNotEmpty()) fpsStr else "30"
+
                 val merge = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
-                        "-y -i \"${rawOut.absolutePath}\" -i \"$safUrl\" " +
-                        "-map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k " +
+                        "-y -framerate $fps " +
+                        "-i \"${tempDir.absolutePath}/frame_%05d.jpg\" " +
+                        "-i \"$safUrl\" " +
+                        "-map 0:v -map 1:a? " + // a? artinya audio opsional (buat video bisu tetep jalan)
+                        "-c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p " + 
+                        "-c:a aac -b:a 192k " +
                         "-movflags +faststart -shortest \"${outFile.absolutePath}\""
                     )
                 }
 
                 val finalPath = if (ReturnCode.isSuccess(merge.returnCode)) {
-                    rawOut.delete(); outFile.absolutePath
-                } else rawOut.absolutePath
-
-                progressPct = 0.95f
-
-                val cv = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, outName)
-                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
+                    tempDir.deleteRecursively(); outFile.absolutePath
+                } else {
+                    errorLog = merge.allLogsAsString
+                    tempDir.deleteRecursively()
+                    null
                 }
-                val savedUri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
-                savedUri?.let { dest ->
-                    context.contentResolver.openOutputStream(dest)?.use { os ->
-                        FileInputStream(File(finalPath)).use { it.copyTo(os) }
+
+                if (finalPath != null) {
+                    progressPct = 0.95f
+                    val cv = ContentValues().apply {
+                        put(MediaStore.Video.Media.DISPLAY_NAME, outName)
+                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
                     }
-                    File(finalPath).delete(); outputUri = dest
+                    val savedUri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
+                    savedUri?.let { dest ->
+                        context.contentResolver.openOutputStream(dest)?.use { os ->
+                            FileInputStream(File(finalPath)).use { it.copyTo(os) }
+                        }
+                        File(finalPath).delete(); outputUri = dest
+                    }
+                    progressPct = 1f; isSuccess = true
+                    statusMsg = "Selesai! $doneFrames frame diproses"
+                } else {
+                    statusMsg = "Gagal menjahit video!"
                 }
-
-                progressPct = 1f; isSuccess = true
-                statusMsg = "Selesai! $doneFrames frame diproses"
 
             } catch (e: Exception) {
                 errorLog = "${e.javaClass.simpleName}: ${e.message}"; statusMsg = "Error"
-                withContext(Dispatchers.IO) { OpenCvBridge.close(); rawOut.delete() }
+                withContext(Dispatchers.IO) { OpenCvBridge.close(); tempDir.deleteRecursively() }
             }
             isProcessing = false
         }
