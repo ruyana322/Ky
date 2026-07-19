@@ -20,7 +20,6 @@ android {
             abiFilters.add("arm64-v8a")
         }
 
-        // ← TAMBAH INI: force rebuild CMake cache setiap build
         externalNativeBuild {
             cmake {
                 arguments(
@@ -81,8 +80,17 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "lib/x86/**"
-            excludes += "lib/armeabi-v7a/**"
+        }
+        // ← FIX: libc++_shared.so duplikat dari jniLibs + CMake + FFmpeg AAR
+        jniLibs {
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/arm64-v8a/libMNN.so",
+                "lib/arm64-v8a/libopencv_java4.so",
+                "lib/arm64-v8a/libncnn.so",
+                "lib/arm64-v8a/libomp.so",
+                "lib/arm64-v8a/librife.so"
+            )
         }
     }
 }
