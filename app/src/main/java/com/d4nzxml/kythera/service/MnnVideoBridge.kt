@@ -5,141 +5,116 @@ import android.graphics.Bitmap
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
+import java.io.File
+import java.io.FileOutputStream
 
 /**
- * MnnVideoBridge — Video Enhancement via MNN (libenhance.so)
- * Pipeline khusus video, direct to native byte array!
- * D4nzxml Studio © 2026
+ * MnnVideoBridge — Video Enhancement via MNN (libkythera_mnn.so)
+ * Pipeline khusus video, terpisah dari photo upscale
  */
 object MnnVideoBridge {
 
     private const val TAG = "KytheraVideoMNN"
 
-    // Model scale pilihan (Pastikan file .mnn ini beneran ada di folder assets/realsr/models/)
-    enum class VideoScale(val label: String, val fileName: String, val scaleFactor: Int) {
-        X2("2x Enhance", "resrgan_srvggx1_d2u2_1024.mnn", 2),
-        X4("4x Enhance", "resrgan_srvggx1_d4u4_1024.mnn", 4)
+    enum class VideoScale(val label: String, val fileName: String) {
+        X2("2x Enhance", "resrgan_srvggx1_d2u2_1024.mnn"),
+        X4("4x Enhance", "resrgan_srvggx1_d4u4_1024.mnn")
     }
 
-    // Akselerasi (Catatan: libenhance.so mungkin udah ngatur GPU/CPU otomatis di dalamnya)
     enum class Accelerator(val label: String, val desc: String, val flag: Int) {
         GPU("GPU OpenCL", "Cepat, butuh GPU OpenCL", 0),
         CPU("CPU",        "Kompatibel semua HP",     1)
     }
 
+    private var isLibLoaded  = false
     private var isModelReady = false
     private var currentModel = ""
-    private var engineId: Long = 0L
 
-    // 🔥 Panggil jembatan Java murni yang lu bikin tadi
-    private val enhanceNative = EnhanceNative()
+    // ─── Load native library asli lu ───────────────────────────────────────────
+    private fun loadLib(): Boolean {
+        if (isLibLoaded) return true
+        return try {
+            // Memanggil mesin asli buatan lu yang ada di MT Manager
+            System.loadLibrary("kythera_mnn")
+            isLibLoaded = true
+            Log.d(TAG, "Native lib loaded ✅")
+            true
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "Failed load lib: ${e.message}")
+            false
+        }
+    }
 
-    // ─── Setup: Baca model dari assets jadi ByteArray ──────────────────────────
+    // ─── Setup: ekstrak model ke internal storage ─────────────────────────────
     suspend fun setup(context: Context, scale: VideoScale = VideoScale.X4): Boolean =
         withContext(Dispatchers.IO) {
-            // Kalau udah di-load dengan model yang sama, skip aja biar ngebut
-            if (isModelReady && currentModel == scale.fileName) return@withContext true
+            if (!loadLib()) return@withContext false
 
-            // Release model lama kalau lagi ganti resolusi
-            if (engineId != 0L) {
-                enhanceNative.nativeRelease(engineId)
-                engineId = 0L
-            }
+            val dir       = File(context.filesDir, "mnn_video").also { it.mkdirs() }
+            val modelFile = File(dir, scale.fileName)
 
-            try {
-                // Baca file .mnn langsung dari assets (NO EKSTRAK KE INTERNAL!)
-                val assetPath = "realsr/models/${scale.fileName}"
-                val modelBytes = context.assets.open(assetPath).readBytes()
-                
-                // Init ke mesin libenhance.so
-                engineId = enhanceNative.nativeInit(modelBytes, modelBytes.size)
-                
-                if (engineId != 0L) {
-                    isModelReady = true
-                    currentModel = scale.fileName
-                    Log.d(TAG, "MNN Video Engine ready ✅ [${scale.label}], ID: $engineId")
-                    return@withContext true
-                } else {
-                    Log.e(TAG, "Gagal init model ke libenhance.so")
+            if (!modelFile.exists() || modelFile.length() < 1000) {
+                try {
+                    context.assets.open("realsr/models/${scale.fileName}").use { input ->
+                        FileOutputStream(modelFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    Log.d(TAG, "Model extracted: ${scale.fileName}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed extract model: ${e.message}")
                     return@withContext false
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Setup gagal: ${e.message}")
-                return@withContext false
             }
+
+            val loaded = loadModel(modelFile.absolutePath, Accelerator.GPU.flag)
+            if (!loaded) {
+                Log.w(TAG, "GPU load gagal, coba CPU...")
+                val cpuLoaded = loadModel(modelFile.absolutePath, Accelerator.CPU.flag)
+                if (!cpuLoaded) {
+                    Log.e(TAG, "Model load gagal total")
+                    return@withContext false
+                }
+            }
+
+            isModelReady = true
+            currentModel = scale.fileName
+            Log.d(TAG, "MNN Video Engine ready ✅ [${scale.label}]")
+            true
         }
 
-    // ─── Switch model (2x ↔ 4x) ───────────────────────────────────────────────
     suspend fun switchScale(context: Context, scale: VideoScale): Boolean {
         if (currentModel == scale.fileName && isModelReady) return true
         isModelReady = false
         return setup(context, scale)
     }
 
-    // ─── Enhance satu frame (No Float, Pure Byte Array!) ───────────────────────
     suspend fun enhance(
         bitmap: Bitmap,
         accelerator: Accelerator = Accelerator.GPU
     ): Bitmap? = withContext(Dispatchers.IO) {
-        if (!isModelReady || engineId == 0L) {
+        if (!isLibLoaded || !isModelReady) {
             Log.e(TAG, "Engine belum siap!")
             return@withContext null
         }
-        
         try {
-            val width = bitmap.width
-            val height = bitmap.height
-
-            // Pastikan format gambarnya ARGB_8888 biar ukurannya pas 4 byte per piksel
+            // 🔥 PASTIKAN FORMAT WARNA BENAR BIAR GAK KOTAK-KOTAK / TV RUSAK
             val safe = if (bitmap.config != Bitmap.Config.ARGB_8888)
                 bitmap.copy(Bitmap.Config.ARGB_8888, false) else bitmap
 
-            // 🔥 A. Convert Bitmap ke ByteArray
-            val byteBuffer = ByteBuffer.allocate(width * height * 4)
-            safe.copyPixelsToBuffer(byteBuffer)
-            val inputByteArray = byteBuffer.array()
-
-            // 🔥 B. Hajar pakai AI libenhance.so (Color format = 1 untuk RGBA)
-            val outByteArray = enhanceNative.nativeEnhance(engineId, inputByteArray, 1, width, height)
-
-            if (outByteArray == null || outByteArray.isEmpty()) {
-                Log.e(TAG, "Waduh, output dari C++ kosong!")
-                return@withContext null
-            }
-
-            // 🔥 C. Hitung otomatis ukuran output (Dinamis mau itu 2x atau 4x)
-            val totalOutputPixels = outByteArray.size / 4
-            val scaleSq = totalOutputPixels / (width * height)
-            val scale = Math.sqrt(scaleSq.toDouble()).toInt()
-            
-            val outWidth = width * scale
-            val outHeight = height * scale
-
-            // 🔥 D. Balikin ByteArray hasil AI ke wujud Bitmap bening
-            val outputBitmap = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
-            outputBitmap.copyPixelsFromBuffer(ByteBuffer.wrap(outByteArray))
+            val result = enhanceFrame(safe)
 
             if (safe != bitmap) safe.recycle()
-            
-            return@withContext outputBitmap
-
+            result
         } catch (e: Exception) {
             Log.e(TAG, "Enhance error: ${e.message}")
             null
         }
     }
 
-    val ready: Boolean get() = isModelReady && engineId != 0L
+    val ready: Boolean get() = isLibLoaded && isModelReady
 
-    // ─── Bersih-bersih RAM ─────────────────────────────────────────────────────
-    fun release() {
-        if (engineId != 0L) {
-            enhanceNative.nativeRelease(engineId)
-            engineId = 0L
-            isModelReady = false
-            currentModel = ""
-            Log.d(TAG, "MNN Video Engine dirilis, RAM aman!")
-        }
-    }
+    private external fun loadModel(modelPath: String, gpuMode: Int): Boolean
+    private external fun enhanceFrame(bitmap: Bitmap): Bitmap?
+    external fun release()
 }
