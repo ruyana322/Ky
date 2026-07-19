@@ -130,21 +130,22 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     }
     g_net->resizeSession(g_session);
 
-    // 🔥 FIX 1: BIARKAN MNN BIKIN WADAH MEMORI INPUT SENDIRI BIAR PAS!
-    auto* hostIn = new MNN::Tensor(inputTensor, inputTensor->getDimensionType());
+    // 🔥 FIX 1: BIKIN WADAH INPUT DENGAN TIPE DATA SPESIFIK!
+    halide_type_t inType = inputTensor->getType();
+    auto* hostIn = MNN::Tensor::create(inputTensor->shape(), inType, nullptr, inputTensor->getDimensionType());
 
     // Masukin nilai RGBA asli (0-255) ke memori MNN
-    if (hostIn->getType().code == halide_type_float) {
+    if (inType.code == halide_type_float) {
         float* ptr = hostIn->host<float>();
         for (int i = 0; i < inW * inH; i++) {
             if (isNhwc) {
-                ptr[i*3+0] = (float)inputRGBA[i*4+0]; // R
-                ptr[i*3+1] = (float)inputRGBA[i*4+1]; // G
-                ptr[i*3+2] = (float)inputRGBA[i*4+2]; // B
+                ptr[i*3+0] = (float)inputRGBA[i*4+0] / 255.0f; // R
+                ptr[i*3+1] = (float)inputRGBA[i*4+1] / 255.0f; // G
+                ptr[i*3+2] = (float)inputRGBA[i*4+2] / 255.0f; // B
             } else {
-                ptr[0*inW*inH + i] = (float)inputRGBA[i*4+0]; // R
-                ptr[1*inW*inH + i] = (float)inputRGBA[i*4+1]; // G
-                ptr[2*inW*inH + i] = (float)inputRGBA[i*4+2]; // B
+                ptr[0*inW*inH + i] = (float)inputRGBA[i*4+0] / 255.0f; // R
+                ptr[1*inW*inH + i] = (float)inputRGBA[i*4+1] / 255.0f; // G
+                ptr[2*inW*inH + i] = (float)inputRGBA[i*4+2] / 255.0f; // B
             }
         }
     } else {
@@ -172,9 +173,12 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
     if (!outTensor) return nullptr;
 
-    // 🔥 FIX 2: BIARKAN MNN BIKIN WADAH OUTPUT SENDIRI (ANTI FORCE CLOSE!)
-    auto* hostOut = new MNN::Tensor(outTensor, outTensor->getDimensionType());
-    outTensor->copyToHostTensor(hostOut); // Sekarang dijamin 100% aman!
+    // 🔥 FIX 2: BIKIN WADAH OUTPUT MANUAL YANG SANGAT SPESIFIK!
+    halide_type_t outType = outTensor->getType();
+    auto* hostOut = MNN::Tensor::create(outTensor->shape(), outType, nullptr, outTensor->getDimensionType());
+    
+    // Copy data (Ini titik keramatnya, harusnya udah gak Force Close!)
+    outTensor->copyToHostTensor(hostOut); 
 
     auto shape = outTensor->shape();
     bool isOutNhwc = (outTensor->getDimensionType() == MNN::Tensor::TENSORFLOW);
@@ -185,17 +189,17 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     // Konversi hasil AI jadi gambar Android
     std::vector<uint8_t> finalRGBA(outW * outH * 4);
     
-    if (hostOut->getType().code == halide_type_float) {
+    if (outType.code == halide_type_float) {
         float* ptr = hostOut->host<float>();
         for (int i = 0; i < outW * outH; i++) {
             if (isOutNhwc) {
-                finalRGBA[i*4+0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+0]));
-                finalRGBA[i*4+1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+1]));
-                finalRGBA[i*4+2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+2]));
+                finalRGBA[i*4+0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+0] * 255.0f));
+                finalRGBA[i*4+1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+1] * 255.0f));
+                finalRGBA[i*4+2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[i*outC+2] * 255.0f));
             } else {
-                finalRGBA[i*4+0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[0*outW*outH+i]));
-                finalRGBA[i*4+1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[1*outW*outH+i]));
-                finalRGBA[i*4+2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[2*outW*outH+i]));
+                finalRGBA[i*4+0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[0*outW*outH+i] * 255.0f));
+                finalRGBA[i*4+1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[1*outW*outH+i] * 255.0f));
+                finalRGBA[i*4+2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptr[2*outW*outH+i] * 255.0f));
             }
             finalRGBA[i*4+3] = 255;
         }
@@ -215,7 +219,7 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
         }
     }
 
-    delete hostOut; // Bersihkan memori output MNN
+    delete hostOut; 
 
     return rgbaToBitmap(env, finalRGBA.data(), outW, outH);
 }
