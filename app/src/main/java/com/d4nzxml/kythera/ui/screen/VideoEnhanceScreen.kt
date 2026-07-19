@@ -143,7 +143,7 @@ fun VideoEnhanceScreen() {
         }
     }
 
-    fun processAI() {
+        fun processAI() {
         val uri  = inputUri ?: return
         val meta = videoMeta ?: return
         scope.launch {
@@ -198,7 +198,7 @@ fun VideoEnhanceScreen() {
 
                         // 🔥 SIMPAN KE JPEG (Bypass OpenCV VideoWriter)
                         val frameFile = File(tempDir, String.format("frame_%05d.jpg", frameIdx))
-                        val outStream = FileOutputStream(frameFile)
+                        val outStream = java.io.FileOutputStream(frameFile)
                         // Compress pakai quality 97 biar HD mirip PNG tapi ringan
                         toWrite.compress(android.graphics.Bitmap.CompressFormat.JPEG, 97, outStream)
                         outStream.flush()
@@ -278,6 +278,7 @@ fun VideoEnhanceScreen() {
             isProcessing = false
         }
     }
+
 
     fun processFastHD() {
         val uri  = inputUri ?: return
