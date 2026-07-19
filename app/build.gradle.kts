@@ -15,14 +15,22 @@ android {
         versionCode = 1
         versionName = "1.0.1"
 
-        // 🔥 KUNCI BUILD: Cukup buat 64-bit (arm64-v8a) aja biar APK nggak bengkak!
         ndk {
             abiFilters.clear()
             abiFilters.add("arm64-v8a")
         }
+
+        // ← TAMBAH INI: force rebuild CMake cache setiap build
+        externalNativeBuild {
+            cmake {
+                arguments(
+                    "-DANDROID_STL=c++_shared",
+                    "-DCMAKE_VERBOSE_MAKEFILE=ON"
+                )
+            }
+        }
     }
 
-    // 🔥 PELURU BIUS: Bungkam satpam Lint Google biar lolos targetSdk 28
     lint {
         abortOnError = false
         checkReleaseBuilds = false
@@ -45,10 +53,10 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
-    // 🔥 BRANKAS KEYSTORE: Ngebaca file hasil decode dan password rahasia GitHub Actions
     signingConfigs {
         create("release") {
             storeFile = file("dadan_ruyana_release.keystore")
@@ -61,7 +69,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            isShrinkResources = true // 🔥 Biar file APK makin langsing
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -74,14 +82,13 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "lib/x86/**"
-            excludes += "lib/armeabi-v7a/**" // 🔥 Sapu bersih folder 32-bit dari APK
+            excludes += "lib/armeabi-v7a/**"
         }
     }
 }
 
 dependencies {
     implementation("androidx.browser:browser:1.8.0")
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -94,11 +101,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.appcompat)
-
-    // FFMPEG Offline lu aman, nggak diutak-atik
     implementation(files("libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar"))
     implementation("com.arthenica:smart-exception-java:0.2.1")
-
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
 }
