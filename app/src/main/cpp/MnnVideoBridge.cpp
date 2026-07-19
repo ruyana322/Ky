@@ -19,7 +19,7 @@ static std::string       g_modelPath;
 
 // ─── DEBUG MODE: bypass MNN, return input as-is ──────────────────────────────
 // Set ke false kalau mau pakai MNN beneran
-static bool DEBUG_BYPASS_MNN = true;
+static bool DEBUG_BYPASS_MNN = false;
 
 // ─── Bitmap → RGBA bytes ─────────────────────────────────────────────────────
 static bool bitmapToRGBA(JNIEnv* env, jobject bitmap,
