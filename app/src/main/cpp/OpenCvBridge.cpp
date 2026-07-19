@@ -17,32 +17,23 @@ static int    g_totalFrames = 0;
 static double g_fps         = 30.0;
 static int    g_width       = 0;
 static int    g_height      = 0;
-static int    g_rotation    = 0;  // rotation dari metadata video
+static int    g_rotation    = 0;
 
-// ─── Helper: Mat → Bitmap (handle rotation) ───────────────────────────────────
+// ─── Mat → Bitmap dengan auto-rotate ─────────────────────────────────────────
 static jobject matToBitmap(JNIEnv* env, cv::Mat& mat) {
-    // Auto rotate frame sesuai metadata video
     cv::Mat rotated;
     switch (g_rotation) {
-        case 90:
-            cv::rotate(mat, rotated, cv::ROTATE_90_CLOCKWISE);
-            break;
-        case 180:
-            cv::rotate(mat, rotated, cv::ROTATE_180);
-            break;
-        case 270:
-            cv::rotate(mat, rotated, cv::ROTATE_90_COUNTERCLOCKWISE);
-            break;
-        default:
-            rotated = mat;
-            break;
+        case 90:  cv::rotate(mat, rotated, cv::ROTATE_90_CLOCKWISE);        break;
+        case 180: cv::rotate(mat, rotated, cv::ROTATE_180);                  break;
+        case 270: cv::rotate(mat, rotated, cv::ROTATE_90_COUNTERCLOCKWISE); break;
+        default:  rotated = mat; break;
     }
 
     jclass bitmapClass  = env->FindClass("android/graphics/Bitmap");
     jclass configClass  = env->FindClass("android/graphics/Bitmap$Config");
-    jfieldID argb8888Id = env->GetStaticFieldID(configClass, "ARGB_8888",
+    jfieldID fid        = env->GetStaticFieldID(configClass, "ARGB_8888",
                             "Landroid/graphics/Bitmap$Config;");
-    jobject argb8888    = env->GetStaticObjectField(configClass, argb8888Id);
+    jobject argb8888    = env->GetStaticObjectField(configClass, fid);
     jmethodID create    = env->GetStaticMethodID(bitmapClass, "createBitmap",
                             "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
 
@@ -51,31 +42,33 @@ static jobject matToBitmap(JNIEnv* env, cv::Mat& mat) {
 
     void* pixels = nullptr;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return nullptr;
-
     cv::Mat rgba;
     cv::cvtColor(rotated, rgba, cv::COLOR_BGR2RGBA);
     memcpy(pixels, rgba.data, (size_t)(w * h * 4));
-
     AndroidBitmap_unlockPixels(env, bitmap);
     return bitmap;
 }
 
-// ─── Helper: Bitmap → Mat ─────────────────────────────────────────────────────
+// ─── Bitmap → Mat ─────────────────────────────────────────────────────────────
 static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
     AndroidBitmapInfo info;
     AndroidBitmap_getInfo(env, bitmap, &info);
     void* pixels = nullptr;
     AndroidBitmap_lockPixels(env, bitmap, &pixels);
-    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels);
+    cv::Mat rgba((int)info.height, (int)info.width, CV_8UC4, pixels);
     cv::Mat bgr;
     cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
     AndroidBitmap_unlockPixels(env, bitmap);
     return bgr.clone();
 }
 
-// ─── JNI: openVideo ───────────────────────────────────────────────────────────
+// ─── PENTING: nama fungsi harus PERSIS match package + class + method ─────────
+// Package: com.d4nzxml.kythera.service
+// Class:   OpenCvBridge
+// Method:  openVideoNative → Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative
+
 extern "C" JNIEXPORT jintArray JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
+Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
         JNIEnv* env, jobject, jstring videoPath) {
 
     const char* path = env->GetStringUTFChars(videoPath, nullptr);
@@ -83,8 +76,8 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
     env->ReleaseStringUTFChars(videoPath, path);
 
     if (g_cap.isOpened()) g_cap.release();
-
     g_cap.open(pathStr);
+
     if (!g_cap.isOpened()) {
         LOGE("Failed to open: %s", pathStr.c_str());
         return nullptr;
@@ -95,51 +88,37 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideo(
     g_width       = (int)g_cap.get(cv::CAP_PROP_FRAME_WIDTH);
     g_height      = (int)g_cap.get(cv::CAP_PROP_FRAME_HEIGHT);
 
-    // Baca rotation metadata
-    // OpenCV CAP_PROP_ORIENTATION_META = 181 (tersedia di OpenCV 4.5+)
+    // Rotation metadata
     double rotMeta = g_cap.get(181); // CAP_PROP_ORIENTATION_META
     g_rotation = (int)rotMeta;
-
-    // Validasi rotation value
-    if (g_rotation != 0 && g_rotation != 90 && g_rotation != 180 && g_rotation != 270) {
-        g_rotation = 0;
-    }
+    if (g_rotation != 90 && g_rotation != 180 && g_rotation != 270) g_rotation = 0;
 
     if (g_fps <= 0 || g_fps > 120) g_fps = 30.0;
 
-    LOGI("Video: %dx%d, %.2f fps, %d frames, rotation=%d",
+    LOGI("Opened: %dx%d %.2ffps %d frames rot=%d",
          g_width, g_height, g_fps, g_totalFrames, g_rotation);
 
+    // Swap width/height kalau portrait
+    int outW = (g_rotation == 90 || g_rotation == 270) ? g_height : g_width;
+    int outH = (g_rotation == 90 || g_rotation == 270) ? g_width  : g_height;
+
     jintArray result = env->NewIntArray(5);
-    jint vals[5] = {
-        g_totalFrames,
-        (jint)(g_fps * 1000),
-        // Width/height sudah dihitung dengan rotation
-        (g_rotation == 90 || g_rotation == 270) ? g_height : g_width,
-        (g_rotation == 90 || g_rotation == 270) ? g_width  : g_height,
-        g_rotation
-    };
+    jint vals[5] = { g_totalFrames, (jint)(g_fps * 1000), outW, outH, g_rotation };
     env->SetIntArrayRegion(result, 0, 5, vals);
     return result;
 }
 
-// ─── JNI: readFrame ───────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
-        JNIEnv* env, jobject) {
-
+Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(JNIEnv* env, jobject) {
     if (!g_cap.isOpened()) return nullptr;
     cv::Mat frame;
     if (!g_cap.read(frame) || frame.empty()) return nullptr;
-    // matToBitmap auto-rotate sesuai g_rotation
     return matToBitmap(env, frame);
 }
 
-// ─── JNI: openWriter ──────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriter(
-        JNIEnv* env, jobject,
-        jstring outputPath, jint width, jint height) {
+Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
+        JNIEnv* env, jobject, jstring outputPath, jint width, jint height) {
 
     const char* path = env->GetStringUTFChars(outputPath, nullptr);
     std::string pathStr(path);
@@ -147,39 +126,31 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriter(
 
     if (g_writer.isOpened()) g_writer.release();
 
-    // H264 encoder
     int fourcc = cv::VideoWriter::fourcc('H','2','6','4');
     g_writer.open(pathStr, fourcc, g_fps, cv::Size(width, height));
-
     if (!g_writer.isOpened()) {
-        // Fallback AVC1
         fourcc = cv::VideoWriter::fourcc('a','v','c','1');
         g_writer.open(pathStr, fourcc, g_fps, cv::Size(width, height));
     }
 
-    LOGI("Writer: %dx%d @ %.2f fps → %s (opened=%d)",
-         width, height, g_fps, pathStr.c_str(), g_writer.isOpened());
+    LOGI("Writer: %dx%d @ %.2f → %s (ok=%d)", width, height, g_fps,
+         pathStr.c_str(), g_writer.isOpened());
     return (jboolean)g_writer.isOpened();
 }
 
-// ─── JNI: writeFrame ──────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
-        JNIEnv* env, jobject, jobject bitmap) {
-
+Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(JNIEnv* env, jobject, jobject bitmap) {
     if (!g_writer.isOpened()) return;
     cv::Mat mat = bitmapToMat(env, bitmap);
     if (!mat.empty()) g_writer.write(mat);
 }
 
-// ─── JNI: closeAll ────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_closeAll(JNIEnv*, jobject) {
     if (g_cap.isOpened())    g_cap.release();
     if (g_writer.isOpened()) g_writer.release();
-    g_totalFrames = 0; g_fps = 30.0;
-    g_width = g_height = g_rotation = 0;
-    LOGI("OpenCV released");
+    g_totalFrames = 0; g_fps = 30.0; g_width = g_height = g_rotation = 0;
+    LOGI("Released");
 }
 
 extern "C" JNIEXPORT jint JNICALL
