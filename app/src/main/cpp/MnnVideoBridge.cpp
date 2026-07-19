@@ -3,248 +3,170 @@
 #include <android/log.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 
-// MNN Headers — dari MNN source include/
 #include "MNN/Interpreter.hpp"
 #include "MNN/MNNDefine.h"
 #include "MNN/Tensor.hpp"
-#include "MNN/ImageProcess.hpp"
 
-#define TAG "KytheraVideoMNN"
+#define TAG "KytheraEnhance"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// ─── Global state ─────────────────────────────────────────────────────────────
 static MNN::Interpreter* g_net     = nullptr;
 static MNN::Session*     g_session = nullptr;
-static std::string       g_loadedModel;
-static int               g_inW = 0, g_inH = 0;
+static std::string       g_modelPath;
 
-// ─── Helper: Bitmap → float NCHW ──────────────────────────────────────────────
-static bool bitmapToFloat(JNIEnv* env, jobject bitmap,
-                           std::vector<float>& out, int& w, int& h) {
+// ─── DEBUG MODE: bypass MNN, return input as-is ──────────────────────────────
+// Set ke false kalau mau pakai MNN beneran
+static bool DEBUG_BYPASS_MNN = true;
+
+// ─── Bitmap → RGBA bytes ─────────────────────────────────────────────────────
+static bool bitmapToRGBA(JNIEnv* env, jobject bitmap,
+                          std::vector<uint8_t>& out, int& w, int& h) {
     AndroidBitmapInfo info;
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) {
-        LOGE("getInfo failed");
-        return false;
-    }
-    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
-        LOGE("Bitmap must be ARGB_8888");
-        return false;
-    }
-
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return false;
     void* pixels = nullptr;
-    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) {
-        LOGE("lockPixels failed");
-        return false;
-    }
-
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return false;
     w = (int)info.width;
     h = (int)info.height;
-    int n = w * h;
-
-    // NCHW: [1, 3, H, W]
-    out.resize(3 * n);
-    auto* src = (uint8_t*)pixels;
-
-    for (int i = 0; i < n; i++) {
-        // RGBA → RGB normalized [0,1]
-        out[0 * n + i] = src[i * 4 + 0] / 255.0f; // R
-        out[1 * n + i] = src[i * 4 + 1] / 255.0f; // G
-        out[2 * n + i] = src[i * 4 + 2] / 255.0f; // B
-    }
-
+    out.resize(w * h * 4);
+    memcpy(out.data(), pixels, w * h * 4);
     AndroidBitmap_unlockPixels(env, bitmap);
     return true;
 }
 
-// ─── Helper: float NCHW → Bitmap ──────────────────────────────────────────────
-static jobject floatToBitmap(JNIEnv* env, const float* data, int w, int h) {
-    // Buat Bitmap via Android API
+// ─── RGBA bytes → Bitmap ─────────────────────────────────────────────────────
+static jobject rgbaToBitmap(JNIEnv* env, const uint8_t* rgba, int w, int h) {
     jclass bitmapClass  = env->FindClass("android/graphics/Bitmap");
     jclass configClass  = env->FindClass("android/graphics/Bitmap$Config");
     jfieldID argb8888Id = env->GetStaticFieldID(configClass, "ARGB_8888",
-                                                  "Landroid/graphics/Bitmap$Config;");
+                            "Landroid/graphics/Bitmap$Config;");
     jobject argb8888    = env->GetStaticObjectField(configClass, argb8888Id);
-
-    jmethodID createBitmap = env->GetStaticMethodID(bitmapClass, "createBitmap",
-        "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
-    jobject outBitmap = env->CallStaticObjectMethod(bitmapClass, createBitmap,
-                                                     w, h, argb8888);
-
+    jmethodID create    = env->GetStaticMethodID(bitmapClass, "createBitmap",
+                            "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    jobject bitmap = env->CallStaticObjectMethod(bitmapClass, create, w, h, argb8888);
     void* pixels = nullptr;
-    if (AndroidBitmap_lockPixels(env, outBitmap, &pixels) < 0) {
-        LOGE("lockPixels output failed");
-        return nullptr;
-    }
-
-    int n = w * h;
-    auto* dst = (uint8_t*)pixels;
-
-    for (int i = 0; i < n; i++) {
-        // Clamp [0,1] → [0,255]
-        auto r = (uint8_t)(std::min(std::max(data[0 * n + i], 0.0f), 1.0f) * 255.0f);
-        auto g = (uint8_t)(std::min(std::max(data[1 * n + i], 0.0f), 1.0f) * 255.0f);
-        auto b = (uint8_t)(std::min(std::max(data[2 * n + i], 0.0f), 1.0f) * 255.0f);
-        dst[i * 4 + 0] = r;
-        dst[i * 4 + 1] = g;
-        dst[i * 4 + 2] = b;
-        dst[i * 4 + 3] = 255; // Alpha
-    }
-
-    AndroidBitmap_unlockPixels(env, outBitmap);
-    return outBitmap;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return nullptr;
+    memcpy(pixels, rgba, (size_t)(w * h * 4));
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return bitmap;
 }
 
 // ─── JNI: loadModel ───────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
-        JNIEnv* env, jobject /* this */,
-        jstring modelPath,
-        jint    gpuMode) {   // 0=GPU OpenCL, 1=CPU
+        JNIEnv* env, jobject, jstring modelPath, jint gpuMode) {
 
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
     std::string pathStr(path);
     env->ReleaseStringUTFChars(modelPath, path);
 
-    // Jika model sama sudah loaded, skip
-    if (g_net != nullptr && g_loadedModel == pathStr) {
-        LOGI("Model already loaded: %s", pathStr.c_str());
+    if (DEBUG_BYPASS_MNN) {
+        LOGI("DEBUG: bypass mode ON — skip model load");
+        g_modelPath = pathStr;
         return JNI_TRUE;
     }
 
-    // Cleanup session lama
-    if (g_net && g_session) {
-        g_net->releaseSession(g_session);
-        g_session = nullptr;
-    }
-    if (g_net) {
-        MNN::Interpreter::destroy(g_net);
-        g_net = nullptr;
-    }
+    if (g_net && g_session && g_modelPath == pathStr) return JNI_TRUE;
+    if (g_net && g_session) { g_net->releaseSession(g_session); g_session = nullptr; }
+    if (g_net) { MNN::Interpreter::destroy(g_net); g_net = nullptr; }
 
-    LOGI("Loading model: %s", pathStr.c_str());
     g_net = MNN::Interpreter::createFromFile(pathStr.c_str());
-    if (!g_net) {
-        LOGE("Failed to create Interpreter from: %s", pathStr.c_str());
-        return JNI_FALSE;
-    }
+    if (!g_net) { LOGE("Failed to load model"); return JNI_FALSE; }
 
-    // Config: GPU OpenCL atau CPU
     MNN::ScheduleConfig config;
-    config.numThread = 4;
-
+    MNN::BackendConfig backendCfg;
     if (gpuMode == 0) {
-        // GPU OpenCL — sama kayak Speedkythera
-        MNN::BackendConfig backendConfig;
-        backendConfig.precision = MNN::BackendConfig::Precision_Low;
-        backendConfig.power     = MNN::BackendConfig::Power_High;
-        config.type             = MNN_FORWARD_OPENCL;
-        config.backendConfig    = &backendConfig;
-        LOGI("Backend: GPU OpenCL");
+        backendCfg.precision = MNN::BackendConfig::Precision_Low;
+        backendCfg.power     = MNN::BackendConfig::Power_High;
+        config.type          = MNN_FORWARD_OPENCL;
+        config.backendConfig = &backendCfg;
     } else {
-        // CPU fallback
-        config.type = MNN_FORWARD_CPU;
-        LOGI("Backend: CPU");
+        config.type      = MNN_FORWARD_CPU;
+        config.numThread = 4;
     }
 
     g_session = g_net->createSession(config);
     if (!g_session) {
-        // Fallback ke CPU kalau GPU gagal
-        LOGE("GPU session failed, fallback CPU...");
         config.type = MNN_FORWARD_CPU;
-        g_session   = g_net->createSession(config);
-        if (!g_session) {
-            LOGE("CPU session also failed");
-            MNN::Interpreter::destroy(g_net);
-            g_net = nullptr;
-            return JNI_FALSE;
-        }
+        config.backendConfig = nullptr;
+        g_session = g_net->createSession(config);
+    }
+    if (!g_session) {
+        MNN::Interpreter::destroy(g_net); g_net = nullptr;
+        return JNI_FALSE;
     }
 
-    g_loadedModel = pathStr;
-    LOGI("Model loaded OK ✅");
+    g_modelPath = pathStr;
+    LOGI("Model loaded OK");
     return JNI_TRUE;
 }
 
 // ─── JNI: enhanceFrame ────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
-        JNIEnv* env, jobject /* this */,
-        jobject inputBitmap) {
+        JNIEnv* env, jobject, jobject inputBitmap) {
 
-    if (!g_net || !g_session) {
-        LOGE("Model not loaded!");
-        return nullptr;
-    }
-
-    // Bitmap → float tensor
-    std::vector<float> inputData;
+    std::vector<uint8_t> inputRGBA;
     int inW = 0, inH = 0;
-    if (!bitmapToFloat(env, inputBitmap, inputData, inW, inH)) {
-        return nullptr;
+    if (!bitmapToRGBA(env, inputBitmap, inputRGBA, inW, inH)) return nullptr;
+
+    // ── DEBUG: bypass MNN, return frame asli ─────────────────────────────────
+    if (DEBUG_BYPASS_MNN) {
+        LOGI("DEBUG: returning original frame %dx%d", inW, inH);
+        return rgbaToBitmap(env, inputRGBA.data(), inW, inH);
     }
 
-    // Resize input tensor kalau ukuran berubah
-    if (inW != g_inW || inH != g_inH) {
-        auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
-        g_net->resizeTensor(inputTensor, {1, 3, inH, inW});
-        g_net->resizeSession(g_session);
-        g_inW = inW;
-        g_inH = inH;
-        LOGI("Resized input to %dx%d", inW, inH);
-    }
+    // ── REAL MNN inference ────────────────────────────────────────────────────
+    if (!g_net || !g_session) return nullptr;
 
-    // Copy input data ke tensor
+    // Resize tensor
     auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
-    auto* nchwTensor  = MNN::Tensor::create<float>(
-        {1, 3, inH, inW}, inputData.data(), MNN::Tensor::CAFFE
-    );
-    inputTensor->copyFromHostTensor(nchwTensor);
-    delete nchwTensor;
+    g_net->resizeTensor(inputTensor, {1, 3, inH, inW});
+    g_net->resizeSession(g_session);
 
-    // Run inference
+    // RGBA [0-255] → float NCHW [0-1]
+    int n = inW * inH;
+    std::vector<float> inputFloat(3 * n);
+    for (int i = 0; i < n; i++) {
+        inputFloat[0 * n + i] = inputRGBA[i*4+0] / 255.0f; // R
+        inputFloat[1 * n + i] = inputRGBA[i*4+1] / 255.0f; // G
+        inputFloat[2 * n + i] = inputRGBA[i*4+2] / 255.0f; // B
+    }
+
+    auto* hostIn = MNN::Tensor::create<float>({1,3,inH,inW}, inputFloat.data(), MNN::Tensor::CAFFE);
+    inputTensor->copyFromHostTensor(hostIn);
+    delete hostIn;
+
     g_net->runSession(g_session);
 
-    // Ambil output
-    auto* outputTensor = g_net->getSessionOutput(g_session, nullptr);
-    auto shape = outputTensor->shape(); // [1, 3, outH, outW]
-    if (shape.size() < 4) {
-        LOGE("Unexpected output shape");
-        return nullptr;
-    }
+    auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
+    auto shape = outTensor->shape();
+    if (shape.size() < 4) return nullptr;
 
-    int outH = shape[2];
-    int outW = shape[3];
-    int outN = outH * outW;
-
-    std::vector<float> outputData(3 * outN);
-    auto* hostOut = MNN::Tensor::create<float>(
-        {1, 3, outH, outW}, outputData.data(), MNN::Tensor::CAFFE
-    );
-    outputTensor->copyToHostTensor(hostOut);
+    int outH = shape[2], outW = shape[3], outN = outH * outW;
+    std::vector<float> outFloat(3 * outN);
+    auto* hostOut = MNN::Tensor::create<float>({1,3,outH,outW}, outFloat.data(), MNN::Tensor::CAFFE);
+    outTensor->copyToHostTensor(hostOut);
     delete hostOut;
 
-    LOGI("Enhanced: %dx%d → %dx%d", inW, inH, outW, outH);
+    // float NCHW [0-1] → RGBA [0-255]
+    std::vector<uint8_t> outRGBA((size_t)(outW * outH * 4));
+    for (int i = 0; i < outN; i++) {
+        outRGBA[i*4+0] = (uint8_t)(std::max(0.0f, std::min(1.0f, outFloat[0*outN+i])) * 255.0f + 0.5f);
+        outRGBA[i*4+1] = (uint8_t)(std::max(0.0f, std::min(1.0f, outFloat[1*outN+i])) * 255.0f + 0.5f);
+        outRGBA[i*4+2] = (uint8_t)(std::max(0.0f, std::min(1.0f, outFloat[2*outN+i])) * 255.0f + 0.5f);
+        outRGBA[i*4+3] = 255;
+    }
 
-    // float → Bitmap
-    return floatToBitmap(env, outputData.data(), outW, outH);
+    return rgbaToBitmap(env, outRGBA.data(), outW, outH);
 }
 
 // ─── JNI: release ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_MnnVideoBridge_release(
-        JNIEnv* /* env */, jobject /* this */) {
-
-    if (g_net && g_session) {
-        g_net->releaseSession(g_session);
-        g_session = nullptr;
-    }
-    if (g_net) {
-        MNN::Interpreter::destroy(g_net);
-        g_net = nullptr;
-    }
-    g_loadedModel.clear();
-    g_inW = g_inH = 0;
-    LOGI("MNN resources released");
+Java_com_d4nzxml_kythera_service_MnnVideoBridge_release(JNIEnv*, jobject) {
+    if (g_net && g_session) { g_net->releaseSession(g_session); g_session = nullptr; }
+    if (g_net) { MNN::Interpreter::destroy(g_net); g_net = nullptr; }
+    g_modelPath.clear();
 }
