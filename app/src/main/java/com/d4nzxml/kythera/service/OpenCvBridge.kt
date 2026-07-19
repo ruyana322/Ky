@@ -2,6 +2,8 @@ package com.d4nzxml.kythera.service
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.util.Log
 
 /**
@@ -38,25 +40,54 @@ object OpenCvBridge {
             Log.d(TAG, "OpenCV lib loaded ✅")
             true
         } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "Failed load kythera_cv: ${e.message}")
+            Log.e(TAG, "Failed: ${e.message}")
             false
         }
     }
 
-    fun openVideo(videoPath: String): VideoMeta? {
-        if (!loadLib()) {
-            Log.e(TAG, "Library not loaded!")
-            return null
-        }
+    /**
+     * Baca rotation dari MediaMetadataRetriever (lebih reliable dari OpenCV)
+     */
+    fun getRotation(context: Context, uri: Uri): Int {
         return try {
-            val arr = openVideoNative(videoPath) ?: return null
-            if (arr.size < 5) return null
+            val r = MediaMetadataRetriever()
+            r.setDataSource(context, uri)
+            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            r.release()
+            rot
+        } catch (e: Exception) { 0 }
+    }
+
+    fun getRotationFromPath(path: String): Int {
+        return try {
+            val r = MediaMetadataRetriever()
+            r.setDataSource(path)
+            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            r.release()
+            rot
+        } catch (e: Exception) { 0 }
+    }
+
+    /**
+     * Buka video → dapat metadata instan
+     * rotation dibaca dari MediaMetadataRetriever, bukan OpenCV
+     */
+    fun openVideo(videoPath: String): VideoMeta? {
+        if (!loadLib()) return null
+        return try {
+            // Baca rotation via MediaMetadataRetriever dulu
+            val rotation = getRotationFromPath(videoPath)
+
+            val arr = openVideoNative(videoPath, rotation) ?: return null
+            if (arr.size < 4) return null
             VideoMeta(
                 totalFrames = arr[0],
                 fps         = arr[1] / 1000.0,
                 width       = arr[2],
                 height      = arr[3],
-                rotation    = arr[4]
+                rotation    = rotation
             )
         } catch (e: Exception) {
             Log.e(TAG, "openVideo error: ${e.message}")
@@ -76,11 +107,11 @@ object OpenCvBridge {
 
     fun close() {
         if (!libLoaded) return
-        try { closeAll() } catch (e: Exception) { Log.e(TAG, "close error: ${e.message}") }
+        try { closeAll() } catch (e: Exception) { Log.e(TAG, "close: ${e.message}") }
     }
 
-    // ─── JNI Declarations — nama HARUS match persis dengan C++ function name ──
-    @JvmStatic external fun openVideoNative(path: String): IntArray?
+    // ─── JNI ──────────────────────────────────────────────────────────────────
+    @JvmStatic external fun openVideoNative(path: String, rotation: Int): IntArray?
     @JvmStatic external fun readFrame(): Bitmap?
     @JvmStatic external fun openWriterNative(path: String, w: Int, h: Int): Boolean
     @JvmStatic external fun writeFrame(bitmap: Bitmap)
@@ -88,7 +119,5 @@ object OpenCvBridge {
     @JvmStatic external fun getTotalFrames(): Int
     @JvmStatic external fun getFps(): Double
 
-    init {
-        loadLib()
-    }
+    init { loadLib() }
 }
