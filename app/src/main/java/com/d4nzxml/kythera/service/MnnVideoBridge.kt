@@ -29,18 +29,25 @@ object MnnVideoBridge {
     private var isLibLoaded  = false
     private var isModelReady = false
     private var currentModel = ""
+    
+    // 🔥 Variabel CCTV buat nangkep pesan error biar nggak Force Close
+    var lastErrorMsg: String = ""
 
     // ─── Load native library asli lu ───────────────────────────────────────────
     private fun loadLib(): Boolean {
         if (isLibLoaded) return true
         return try {
-            // Memanggil mesin asli buatan lu yang ada di MT Manager
+            // 🔥 WAJIB: Panggil induknya dulu (MNN), baru panggil kythera_mnn
+            System.loadLibrary("MNN")
             System.loadLibrary("kythera_mnn")
+            
             isLibLoaded = true
-            Log.d(TAG, "Native lib loaded ✅")
+            lastErrorMsg = ""
+            Log.d(TAG, "Native lib MNN & Kythera loaded ✅")
             true
-        } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "Failed load lib: ${e.message}")
+        } catch (e: Throwable) { // 🔥 Ganti ke Throwable biar C++ crash ketangkep
+            lastErrorMsg = "GAGAL LOAD LIB: ${e.javaClass.simpleName} - ${e.message}"
+            Log.e(TAG, lastErrorMsg)
             false
         }
     }
@@ -48,39 +55,63 @@ object MnnVideoBridge {
     // ─── Setup: ekstrak model ke internal storage ─────────────────────────────
     suspend fun setup(context: Context, scale: VideoScale = VideoScale.X4): Boolean =
         withContext(Dispatchers.IO) {
-            if (!loadLib()) return@withContext false
+            try {
+                if (!loadLib()) return@withContext false
 
-            val dir       = File(context.filesDir, "mnn_video").also { it.mkdirs() }
-            val modelFile = File(dir, scale.fileName)
+                val dir       = File(context.filesDir, "mnn_video").also { it.mkdirs() }
+                val modelFile = File(dir, scale.fileName)
 
-            if (!modelFile.exists() || modelFile.length() < 1000) {
-                try {
-                    context.assets.open("realsr/models/${scale.fileName}").use { input ->
-                        FileOutputStream(modelFile).use { output ->
-                            input.copyTo(output)
+                if (!modelFile.exists() || modelFile.length() < 1000) {
+                    try {
+                        context.assets.open("realsr/models/${scale.fileName}").use { input ->
+                            FileOutputStream(modelFile).use { output ->
+                                input.copyTo(output)
+                            }
                         }
+                        Log.d(TAG, "Model extracted: ${scale.fileName}")
+                    } catch (e: Exception) {
+                        lastErrorMsg = "GAGAL EKSTRAK MODEL: ${e.message}"
+                        Log.e(TAG, lastErrorMsg)
+                        return@withContext false
                     }
-                    Log.d(TAG, "Model extracted: ${scale.fileName}")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed extract model: ${e.message}")
-                    return@withContext false
                 }
-            }
 
-            val loaded = loadModel(modelFile.absolutePath, Accelerator.GPU.flag)
-            if (!loaded) {
-                Log.w(TAG, "GPU load gagal, coba CPU...")
-                val cpuLoaded = loadModel(modelFile.absolutePath, Accelerator.CPU.flag)
-                if (!cpuLoaded) {
-                    Log.e(TAG, "Model load gagal total")
-                    return@withContext false
+                // 🔥 Pasang pelindung Throwable pas inisialisasi mesin C++
+                val loaded = try {
+                    loadModel(modelFile.absolutePath, Accelerator.GPU.flag)
+                } catch (e: Throwable) {
+                    lastErrorMsg = "CRASH LOAD MODEL GPU: ${e.message}"
+                    Log.e(TAG, lastErrorMsg)
+                    false
                 }
-            }
 
-            isModelReady = true
-            currentModel = scale.fileName
-            Log.d(TAG, "MNN Video Engine ready ✅ [${scale.label}]")
-            true
+                if (!loaded) {
+                    Log.w(TAG, "GPU load gagal, coba CPU...")
+                    val cpuLoaded = try {
+                        loadModel(modelFile.absolutePath, Accelerator.CPU.flag)
+                    } catch (e: Throwable) {
+                        lastErrorMsg = "CRASH LOAD MODEL CPU: ${e.message}"
+                        Log.e(TAG, lastErrorMsg)
+                        false
+                    }
+                    
+                    if (!cpuLoaded) {
+                        if (lastErrorMsg.isEmpty()) lastErrorMsg = "Model load ditolak (Return False)"
+                        Log.e(TAG, "Model load gagal total")
+                        return@withContext false
+                    }
+                }
+
+                isModelReady = true
+                currentModel = scale.fileName
+                lastErrorMsg = ""
+                Log.d(TAG, "MNN Video Engine ready ✅ [${scale.label}]")
+                true
+            } catch (e: Throwable) {
+                lastErrorMsg = "FATAL ERROR SETUP: ${e.message}"
+                Log.e(TAG, lastErrorMsg)
+                false
+            }
         }
 
     suspend fun switchScale(context: Context, scale: VideoScale): Boolean {
@@ -94,7 +125,8 @@ object MnnVideoBridge {
         accelerator: Accelerator = Accelerator.GPU
     ): Bitmap? = withContext(Dispatchers.IO) {
         if (!isLibLoaded || !isModelReady) {
-            Log.e(TAG, "Engine belum siap!")
+            lastErrorMsg = "Engine belum siap!"
+            Log.e(TAG, lastErrorMsg)
             return@withContext null
         }
         try {
@@ -106,8 +138,9 @@ object MnnVideoBridge {
 
             if (safe != bitmap) safe.recycle()
             result
-        } catch (e: Exception) {
-            Log.e(TAG, "Enhance error: ${e.message}")
+        } catch (e: Throwable) { // 🔥 Ganti ke Throwable biar aman
+            lastErrorMsg = "CRASH ENHANCE FRAME: ${e.message}"
+            Log.e(TAG, lastErrorMsg)
             null
         }
     }
