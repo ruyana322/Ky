@@ -17,9 +17,9 @@ static int    g_totalFrames = 0;
 static double g_fps         = 30.0;
 static int    g_width       = 0;
 static int    g_height      = 0;
-static int    g_rotation    = 0;
+static int    g_rotation    = 0; // dikirim dari Kotlin via MediaMetadataRetriever
 
-// ─── Mat → Bitmap dengan auto-rotate ─────────────────────────────────────────
+// ─── Mat → Bitmap dengan rotation dari Kotlin ─────────────────────────────────
 static jobject matToBitmap(JNIEnv* env, cv::Mat& mat) {
     cv::Mat rotated;
     switch (g_rotation) {
@@ -29,15 +29,15 @@ static jobject matToBitmap(JNIEnv* env, cv::Mat& mat) {
         default:  rotated = mat; break;
     }
 
-    jclass bitmapClass  = env->FindClass("android/graphics/Bitmap");
-    jclass configClass  = env->FindClass("android/graphics/Bitmap$Config");
-    jfieldID fid        = env->GetStaticFieldID(configClass, "ARGB_8888",
-                            "Landroid/graphics/Bitmap$Config;");
-    jobject argb8888    = env->GetStaticObjectField(configClass, fid);
-    jmethodID create    = env->GetStaticMethodID(bitmapClass, "createBitmap",
-                            "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
-
     int w = rotated.cols, h = rotated.rows;
+
+    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
+    jclass configClass = env->FindClass("android/graphics/Bitmap$Config");
+    jfieldID fid       = env->GetStaticFieldID(configClass, "ARGB_8888",
+                           "Landroid/graphics/Bitmap$Config;");
+    jobject argb8888   = env->GetStaticObjectField(configClass, fid);
+    jmethodID create   = env->GetStaticMethodID(bitmapClass, "createBitmap",
+                           "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
     jobject bitmap = env->CallStaticObjectMethod(bitmapClass, create, w, h, argb8888);
 
     void* pixels = nullptr;
@@ -62,14 +62,10 @@ static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
     return bgr.clone();
 }
 
-// ─── PENTING: nama fungsi harus PERSIS match package + class + method ─────────
-// Package: com.d4nzxml.kythera.service
-// Class:   OpenCvBridge
-// Method:  openVideoNative → Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative
-
+// ─── openVideoNative — terima rotation dari Kotlin ────────────────────────────
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
-        JNIEnv* env, jobject, jstring videoPath) {
+        JNIEnv* env, jobject, jstring videoPath, jint rotation) {
 
     const char* path = env->GetStringUTFChars(videoPath, nullptr);
     std::string pathStr(path);
@@ -77,34 +73,26 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
 
     if (g_cap.isOpened()) g_cap.release();
     g_cap.open(pathStr);
-
-    if (!g_cap.isOpened()) {
-        LOGE("Failed to open: %s", pathStr.c_str());
-        return nullptr;
-    }
+    if (!g_cap.isOpened()) { LOGE("Failed open: %s", pathStr.c_str()); return nullptr; }
 
     g_totalFrames = (int)g_cap.get(cv::CAP_PROP_FRAME_COUNT);
     g_fps         = g_cap.get(cv::CAP_PROP_FPS);
     g_width       = (int)g_cap.get(cv::CAP_PROP_FRAME_WIDTH);
     g_height      = (int)g_cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-
-    // Rotation metadata
-    double rotMeta = g_cap.get(181); // CAP_PROP_ORIENTATION_META
-    g_rotation = (int)rotMeta;
-    if (g_rotation != 90 && g_rotation != 180 && g_rotation != 270) g_rotation = 0;
+    g_rotation    = (int)rotation; // dari MediaMetadataRetriever Kotlin
 
     if (g_fps <= 0 || g_fps > 120) g_fps = 30.0;
 
     LOGI("Opened: %dx%d %.2ffps %d frames rot=%d",
          g_width, g_height, g_fps, g_totalFrames, g_rotation);
 
-    // Swap width/height kalau portrait
+    // Output width/height sudah dalam orientasi yang bener
     int outW = (g_rotation == 90 || g_rotation == 270) ? g_height : g_width;
     int outH = (g_rotation == 90 || g_rotation == 270) ? g_width  : g_height;
 
-    jintArray result = env->NewIntArray(5);
-    jint vals[5] = { g_totalFrames, (jint)(g_fps * 1000), outW, outH, g_rotation };
-    env->SetIntArrayRegion(result, 0, 5, vals);
+    jintArray result = env->NewIntArray(4);
+    jint vals[4] = { g_totalFrames, (jint)(g_fps * 1000), outW, outH };
+    env->SetIntArrayRegion(result, 0, 4, vals);
     return result;
 }
 
@@ -133,13 +121,13 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openWriterNative(
         g_writer.open(pathStr, fourcc, g_fps, cv::Size(width, height));
     }
 
-    LOGI("Writer: %dx%d @ %.2f → %s (ok=%d)", width, height, g_fps,
-         pathStr.c_str(), g_writer.isOpened());
+    LOGI("Writer: %dx%d @ %.2f ok=%d", width, height, g_fps, g_writer.isOpened());
     return (jboolean)g_writer.isOpened();
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(JNIEnv* env, jobject, jobject bitmap) {
+Java_com_d4nzxml_kythera_service_OpenCvBridge_writeFrame(
+        JNIEnv* env, jobject, jobject bitmap) {
     if (!g_writer.isOpened()) return;
     cv::Mat mat = bitmapToMat(env, bitmap);
     if (!mat.empty()) g_writer.write(mat);
