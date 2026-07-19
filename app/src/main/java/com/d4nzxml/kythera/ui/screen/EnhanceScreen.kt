@@ -3,9 +3,9 @@ package com.d4nzxml.kythera.ui.screen
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
+import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -54,8 +54,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 
 private val DashBg = Color(0xFF18152B)
 private val CardSolidBg = Color(0xFF26233E)
@@ -77,7 +75,7 @@ fun EnhanceScreen() {
     var inputBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var resultBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showPreview by remember { mutableStateOf(false) }
-    var pendingSavedPath by remember { mutableStateOf<String?>(null) }
+    var pendingSavedUri by remember { mutableStateOf<Uri?>(null) } 
 
     // State buat Notifikasi
     var toastMessage by remember { mutableStateOf<String?>(null) }
@@ -89,14 +87,14 @@ fun EnhanceScreen() {
         selectedFileUri = uri
     }
 
-    // Pembersih RAM Pintar
+    // 🔥 LOGIKA PEMBERSIH RAM PINTAR (Jalan setelah animasi tutup selesai)
     LaunchedEffect(showPreview) {
         if (!showPreview) {
-            delay(500) 
+            delay(500) // Tunggu setengah detik biar animasi fade-out beres
             inputBitmap = null
             resultBitmap = null
-            pendingSavedPath = null
-            System.gc() 
+            pendingSavedUri = null
+            System.gc() // Suruh Android buang sampah RAM
         }
     }
 
@@ -188,57 +186,55 @@ fun EnhanceScreen() {
                                         var currentP = 0
                                         while (isProcessing && currentP < 90) { 
                                             delay(500) 
-                                            // 🔥 KUNCI ANTI-NABRAK: Langsung stop kalau isProcessing udah false
-                                            if (!isProcessing) break 
                                             currentP += 1
-                                            progressPercent = currentP
+                                            progressPercent = currentP.coerceAtMost(90)
                                         }
                                     }
 
                                     RealSrEngine.setup(context) 
                                     val (resBitmap, errorLog) = RealSrEngine.upscaleWithLog(context, loadedBitmap)
-                                    
-                                    // Matiin loading palsu SEKARANG JUGA
                                     isProcessing = false 
 
                                     if (resBitmap != null) {
+                                        withContext(Dispatchers.Main) { progressPercent = 92 } 
+                                        
                                         System.gc() 
 
-                                        // Simpan ke DCIM Public Storage diam-diam
-                                        val savedFilePath = withContext(Dispatchers.IO) {
+                                        val uri = withContext(Dispatchers.IO) {
                                             try {
-                                                val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
-                                                val kytheraDir = File(dcimDir, "kytheraImg")
-                                                if (!kytheraDir.exists()) kytheraDir.mkdirs()
-
-                                                val outFile = File(kytheraDir, "Kythera_x4_${System.currentTimeMillis()}.png")
-                                                FileOutputStream(outFile).use { out ->
-                                                    resBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                                val resolver = context.contentResolver
+                                                val values = ContentValues().apply {
+                                                    put(MediaStore.Images.Media.DISPLAY_NAME, "Kythera_x4_${System.currentTimeMillis()}.png")
+                                                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                                                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/kytheraImg")
+                                                    put(MediaStore.Images.Media.IS_PENDING, 1)
                                                 }
-
-                                                MediaScannerConnection.scanFile(
-                                                    context,
-                                                    arrayOf(outFile.absolutePath),
-                                                    arrayOf("image/png")
-                                                ) { _, _ -> }
-
-                                                outFile.absolutePath
+                                                val newUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                                                if (newUri != null) {
+                                                    resolver.openOutputStream(newUri)?.use { out ->
+                                                        resBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                                    }
+                                                    values.clear()
+                                                    values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                                                    resolver.update(newUri, values, null, null)
+                                                }
+                                                newUri
                                             } catch (e: Exception) { null }
                                         }
 
                                         withContext(Dispatchers.Main) {
-                                            // 🔥 BARU 100% KETIKA BENER-BENER BERES
                                             progressPercent = 100
                                             resultBitmap = resBitmap
-                                            pendingSavedPath = savedFilePath 
-                                            delay(300) // Kasih lihat angka 100% bentar
+                                            pendingSavedUri = uri 
+                                            delay(200) 
                                             isLoading = false
                                             showPreview = true 
                                         }
                                     } else {
                                         withContext(Dispatchers.Main) {
                                             isLoading = false
-                                            toastMessage = "Upscale Gagal, Cek Logcat!"
+                                            // 🔥 MODIFIKASI: Menampilkan pesan error asli dari AI, kalau kosong baru munculin default
+                                            toastMessage = errorLog ?: "Upscale Gagal, Cek Logcat!"
                                             isErrorToast = true
                                         }
                                     }
@@ -276,19 +272,15 @@ fun EnhanceScreen() {
         // 2. LAYAR PREVIEW BEFORE/AFTER
         // ==========================================
         AnimatedVisibility(
-            visible = showPreview, 
+            visible = showPreview, // Hapus pengecekan null di sini biar animasi ga kaget
             enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
         ) {
             val cancelPreview = {
                 scope.launch(Dispatchers.IO) {
-                    pendingSavedPath?.let { path -> 
-                        val file = File(path)
-                        if (file.exists()) file.delete()
-                        MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
-                    }
+                    pendingSavedUri?.let { context.contentResolver.delete(it, null, null) }
                 }
-                showPreview = false 
+                showPreview = false // Cuma nutup layar, RAM dihapus otomatis sama LaunchedEffect
             }
 
             BackHandler { cancelPreview() }
@@ -296,6 +288,7 @@ fun EnhanceScreen() {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
                 var sliderPosition by remember { mutableFloatStateOf(0.5f) }
 
+                // 🔥 ANTI-NULL RENDERER (Kalau RAM udah dibersihin, biarin aja kosong ga usah digambar)
                 val currentInBmp = inputBitmap
                 val currentResBmp = resultBitmap
 
@@ -343,7 +336,7 @@ fun EnhanceScreen() {
 
                     Button(
                         onClick = {
-                            toastMessage = "Selesai! Tersimpan di DCIM/kytheraImg"
+                            toastMessage = "Selesai! Tersimpan di Pictures/kytheraImg"
                             isErrorToast = false
                             showPreview = false
                             selectedFileUri = null
@@ -376,7 +369,7 @@ fun EnhanceScreen() {
                         Text("$progressPercent%", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     }
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text("AI RealSR sedang merender...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(if (progressPercent > 90) "Membangun File PNG..." else "AI RealSR sedang bekerja...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Menggunakan GPU Vulkan NCNN", color = TextDesc, fontSize = 11.sp)
                 }
