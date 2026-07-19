@@ -217,7 +217,7 @@ fun VideoEnhanceScreen() {
                 progressPct = 0.05f
                 val startTime = System.currentTimeMillis()
 
-                // ── Loop frame-by-frame ───────────────────────────────────
+                                // ── Loop frame-by-frame ───────────────────────────────────
                 withContext(Dispatchers.IO) {
                     var frameIdx = 0
                     while (true) {
@@ -228,19 +228,31 @@ fun VideoEnhanceScreen() {
 
                         // Enhance via MNN
                         val enhanced = MnnVideoBridge.enhance(frame, accelerator)
+                        if (enhanced == null && MnnVideoBridge.lastErrorMsg.isNotEmpty()) {
+                            throw Exception("MNN Error: ${MnnVideoBridge.lastErrorMsg}")
+                        }
                         frame.recycle()
 
-                        val toWrite = enhanced ?: run {
+                        // 🔥 MODIFIKASI PENTING: Samain ukuran AI dengan cetakan OpenCV
+                        val toWrite = if (enhanced != null) {
+                            if (enhanced.width != finalW || enhanced.height != finalH) {
+                                // Kalau AI ngasih gambar kegedean (misal 4K), kita kecilin ke 1080p
+                                val scaled = android.graphics.Bitmap.createScaledBitmap(enhanced, finalW, finalH, true)
+                                enhanced.recycle() // Buang yang gede biar RAM aman
+                                scaled
+                            } else {
+                                enhanced
+                            }
+                        } else {
                             // Fallback: scale manual kalau MNN gagal
-                            android.graphics.Bitmap.createScaledBitmap(
-                                frame, finalW, finalH, true
-                            )
+                            android.graphics.Bitmap.createScaledBitmap(frame, finalW, finalH, true)
                         }
 
                         // Tulis ke output
                         OpenCvBridge.writeFrame(toWrite)
-                        if (toWrite != enhanced) toWrite.recycle()
-                        enhanced?.recycle()
+                        
+                        // 🔥 Bersihin RAM biar gak ngelag
+                        toWrite.recycle()
 
                         frameIdx++
                         val fd = frameIdx
@@ -252,6 +264,7 @@ fun VideoEnhanceScreen() {
                         }
                     }
                 }
+
 
                 // ── Tutup OpenCV ──────────────────────────────────────────
                 withContext(Dispatchers.IO) { OpenCvBridge.close() }
