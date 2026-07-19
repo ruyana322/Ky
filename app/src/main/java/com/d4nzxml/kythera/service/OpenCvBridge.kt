@@ -3,11 +3,9 @@ package com.d4nzxml.kythera.service
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
-import java.io.File
 
 /**
  * OpenCvBridge — Video I/O via OpenCV
- * Handle rotation metadata otomatis
  * D4nzxml Studio © 2026
  */
 object OpenCvBridge {
@@ -40,45 +38,57 @@ object OpenCvBridge {
             Log.d(TAG, "OpenCV lib loaded ✅")
             true
         } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "Failed: ${e.message}")
+            Log.e(TAG, "Failed load kythera_cv: ${e.message}")
             false
         }
     }
 
-    /**
-     * Buka video → dapat metadata instan + rotation info
-     */
     fun openVideo(videoPath: String): VideoMeta? {
-        if (!loadLib()) return null
-        val arr = openVideoNative(videoPath) ?: return null
-        if (arr.size < 5) return null
-        return VideoMeta(
-            totalFrames = arr[0],
-            fps         = arr[1] / 1000.0,
-            width       = arr[2],
-            height      = arr[3],
-            rotation    = arr[4]
-        )
+        if (!loadLib()) {
+            Log.e(TAG, "Library not loaded!")
+            return null
+        }
+        return try {
+            val arr = openVideoNative(videoPath) ?: return null
+            if (arr.size < 5) return null
+            VideoMeta(
+                totalFrames = arr[0],
+                fps         = arr[1] / 1000.0,
+                width       = arr[2],
+                height      = arr[3],
+                rotation    = arr[4]
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "openVideo error: ${e.message}")
+            null
+        }
     }
 
-    /**
-     * Buka writer untuk output video
-     */
     fun openWriter(outputPath: String, width: Int, height: Int): Boolean {
         if (!loadLib()) return false
-        return openWriterNative(outputPath, width, height)
+        return try {
+            openWriterNative(outputPath, width, height)
+        } catch (e: Exception) {
+            Log.e(TAG, "openWriter error: ${e.message}")
+            false
+        }
     }
 
     fun close() {
-        if (libLoaded) closeAll()
+        if (!libLoaded) return
+        try { closeAll() } catch (e: Exception) { Log.e(TAG, "close error: ${e.message}") }
     }
 
-    // ─── JNI Declarations ─────────────────────────────────────────────────────
-    private external fun openVideoNative(path: String): IntArray?
-    external fun readFrame(): Bitmap?
-    private external fun openWriterNative(path: String, w: Int, h: Int): Boolean
-    external fun writeFrame(bitmap: Bitmap)
-    external fun closeAll()
-    external fun getTotalFrames(): Int
-    external fun getFps(): Double
+    // ─── JNI Declarations — nama HARUS match persis dengan C++ function name ──
+    @JvmStatic external fun openVideoNative(path: String): IntArray?
+    @JvmStatic external fun readFrame(): Bitmap?
+    @JvmStatic external fun openWriterNative(path: String, w: Int, h: Int): Boolean
+    @JvmStatic external fun writeFrame(bitmap: Bitmap)
+    @JvmStatic external fun closeAll()
+    @JvmStatic external fun getTotalFrames(): Int
+    @JvmStatic external fun getFps(): Double
+
+    init {
+        loadLib()
+    }
 }
