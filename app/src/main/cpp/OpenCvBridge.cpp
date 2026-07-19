@@ -67,6 +67,9 @@ static cv::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
     return bgr;
 }
 
+// Tambahin satu variabel global baru di atas (barengan sama g_width dll)
+static int g_rotation = 0; 
+
 // ─── JNI: openVideo ───────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
@@ -88,11 +91,21 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
     g_fps         = g_cap.get(cv::CAP_PROP_FPS);
     g_width       = (int)g_cap.get(cv::CAP_PROP_FRAME_WIDTH);
     g_height      = (int)g_cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+    
+    // 🔥 FIX 1: BACA METADATA ROTASI VIDEO
+    g_rotation    = (int)g_cap.get(cv::CAP_PROP_ORIENTATION_META);
 
     if (g_fps <= 0 || g_fps > 120) g_fps = 30.0;
+    
+    // Kalau muter 90 atau 270 derajat, berarti videonya Portrait! Kita tuker ukurannya
+    if (g_rotation == 90 || g_rotation == 270) {
+        int temp = g_width;
+        g_width = g_height;
+        g_height = temp;
+    }
 
-    LOGI("Video opened: %dx%d, %.2f fps, %d frames",
-         g_width, g_height, g_fps, g_totalFrames);
+    LOGI("Video opened: %dx%d, %.2f fps, %d frames, Rot: %d",
+         g_width, g_height, g_fps, g_totalFrames, g_rotation);
 
     jintArray result = env->NewIntArray(4);
     jint vals[4] = {
@@ -115,8 +128,18 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_readFrame(
     cv::Mat frame;
     if (!g_cap.read(frame) || frame.empty()) return nullptr;
 
+    // 🔥 FIX 2: PUTER GAMBARNYA BIAR BERDIRI (PORTRAIT)
+    if (g_rotation == 90) {
+        cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+    } else if (g_rotation == 180) {
+        cv::rotate(frame, frame, cv::ROTATE_180);
+    } else if (g_rotation == 270) {
+        cv::rotate(frame, frame, cv::ROTATE_90_COUNTERCLOCKWISE);
+    }
+
     return matToBitmap(env, frame);
 }
+
 
 // ─── JNI: openWriter ──────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jboolean JNICALL
