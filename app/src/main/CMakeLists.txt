@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("kythera_native")
 
-# CMAKE_SOURCE_DIR = /runner/work/Ky/Ky/app/src/main
-# Naik 3 level: main→src→app, lalu masuk jniLibs
-# ../../../jniLibs = app/jniLibs ✅
+# CMAKE_SOURCE_DIR = /home/runner/work/Ky/Ky/app/src/main
+# jniLibs ada di app/src/main/jniLibs/ — SAME FOLDER!
+# Jadi path = ${CMAKE_SOURCE_DIR}/jniLibs/
 
-set(JNILIBS_DIR ${CMAKE_SOURCE_DIR}/../../../jniLibs/${ANDROID_ABI})
+set(JNILIBS_DIR ${CMAKE_SOURCE_DIR}/jniLibs/${ANDROID_ABI})
 
 message(STATUS ">>> JNI libs dir: ${JNILIBS_DIR}")
 
