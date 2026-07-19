@@ -27,9 +27,21 @@ object RealSrEngine {
     private fun getBaseDir(context: Context): File =
         context.getDir("realsr", Context.MODE_PRIVATE)
 
+    // 🔥 KODINGAN BARU: Ngabsen semua file wajib ada, bukan cuma satu doang!
     private fun binaryExists(context: Context): Boolean {
-        val f = File(getBaseDir(context), "realsr-ncnn")
-        return f.exists() && f.length() > 100
+        val baseDir = getBaseDir(context)
+        
+        // 1. Cek apakah semua file biner (.so dan realsr-ncnn) udah lengkap terekstrak
+        val isBinariesReady = BINARIES.all { 
+            File(baseDir, it.substringAfterLast("/")).exists() 
+        }
+        
+        // 2. Cek apakah folder models dan isinya (.bin dan .param) udah lengkap
+        val isModelsReady = MODELS.all { 
+            File(File(baseDir, "models"), it.substringAfterLast("/")).exists() 
+        }
+        
+        return isBinariesReady && isModelsReady
     }
 
     suspend fun setup(context: Context): Boolean = withContext(Dispatchers.IO) {
@@ -72,7 +84,7 @@ object RealSrEngine {
         }
     }
 
-        suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
+    suspend fun upscaleWithLog(context: Context, input: Bitmap): Pair<Bitmap?, String?> =
         withContext(Dispatchers.IO) {
             try {
                 val baseDir    = getBaseDir(context)
