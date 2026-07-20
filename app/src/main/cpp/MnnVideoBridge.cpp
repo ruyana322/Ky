@@ -17,10 +17,9 @@ static MNN::Interpreter* g_net     = nullptr;
 static MNN::Session*     g_session = nullptr;
 static std::string       g_modelPath;
 
-// Saklar MNN udah nyala
 static bool DEBUG_BYPASS_MNN = false;
 
-// ─── Bitmap → RGBA bytes (Aman dari Stride Padding) ──────────────────────────
+// ─── Bitmap → RGBA bytes (Stride Safe) ───────────────────────────────────────
 static bool bitmapToRGBA(JNIEnv* env, jobject bitmap, std::vector<uint8_t>& out, int& w, int& h) {
     AndroidBitmapInfo info;
     if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return false;
@@ -42,7 +41,7 @@ static bool bitmapToRGBA(JNIEnv* env, jobject bitmap, std::vector<uint8_t>& out,
     return true;
 }
 
-// ─── RGBA bytes → Bitmap (Aman dari Stride Padding) ──────────────────────────
+// ─── RGBA bytes → Bitmap (Stride Safe) ───────────────────────────────────────
 static jobject rgbaToBitmap(JNIEnv* env, const uint8_t* rgba, int w, int h) {
     jclass bitmapClass  = env->FindClass("android/graphics/Bitmap");
     jclass configClass  = env->FindClass("android/graphics/Bitmap$Config");
@@ -70,6 +69,7 @@ static jobject rgbaToBitmap(JNIEnv* env, const uint8_t* rgba, int w, int h) {
     return bitmap;
 }
 
+// ─── JNI: loadModel ───────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(JNIEnv* env, jobject, jstring modelPath, jint gpuMode) {
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
@@ -106,16 +106,14 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(JNIEnv* env, jobject, 
         config.backendConfig = nullptr;
         g_session = g_net->createSession(config);
     }
-    if (!g_session) {
-        MNN::Interpreter::destroy(g_net); g_net = nullptr;
-        return JNI_FALSE;
-    }
+    if (!g_session) return JNI_FALSE;
 
     g_modelPath = pathStr;
     LOGI("Model loaded OK");
     return JNI_TRUE;
 }
 
+// ─── JNI: enhanceFrame ────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(JNIEnv* env, jobject, jobject inputBitmap) {
     std::vector<uint8_t> inputRGBA;
@@ -127,56 +125,54 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(JNIEnv* env, jobjec
 
     auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
     
-    // 🔥 FIX 1: PAKSA FORMAT NCHW SESUAI ANALISIS (Bypass deteksi otomatis MNN)
+    // 1. Resize bentuk inputnya
     g_net->resizeTensor(inputTensor, {1, 3, inH, inW});
     g_net->resizeSession(g_session);
 
-    // Bikin memori penampung Float32 dengan format NCHW (Caffe)
-    auto* hostIn = MNN::Tensor::create<float>({1, 3, inH, inW}, NULL, MNN::Tensor::CAFFE);
+    // 🔥 FIX UTAMA: Pakai "new" biar RAM fisik beneran teralokasi! 
+    // Format CAFFE = NCHW sesuai spesifikasi model
+    auto* hostIn = new MNN::Tensor(inputTensor, MNN::Tensor::CAFFE);
     float* ptrIn = hostIn->host<float>();
 
-    // 🔥 FIX 2: BACA RGB, BAGI 255.0f, SUSUN JADI NCHW (0.0 to 1.0)
+    // 2. Mapping warna RGBA (Mentah) -> NCHW (0.0f - 1.0f)
     for (int y = 0; y < inH; y++) {
         for (int x = 0; x < inW; x++) {
             int idx = y * inW + x;
-            ptrIn[0 * inH * inW + idx] = (float)inputRGBA[idx * 4 + 0] / 255.0f; // Red
-            ptrIn[1 * inH * inW + idx] = (float)inputRGBA[idx * 4 + 1] / 255.0f; // Green
-            ptrIn[2 * inH * inW + idx] = (float)inputRGBA[idx * 4 + 2] / 255.0f; // Blue
+            ptrIn[0 * inH * inW + idx] = inputRGBA[idx * 4 + 0] / 255.0f; // R
+            ptrIn[1 * inH * inW + idx] = inputRGBA[idx * 4 + 1] / 255.0f; // G
+            ptrIn[2 * inH * inW + idx] = inputRGBA[idx * 4 + 2] / 255.0f; // B
         }
     }
 
+    // 3. Masukin ke mesin AI & Eksekusi
     inputTensor->copyFromHostTensor(hostIn);
-    delete hostIn;
-
-    // RUN AI ENGINE
+    delete hostIn; 
+    
     g_net->runSession(g_session);
 
+    // 4. Ambil Hasil
     auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
     if (!outTensor) return nullptr;
 
-    auto shape = outTensor->shape();
-    if (shape.size() < 4) return nullptr;
-
-    // Output dari model juga NCHW
-    int outH = shape[2]; 
-    int outW = shape[3];
-
-    // Bikin memori penampung Float32 buat narik hasil NCHW
-    auto* hostOut = MNN::Tensor::create<float>(shape, NULL, MNN::Tensor::CAFFE);
+    // 🔥 Bikin wadah output dengan memori fisik dan pastikan formatnya NCHW
+    auto* hostOut = new MNN::Tensor(outTensor, MNN::Tensor::CAFFE);
     outTensor->copyToHostTensor(hostOut); 
+
+    // Panggil helper bawaan MNN biar gak salah comot ukuran
+    int outW = hostOut->width();
+    int outH = hostOut->height();
     float* ptrOut = hostOut->host<float>();
 
     std::vector<uint8_t> finalRGBA(outW * outH * 4);
     
-    // 🔥 FIX 3: KALI 255.0f, SUSUN BALIK DARI NCHW KE RGBA (Biar bisa jadi Bitmap)
+    // 5. Mapping balik NCHW -> RGBA
     for (int y = 0; y < outH; y++) {
         for (int x = 0; x < outW; x++) {
             int idx = y * outW + x;
-            // Clamp and scale
             finalRGBA[idx * 4 + 0] = (uint8_t)std::max(0.0f, std::min(255.0f, ptrOut[0 * outH * outW + idx] * 255.0f));
             finalRGBA[idx * 4 + 1] = (uint8_t)std::max(0.0f, std::min(255.0f, ptrOut[1 * outH * outW + idx] * 255.0f));
             finalRGBA[idx * 4 + 2] = (uint8_t)std::max(0.0f, std::min(255.0f, ptrOut[2 * outH * outW + idx] * 255.0f));
-            finalRGBA[idx * 4 + 3] = 255; // Alpha
+            finalRGBA[idx * 4 + 3] = 255;
         }
     }
 
