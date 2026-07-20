@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cstring>
 
 #include "MNN/Interpreter.hpp"
 #include "MNN/MNNDefine.h"
@@ -13,92 +14,93 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// ─── Model fixed input size: WAJIB 1024x1024 ─────────────────────────────────
-static const int MODEL_SIZE = 1024;
+static const int TILE = 1024; // Model fixed input size
 
-static MNN::Interpreter* g_net      = nullptr;
-static MNN::Session*     g_session  = nullptr;
+static MNN::Interpreter* g_net     = nullptr;
+static MNN::Session*     g_session = nullptr;
 static std::string       g_modelPath;
-static int               g_scale    = 2; // 2 untuk d2u2, 4 untuk d4u4
+static int               g_scale   = 2;
 
-// ─── Bitmap → float NCHW [0,1] dengan resize ke 1024x1024 ───────────────────
-// Model WAJIB terima 1024x1024, jadi frame direscale dulu
-static bool bitmapToNCHW1024(JNIEnv* env, jobject bitmap,
-                              std::vector<float>& out) {
-    AndroidBitmapInfo info;
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return false;
-    void* pixels = nullptr;
-    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return false;
+// ─── Helper: lock bitmap pixels ───────────────────────────────────────────────
+struct BitmapData {
+    JNIEnv* env;
+    jobject bitmap;
+    void*   pixels = nullptr;
+    int     w = 0, h = 0;
+    bool    ok = false;
 
-    int srcW = (int)info.width;
-    int srcH = (int)info.height;
-    auto* src = (uint8_t*)pixels;
-
-    // Output fixed 1024x1024x3 NCHW
-    int N = MODEL_SIZE * MODEL_SIZE;
-    out.resize(3 * N);
-
-    // Bilinear resize ke 1024x1024
-    float scaleX = (float)srcW / MODEL_SIZE;
-    float scaleY = (float)srcH / MODEL_SIZE;
-
-    for (int dy = 0; dy < MODEL_SIZE; dy++) {
-        float fy = dy * scaleY;
-        int   y0 = (int)fy;
-        int   y1 = std::min(y0 + 1, srcH - 1);
-        float wy = fy - y0;
-
-        for (int dx = 0; dx < MODEL_SIZE; dx++) {
-            float fx = dx * scaleX;
-            int   x0 = (int)fx;
-            int   x1 = std::min(x0 + 1, srcW - 1);
-            float wx = fx - x0;
-
-            // Bilinear interpolation untuk R, G, B
-            for (int c = 0; c < 3; c++) {
-                float v00 = src[(y0 * srcW + x0) * 4 + c] / 255.0f;
-                float v01 = src[(y0 * srcW + x1) * 4 + c] / 255.0f;
-                float v10 = src[(y1 * srcW + x0) * 4 + c] / 255.0f;
-                float v11 = src[(y1 * srcW + x1) * 4 + c] / 255.0f;
-
-                float v = v00*(1-wx)*(1-wy) + v01*wx*(1-wy)
-                        + v10*(1-wx)*wy     + v11*wx*wy;
-
-                out[c * N + dy * MODEL_SIZE + dx] = v;
-            }
-        }
+    BitmapData(JNIEnv* e, jobject b) : env(e), bitmap(b) {
+        AndroidBitmapInfo info;
+        if (AndroidBitmap_getInfo(e, b, &info) < 0) return;
+        if (AndroidBitmap_lockPixels(e, b, &pixels) < 0) return;
+        w = info.width; h = info.height; ok = true;
     }
+    ~BitmapData() { if (ok) AndroidBitmap_unlockPixels(env, bitmap); }
+};
 
-    AndroidBitmap_unlockPixels(env, bitmap);
-    return true;
+// ─── Create Bitmap ────────────────────────────────────────────────────────────
+static jobject createBitmap(JNIEnv* env, int w, int h) {
+    jclass bc = env->FindClass("android/graphics/Bitmap");
+    jclass cc = env->FindClass("android/graphics/Bitmap$Config");
+    jfieldID fid = env->GetStaticFieldID(cc, "ARGB_8888",
+                     "Landroid/graphics/Bitmap$Config;");
+    jobject cfg = env->GetStaticObjectField(cc, fid);
+    jmethodID cr = env->GetStaticMethodID(bc, "createBitmap",
+                     "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    return env->CallStaticObjectMethod(bc, cr, w, h, cfg);
 }
 
-// ─── float NCHW → Bitmap (output dari model, ukuran 2048 atau 4096) ──────────
-static jobject ncHWtoBitmap(JNIEnv* env, const float* data, int w, int h) {
-    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
-    jclass configClass = env->FindClass("android/graphics/Bitmap$Config");
-    jfieldID fid       = env->GetStaticFieldID(configClass, "ARGB_8888",
-                           "Landroid/graphics/Bitmap$Config;");
-    jobject cfg        = env->GetStaticObjectField(configClass, fid);
-    jmethodID create   = env->GetStaticMethodID(bitmapClass, "createBitmap",
-                           "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
-    jobject bmp = env->CallStaticObjectMethod(bitmapClass, create, w, h, cfg);
+// ─── Run MNN inference on exactly 1024x1024 RGBA tile ─────────────────────────
+// Input:  RGBA uint8 [TILE*TILE*4]
+// Output: RGBA uint8 [TILE*scale * TILE*scale * 4]
+static bool runTile(const uint8_t* tileIn,
+                    std::vector<uint8_t>& tileOut) {
+    int N   = TILE * TILE;
+    int out = TILE * g_scale;
+    int ON  = out * out;
 
-    void* pixels = nullptr;
-    if (AndroidBitmap_lockPixels(env, bmp, &pixels) < 0) return nullptr;
-
-    int N = w * h;
-    auto* dst = (uint8_t*)pixels;
-
+    // RGBA → float NCHW [0,1]
+    std::vector<float> floatIn(3 * N);
     for (int i = 0; i < N; i++) {
-        dst[i*4+0] = (uint8_t)(std::max(0.0f, std::min(1.0f, data[0*N+i])) * 255.0f + 0.5f); // R
-        dst[i*4+1] = (uint8_t)(std::max(0.0f, std::min(1.0f, data[1*N+i])) * 255.0f + 0.5f); // G
-        dst[i*4+2] = (uint8_t)(std::max(0.0f, std::min(1.0f, data[2*N+i])) * 255.0f + 0.5f); // B
-        dst[i*4+3] = 255; // A
+        floatIn[0*N+i] = tileIn[i*4+0] / 255.0f; // R
+        floatIn[1*N+i] = tileIn[i*4+1] / 255.0f; // G
+        floatIn[2*N+i] = tileIn[i*4+2] / 255.0f; // B
     }
 
-    AndroidBitmap_unlockPixels(env, bmp);
-    return bmp;
+    auto* inputTensor = g_net->getSessionInput(g_session, "input");
+    if (!inputTensor) { LOGE("No input tensor"); return false; }
+
+    auto* hostIn = MNN::Tensor::create<float>(
+        {1, 3, TILE, TILE}, floatIn.data(), MNN::Tensor::CAFFE);
+    inputTensor->copyFromHostTensor(hostIn);
+    delete hostIn;
+
+    g_net->runSession(g_session);
+
+    auto* outTensor = g_net->getSessionOutput(g_session, "output");
+    if (!outTensor) { LOGE("No output tensor"); return false; }
+
+    auto shape = outTensor->shape();
+    if (shape.size() < 4) { LOGE("Bad shape"); return false; }
+
+    int realOH = shape[2], realOW = shape[3];
+    int realON = realOH * realOW;
+
+    std::vector<float> floatOut(3 * realON);
+    auto* hostOut = MNN::Tensor::create<float>(
+        {1, 3, realOH, realOW}, floatOut.data(), MNN::Tensor::CAFFE);
+    outTensor->copyToHostTensor(hostOut);
+    delete hostOut;
+
+    // float NCHW → RGBA uint8
+    tileOut.resize((size_t)(realOW * realOH * 4));
+    for (int i = 0; i < realON; i++) {
+        tileOut[i*4+0] = (uint8_t)(std::max(0.f,std::min(1.f,floatOut[0*realON+i]))*255.f+.5f);
+        tileOut[i*4+1] = (uint8_t)(std::max(0.f,std::min(1.f,floatOut[1*realON+i]))*255.f+.5f);
+        tileOut[i*4+2] = (uint8_t)(std::max(0.f,std::min(1.f,floatOut[2*realON+i]))*255.f+.5f);
+        tileOut[i*4+3] = 255;
+    }
+    return true;
 }
 
 // ─── JNI: loadModel ───────────────────────────────────────────────────────────
@@ -110,48 +112,42 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
     std::string path(p);
     env->ReleaseStringUTFChars(modelPath, p);
 
-    // Deteksi scale dari nama model
-    if (path.find("d2u2") != std::string::npos) g_scale = 2;
-    else if (path.find("d4u4") != std::string::npos) g_scale = 4;
-    else g_scale = 2;
+    g_scale = (path.find("d4u4") != std::string::npos) ? 4 : 2;
 
     if (g_net && g_session && g_modelPath == path) {
-        LOGI("Model already loaded (scale=%dx)", g_scale);
+        LOGI("Already loaded scale=%dx", g_scale);
         return JNI_TRUE;
     }
 
     if (g_net && g_session) { g_net->releaseSession(g_session); g_session = nullptr; }
     if (g_net) { MNN::Interpreter::destroy(g_net); g_net = nullptr; }
 
-    LOGI("Loading model: %s (scale=%dx)", path.c_str(), g_scale);
     g_net = MNN::Interpreter::createFromFile(path.c_str());
-    if (!g_net) { LOGE("Failed load model"); return JNI_FALSE; }
+    if (!g_net) { LOGE("Load failed"); return JNI_FALSE; }
 
-    // Resize input ke fixed 1024x1024 SEBELUM buat session
+    // Set fixed input size
     auto* inputTensor = g_net->getSessionInput(nullptr, "input");
     if (inputTensor) {
-        g_net->resizeTensor(inputTensor, {1, 3, MODEL_SIZE, MODEL_SIZE});
+        g_net->resizeTensor(inputTensor, {1, 3, TILE, TILE});
     }
 
     MNN::ScheduleConfig config;
     MNN::BackendConfig backendCfg;
-
     if (gpuMode == 0) {
         backendCfg.precision = MNN::BackendConfig::Precision_Low;
         backendCfg.power     = MNN::BackendConfig::Power_High;
         config.type          = MNN_FORWARD_OPENCL;
         config.backendConfig = &backendCfg;
-        LOGI("Backend: GPU OpenCL");
+        LOGI("GPU OpenCL");
     } else {
-        config.type      = MNN_FORWARD_CPU;
-        config.numThread = 4;
-        LOGI("Backend: CPU x4");
+        config.type = MNN_FORWARD_CPU; config.numThread = 4;
+        LOGI("CPU x4");
     }
 
     g_session = g_net->createSession(config);
     if (!g_session) {
-        LOGE("GPU failed, fallback CPU");
-        config.type = MNN_FORWARD_CPU; config.numThread = 4; config.backendConfig = nullptr;
+        config.type = MNN_FORWARD_CPU; config.numThread = 4;
+        config.backendConfig = nullptr;
         g_session = g_net->createSession(config);
     }
     if (!g_session) {
@@ -159,66 +155,92 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
         return JNI_FALSE;
     }
 
-    // Resize session setelah session dibuat
     g_net->resizeSession(g_session);
-
     g_modelPath = path;
-    LOGI("Model loaded OK ✅ input=1024x1024 output=%dx%d",
-         MODEL_SIZE * g_scale, MODEL_SIZE * g_scale);
+    LOGI("Loaded OK scale=%dx", g_scale);
     return JNI_TRUE;
 }
 
 // ─── JNI: enhanceFrame ────────────────────────────────────────────────────────
+// Padding approach: pad frame ke kelipatan TILE, proses tile per tile, crop balik
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
         JNIEnv* env, jobject, jobject inputBitmap) {
 
-    if (!g_net || !g_session) { LOGE("Not loaded!"); return nullptr; }
+    if (!g_net || !g_session) { LOGE("Not loaded"); return nullptr; }
 
-    // Bitmap → NCHW float [0,1], auto-resize ke 1024x1024
-    std::vector<float> inputFloat;
-    if (!bitmapToNCHW1024(env, inputBitmap, inputFloat)) return nullptr;
+    BitmapData src(env, inputBitmap);
+    if (!src.ok) return nullptr;
 
-    // Copy ke input tensor (sudah fixed 1024x1024)
-    auto* inputTensor = g_net->getSessionInput(g_session, "input");
-    if (!inputTensor) { LOGE("No input tensor 'input'"); return nullptr; }
+    int srcW = src.w, srcH = src.h;
+    auto* srcPx = (uint8_t*)src.pixels;
 
-    auto* hostIn = MNN::Tensor::create<float>(
-        {1, 3, MODEL_SIZE, MODEL_SIZE},
-        inputFloat.data(),
-        MNN::Tensor::CAFFE
-    );
-    inputTensor->copyFromHostTensor(hostIn);
-    delete hostIn;
+    // Hitung jumlah tile yang dibutuhkan
+    int tilesX = (srcW + TILE - 1) / TILE;
+    int tilesY = (srcH + TILE - 1) / TILE;
 
-    // Run inference
-    g_net->runSession(g_session);
+    // Output size = input * scale
+    int outW = srcW * g_scale;
+    int outH = srcH * g_scale;
 
-    // Ambil output tensor
-    auto* outTensor = g_net->getSessionOutput(g_session, "output");
-    if (!outTensor) { LOGE("No output tensor 'output'"); return nullptr; }
+    LOGI("Frame %dx%d → tiles %dx%d → output %dx%d",
+         srcW, srcH, tilesX, tilesY, outW, outH);
 
-    auto shape = outTensor->shape();
-    if (shape.size() < 4) { LOGE("Bad output shape"); return nullptr; }
+    // Alokasi output bitmap
+    jobject outBitmap = createBitmap(env, outW, outH);
+    void* outPxVoid = nullptr;
+    if (AndroidBitmap_lockPixels(env, outBitmap, &outPxVoid) < 0) return nullptr;
+    auto* outPx = (uint8_t*)outPxVoid;
+    memset(outPx, 0, (size_t)(outW * outH * 4));
 
-    int outH = shape[2]; // 2048 atau 4096
-    int outW = shape[3];
-    int outN = outH * outW;
+    bool success = true;
 
-    LOGI("Output: %dx%d", outW, outH);
+    // Buffer tile input (1024x1024 RGBA)
+    std::vector<uint8_t> tileIn(TILE * TILE * 4, 0);
+    std::vector<uint8_t> tileOut;
 
-    // Copy output ke host
-    std::vector<float> outFloat(3 * outN);
-    auto* hostOut = MNN::Tensor::create<float>(
-        {1, 3, outH, outW},
-        outFloat.data(),
-        MNN::Tensor::CAFFE
-    );
-    outTensor->copyToHostTensor(hostOut);
-    delete hostOut;
+    for (int ty = 0; ty < tilesY && success; ty++) {
+        for (int tx = 0; tx < tilesX && success; tx++) {
 
-    // float NCHW → Bitmap
-    return ncHWtoBitmap(env, outFloat.data(), outW, outH);
+            // Fill tile dengan pixel dari frame asli (pad dengan 0 kalau out of bounds)
+            memset(tileIn.data(), 0, tileIn.size());
+
+            int srcStartX = tx * TILE;
+            int srcStartY = ty * TILE;
+            int copyW = std::min(TILE, srcW - srcStartX);
+            int copyH = std::min(TILE, srcH - srcStartY);
+
+            for (int row = 0; row < copyH; row++) {
+                const uint8_t* srcRow = srcPx + ((srcStartY + row) * srcW + srcStartX) * 4;
+                uint8_t* dstRow       = tileIn.data() + row * TILE * 4;
+                memcpy(dstRow, srcRow, (size_t)(copyW * 4));
+            }
+
+            // Run MNN inference pada tile 1024x1024
+            if (!runTile(tileIn.data(), tileOut)) {
+                success = false; break;
+            }
+
+            // Tulis hasil tile ke output bitmap
+            int outTileW    = TILE * g_scale;
+            int outTileH    = TILE * g_scale;
+            int outStartX   = tx * outTileW;
+            int outStartY   = ty * outTileH;
+            int validOutW   = std::min(outTileW, outW - outStartX);
+            int validOutH   = std::min(outTileH, outH - outStartY);
+
+            for (int row = 0; row < validOutH; row++) {
+                const uint8_t* srcRow = tileOut.data() + row * outTileW * 4;
+                uint8_t* dstRow       = outPx + ((outStartY + row) * outW + outStartX) * 4;
+                memcpy(dstRow, srcRow, (size_t)(validOutW * 4));
+            }
+        }
+    }
+
+    AndroidBitmap_unlockPixels(env, outBitmap);
+
+    if (!success) return nullptr;
+    return outBitmap;
 }
 
 // ─── JNI: release ─────────────────────────────────────────────────────────────
