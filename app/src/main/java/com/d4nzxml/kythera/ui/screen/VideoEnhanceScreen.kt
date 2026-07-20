@@ -88,7 +88,7 @@ fun VideoEnhanceScreen() {
     var engineReady  by remember { mutableStateOf(false) }
     var mode         by remember { mutableStateOf(EnhanceMode.AI_QUALITY) }
     var accelerator  by remember { mutableStateOf(Accelerator.GPU) }
-    var videoScale   by remember { mutableStateOf(VideoScale.X4) }
+    var videoScale   by remember { mutableStateOf(VideoScale.X2) }
     var hdPreset     by remember { mutableStateOf(HdPreset.SHARP) }
 
     var isProcessing by rememberSaveable { mutableStateOf(false) }
@@ -107,7 +107,7 @@ fun VideoEnhanceScreen() {
 
     LaunchedEffect(Unit) {
         statusMsg   = "Memuat engine..."
-        engineReady = MnnVideoBridge.setup(context, VideoScale.X4)
+        engineReady = MnnVideoBridge.setup(context, VideoScale.X2)
         statusMsg   = if (engineReady) "" else "Fast HD aktif"
         if (!engineReady) mode = EnhanceMode.FAST_HD
     }
@@ -227,7 +227,7 @@ fun VideoEnhanceScreen() {
                         "-i \"${framesDir.absolutePath}/frame_%05d.png\" " +
                         "-i \"$safUrl\" " +
                         "-map 0:v -map 1:a " +
-                        "-c:v libx264 -preset slow -crf 16 " +  // high quality
+                        "-vf "scale=1080:-2:flags=lanczos" -c:v libx264 -preset slow -crf 16 " +  // high quality
                         "-pix_fmt yuv420p " +
                         "-c:a aac -b:a 192k " +
                         "-movflags +faststart -shortest " +
@@ -241,7 +241,7 @@ fun VideoEnhanceScreen() {
                         FFmpegKit.execute(
                             "-y -framerate $fps " +
                             "-i \"${framesDir.absolutePath}/frame_%05d.png\" " +
-                            "-c:v libx264 -preset slow -crf 16 " +
+                            "-vf "scale=1080:-2:flags=lanczos" -c:v libx264 -preset slow -crf 16 " +
                             "-pix_fmt yuv420p " +
                             "-movflags +faststart " +
                             "\"${outFile.absolutePath}\""
