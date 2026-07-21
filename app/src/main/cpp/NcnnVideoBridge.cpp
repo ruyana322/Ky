@@ -24,7 +24,7 @@ Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(JNIEnv *env, jclass 
         g_net = nullptr;
     }
 
-    // Inisialisasi Vulkan GPU (Buat Poco X6 Pro lu)
+    // Inisialisasi Vulkan GPU
     ncnn::create_gpu_instance();
     g_has_gpu = ncnn::get_gpu_count() > 0;
 
@@ -34,7 +34,7 @@ Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(JNIEnv *env, jclass 
     // Ambil AssetManager dari Kotlin
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
     
-    // Load model x2 dari folder assets sesuai screenshot lu
+    // Load model x2 dari folder assets
     int ret_param = g_net->load_param(mgr, "realsr/models/realesr-animevideov3-x2.param");
     int ret_bin   = g_net->load_model(mgr, "realsr/models/realesr-animevideov3-x2.bin");
 
@@ -75,17 +75,26 @@ Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(JNIEnv *env, jclas
 
     // 1. Konversi Bitmap Android (RGBA) ke format matriks AI NCNN (RGB)
     ncnn::Mat in = ncnn::Mat::from_pixels((const unsigned char*)pixels, ncnn::Mat::PIXEL_RGBA2RGB, info.width, info.height);
-    AndroidBitmap_unlockPixels(env, bitmap); // Lepas kunci gambar asli
+    
+    // Lepas kunci gambar asli di sini (Cukup 1x aja!)
+    AndroidBitmap_unlockPixels(env, bitmap); 
 
     // 2. EKSEKUSI AI UPSCALE
     ncnn::Extractor ex = g_net->create_extractor();
-   
-    // Input node biasanya bernama "data", dan outputnya "out"
-    // (Jika output gambar nanti hitam/blank, ubah ini jadi "in0" dan "out0")
-    ex.input("data", in);
+    
+    // Pintu masuknya pakai "data"
+    ex.input("data", in); 
     
     ncnn::Mat out;
-    ex.extract("out", out);
+    // Pintu keluarnya pakai "output"
+    ex.extract("output", out); 
+
+    // Keamanan biar nggak force close kalau gagal
+    if (out.empty()) {
+        LOGE("WADUH! Gambar AI kosong. Ekstraksi gagal!");
+        // Baris unlock dihapus dari sini biar nggak crash
+        return nullptr;
+    }
 
     // 3. Buat "Kanvas" Bitmap BARU di Kotlin untuk menampung gambar HD yang udah membesar
     jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
