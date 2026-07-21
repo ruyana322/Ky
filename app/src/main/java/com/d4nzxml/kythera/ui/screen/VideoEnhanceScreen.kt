@@ -58,11 +58,12 @@ enum class EnhanceMode(val label: String, val emoji: String, val desc: String) {
     FAST_HD("Fast HD", "⚡", "Instant scale, no AI")
 }
 
+// Preset Lanczos dihapus biar lebih ringan dan lancar
 enum class HdPreset(val label: String, val desc: String, val vf: String, val bitrate: String) {
-    SHARP(  "Tajam",  "Lanczos + unsharp ringan", "scale=%s:flags=lanczos,unsharp=3:3:0.8:3:3:0",                                 "12M"),
-    ULTRA(  "Ultra",  "Lanczos + sharpen kuat",   "scale=%s:flags=lanczos,unsharp=5:5:1.2:5:5:0,eq=contrast=1.03:saturation=1.1","18M"),
-    SMOOTH( "Smooth", "Lanczos + denoise",         "scale=%s:flags=lanczos,hqdn3d=1:1:3:3",                                       "15M"),
-    TIKTOK( "TikTok", "Optimized untuk upload",    "scale=%s:flags=lanczos,unsharp=3:3:1.0:3:3:0,eq=saturation=1.2",             "8M")
+    SHARP(  "Tajam",  "Unsharp ringan", "scale=%s,unsharp=3:3:0.8:3:3:0",                                 "12M"),
+    ULTRA(  "Ultra",  "Sharpen kuat",   "scale=%s,unsharp=5:5:1.2:5:5:0,eq=contrast=1.03:saturation=1.1","18M"),
+    SMOOTH( "Smooth", "Denoise",        "scale=%s,hqdn3d=1:1:3:3",                                       "15M"),
+    TIKTOK( "TikTok", "Optimized upload", "scale=%s,unsharp=3:3:1.0:3:3:0,eq=saturation=1.2",             "8M")
 }
 
 fun getRealPath(context: Context, uri: Uri): String? {
@@ -144,7 +145,6 @@ fun VideoEnhanceScreen() {
         }
     }
 
-    // ─── AI Process: OpenCV read → MNN enhance → PNG → FFmpeg encode ──────────
     fun processAI() {
         val uri  = inputUri ?: return
         val meta = videoMeta ?: return
@@ -153,7 +153,6 @@ fun VideoEnhanceScreen() {
             outputUri = null; errorLog = null
             doneFrames = 0; progressPct = 0f; processFps = 0f
 
-            // Folder untuk PNG frames hasil enhance
             val framesDir = File(context.cacheDir, "ky_frames_${System.currentTimeMillis()}")
             framesDir.mkdirs()
             val outName = "Kythera_${System.currentTimeMillis()}.mp4"
@@ -173,22 +172,15 @@ fun VideoEnhanceScreen() {
                 statusMsg = "Memproses frames..."; progressPct = 0.03f
                 val startTime = System.currentTimeMillis()
 
-                // ── Loop frame via OpenCV → enhance MNN → simpan PNG ──────────
                 withContext(Dispatchers.IO) {
                     var frameIdx = 0
                     while (true) {
                         if (isCancelled) break
 
                         val frame = OpenCvBridge.readFrame() ?: break
-
-                        // Enhance via MNN
-                        val enhanced = try {
-                            MnnVideoBridge.enhance(frame, accelerator)
-                        } catch (e: Exception) { null }
-
+                        val enhanced = try { MnnVideoBridge.enhance(frame, accelerator) } catch (e: Exception) { null }
                         val toSave = enhanced ?: frame
 
-                        // Simpan sebagai PNG lossless
                         val pngFile = File(framesDir, "frame_%05d.png".format(frameIdx))
                         FileOutputStream(pngFile).use { fos ->
                             toSave.compress(Bitmap.CompressFormat.PNG, 100, fos)
@@ -216,18 +208,18 @@ fun VideoEnhanceScreen() {
 
                 progressPct = 0.77f; statusMsg = "Encoding video HD..."
 
-                // ── FFmpeg: PNG sequence → MP4 high quality ───────────────────
                 val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
                 val fps    = openedMeta.fps
 
+                // Menghapus 'flags=lanczos' dan mengganti string syntax error dengan spasi biasa
+                // Mengubah '-preset slow' jadi '-preset fast' biar enteng
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
-                        "-y " +
-                        "-framerate $fps " +
+                        "-y -framerate $fps " +
                         "-i \"${framesDir.absolutePath}/frame_%05d.png\" " +
                         "-i \"$safUrl\" " +
                         "-map 0:v -map 1:a " +
-                        "-vf "scale=1080:-2:flags=lanczos" -c:v libx264 -preset slow -crf 16 " +  // high quality
+                        "-vf scale=1080:-2 -c:v libx264 -preset fast -crf 18 " +
                         "-pix_fmt yuv420p " +
                         "-c:a aac -b:a 192k " +
                         "-movflags +faststart -shortest " +
@@ -235,13 +227,13 @@ fun VideoEnhanceScreen() {
                     )
                 }
 
-                // Fallback tanpa audio kalau gagal
+                // Fallback tanpa audio kalau gagal, syntax error juga diperbaiki disini
                 val finalSession = if (!ReturnCode.isSuccess(encodeSession.returnCode)) {
                     withContext(Dispatchers.IO) {
                         FFmpegKit.execute(
                             "-y -framerate $fps " +
                             "-i \"${framesDir.absolutePath}/frame_%05d.png\" " +
-                            "-vf "scale=1080:-2:flags=lanczos" -c:v libx264 -preset slow -crf 16 " +
+                            "-vf scale=1080:-2 -c:v libx264 -preset fast -crf 18 " +
                             "-pix_fmt yuv420p " +
                             "-movflags +faststart " +
                             "\"${outFile.absolutePath}\""
@@ -249,7 +241,6 @@ fun VideoEnhanceScreen() {
                     }
                 } else encodeSession
 
-                // Cleanup PNG frames
                 withContext(Dispatchers.IO) { framesDir.deleteRecursively() }
 
                 if (!ReturnCode.isSuccess(finalSession.returnCode)) {
@@ -260,15 +251,12 @@ fun VideoEnhanceScreen() {
 
                 progressPct = 0.95f
 
-                // Simpan ke Gallery
                 val cv = ContentValues().apply {
                     put(MediaStore.Video.Media.DISPLAY_NAME, outName)
                     put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                     put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
                 }
-                val savedUri = context.contentResolver.insert(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv
-                )
+                val savedUri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
                 savedUri?.let { dest ->
                     context.contentResolver.openOutputStream(dest)?.use { os ->
                         FileInputStream(outFile).use { it.copyTo(os) }
@@ -291,7 +279,6 @@ fun VideoEnhanceScreen() {
         }
     }
 
-    // ─── Fast HD ──────────────────────────────────────────────────────────────
     fun processFastHD() {
         val uri  = inputUri ?: return
         val meta = videoMeta ?: return
@@ -304,10 +291,11 @@ fun VideoEnhanceScreen() {
             val vf      = hdPreset.vf.format(scale)
             statusMsg   = "Memproses..."; progressPct = 0.3f
 
+            // Preset diganti ke fast biar tidak terlalu membebani prosesor
             val session = withContext(Dispatchers.IO) {
                 FFmpegKit.execute(
                     "-hide_banner -y -i \"$safUrl\" " +
-                    "-vf \"$vf\" -c:v libx264 -preset slow -crf 18 " +
+                    "-vf \"$vf\" -c:v libx264 -preset fast -crf 18 " +
                     "-b:v ${hdPreset.bitrate} -c:a aac -b:a 192k " +
                     "-movflags +faststart \"${outFile.absolutePath}\""
                 )
@@ -318,9 +306,7 @@ fun VideoEnhanceScreen() {
                     put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                     put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kythera")
                 }
-                val dest = context.contentResolver.insert(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv
-                )
+                val dest = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
                 dest?.let {
                     context.contentResolver.openOutputStream(it)?.use { os ->
                         FileInputStream(outFile).use { fis -> fis.copyTo(os) }
@@ -337,7 +323,6 @@ fun VideoEnhanceScreen() {
 
     fun onProcess() = if (mode == EnhanceMode.AI_QUALITY && engineReady) processAI() else processFastHD()
 
-    // ─── UI ───────────────────────────────────────────────────────────────────
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -469,7 +454,6 @@ fun VideoEnhanceScreen() {
             }
         }
 
-        // Processing UI
         AnimatedVisibility(visible = isProcessing, enter = fadeIn(), exit = fadeOut()) {
             GlassCard {
                 Column(modifier = Modifier.fillMaxWidth(),
