@@ -40,9 +40,12 @@ import androidx.compose.ui.unit.sp
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
-import com.d4nzxml.kythera.service.MnnVideoBridge
-import com.d4nzxml.kythera.service.MnnVideoBridge.Accelerator
-import com.d4nzxml.kythera.service.MnnVideoBridge.VideoScale
+
+// KITA GANTI MNN JADI NCNN DI SINI!
+import com.d4nzxml.kythera.service.NcnnVideoBridge
+import com.d4nzxml.kythera.service.NcnnVideoBridge.Accelerator
+import com.d4nzxml.kythera.service.NcnnVideoBridge.VideoScale
+
 import com.d4nzxml.kythera.service.OpenCvBridge
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
@@ -108,7 +111,8 @@ fun VideoEnhanceScreen() {
 
     LaunchedEffect(Unit) {
         statusMsg   = "Memuat engine..."
-        engineReady = MnnVideoBridge.setup(context, VideoScale.X2)
+        // PANGGIL NCNN DI SINI
+        engineReady = NcnnVideoBridge.setup(context, VideoScale.X2)
         statusMsg   = if (engineReady) "" else "Fast HD aktif"
         if (!engineReady) mode = EnhanceMode.FAST_HD
     }
@@ -117,7 +121,8 @@ fun VideoEnhanceScreen() {
         if (!isProcessing) {
             engineReady = false
             statusMsg   = "Memuat model ${videoScale.label}..."
-            engineReady = MnnVideoBridge.switchScale(context, videoScale)
+            // PANGGIL NCNN DI SINI
+            engineReady = NcnnVideoBridge.switchScale(context, videoScale)
             statusMsg   = ""
         }
     }
@@ -178,7 +183,8 @@ fun VideoEnhanceScreen() {
                         if (isCancelled) break
 
                         val frame = OpenCvBridge.readFrame() ?: break
-                        val enhanced = try { MnnVideoBridge.enhance(frame, accelerator) } catch (e: Exception) { null }
+                        // PANGGIL NCNN DI SINI
+                        val enhanced = try { NcnnVideoBridge.enhance(frame, accelerator) } catch (e: Exception) { null }
                         val toSave = enhanced ?: frame
 
                         val pngFile = File(framesDir, "frame_%05d.png".format(frameIdx))
@@ -211,8 +217,6 @@ fun VideoEnhanceScreen() {
                 val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
                 val fps    = openedMeta.fps
 
-                // Menghapus 'flags=lanczos' dan mengganti string syntax error dengan spasi biasa
-                // Mengubah '-preset slow' jadi '-preset fast' biar enteng
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
                         "-y -framerate $fps " +
@@ -227,7 +231,6 @@ fun VideoEnhanceScreen() {
                     )
                 }
 
-                // Fallback tanpa audio kalau gagal, syntax error juga diperbaiki disini
                 val finalSession = if (!ReturnCode.isSuccess(encodeSession.returnCode)) {
                     withContext(Dispatchers.IO) {
                         FFmpegKit.execute(
@@ -291,7 +294,6 @@ fun VideoEnhanceScreen() {
             val vf      = hdPreset.vf.format(scale)
             statusMsg   = "Memproses..."; progressPct = 0.3f
 
-            // Preset diganti ke fast biar tidak terlalu membebani prosesor
             val session = withContext(Dispatchers.IO) {
                 FFmpegKit.execute(
                     "-hide_banner -y -i \"$safUrl\" " +
