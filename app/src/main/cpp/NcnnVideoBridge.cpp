@@ -115,3 +115,50 @@ Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv *env, jobj
     ncnn::destroy_gpu_instance();
     LOGD("Mesin NCNN dimatikan dan memori dibersihkan.");
 }
+#include <jni.h>
+#include <android/bitmap.h>
+#include <android/log.h>
+
+// Ini pintu JNI yang dicari-cari sama Kotlin lu
+extern "C"
+JNIEXPORT jobject JNICALL
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(JNIEnv *env, jclass clazz, jobject bitmap, jboolean useGpu) {
+    
+    AndroidBitmapInfo info;
+    void* pixels;
+    
+    // 1. Kunci Bitmap dari Kotlin biar bisa dibaca C++
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "NcnnBridge", "Gagal baca info bitmap!");
+        return nullptr;
+    }
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "NcnnBridge", "Gagal lock pixels!");
+        return nullptr;
+    }
+
+    // ==========================================================
+    // 2. DI SINI TEMPAT MESIN NCNN LU BEKERJA (UPSCALE)
+    // ==========================================================
+    // Logika Real-ESRGAN / AI Upscale lu taruh di sini, Kang.
+    // Variabel 'useGpu' (true/false) dari UI bisa lu pakai buat 
+    // ngaktifin Vulkan compute di NCNN.
+    //
+    // Contoh alurnya (harus disesuaikan sama model AI lu):
+    // ncnn::Mat in = ncnn::Mat::from_pixels(...);
+    // ncnn::Extractor ex = net.create_extractor();
+    // ex.set_vulkan_compute(useGpu);
+    // ex.input("in0", in);
+    // ncnn::Mat out;
+    // ex.extract("out0", out);
+    // out.to_pixels((unsigned char*)pixels, ...);
+    // ==========================================================
+
+    // 3. Lepas kunci Bitmap setelah selesai diproses
+    AndroidBitmap_unlockPixels(env, bitmap);
+
+    // 4. Balikin gambar hasil AI ke Kotlin
+    // (Sementara ini ngembaliin gambar aslinya biar aplikasi nggak force close)
+    return bitmap;
+}
+
