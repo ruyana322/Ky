@@ -4,22 +4,22 @@
 #include <android/bitmap.h>
 #include <android/log.h>
 
-// Include library NCNN
+// Include library inti NCNN
 #include "net.h"
 #include "gpu.h"
 
-#define TAG "NcnnBridge"
+// Setup untuk log di Logcat Android Studio
+#define TAG "NcnnBridgeCPP"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// Bikin instance mesin NCNN global
+// Bikin instance mesin NCNN global biar gak di-load berulang kali
 static ncnn::Net realEsrganNet;
 static bool isGpuEnabled = false;
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-// PENTING: Ganti 'com_example_ky_NcnnVideoBridge' sesuai nama package Kotlin lu nanti!
-Java_com_example_ky_NcnnVideoBridge_initEngine(JNIEnv *env, jobject thiz, jobject assetManager) {
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(JNIEnv *env, jobject thiz, jobject assetManager) {
     
     // 1. Nyalain Mesin GPU (Vulkan)
     ncnn::create_gpu_instance();
@@ -38,8 +38,8 @@ Java_com_example_ky_NcnnVideoBridge_initEngine(JNIEnv *env, jobject thiz, jobjec
     // 2. Siapin AssetManager buat narik file dari folder assets
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
     
-    // 3. Load model anime v3 dari folder assets lu
-    // Sesuaikan jalurnya kalau letaknya beda dari assets/realsr/models/
+    // 3. Load model anime v3 dari folder assets
+    // (Jalur ini disesuaikan dengan struktur di repo GitHub lu)
     int ret_param = realEsrganNet.load_param(mgr, "realsr/models/realesr-animevideov3-x2.param");
     int ret_bin = realEsrganNet.load_model(mgr, "realsr/models/realesr-animevideov3-x2.bin");
 
@@ -53,9 +53,64 @@ Java_com_example_ky_NcnnVideoBridge_initEngine(JNIEnv *env, jobject thiz, jobjec
 }
 
 extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processBitmap(JNIEnv *env, jobject thiz, jobject bitmapIn, jobject bitmapOut) {
+    AndroidBitmapInfo infoIn;
+    AndroidBitmapInfo infoOut;
+    void* pixelsIn;
+    void* pixelsOut;
+
+    // 1. Baca info gambar sumber (Bitmap In)
+    if (AndroidBitmap_getInfo(env, bitmapIn, &infoIn) < 0) {
+        LOGE("Gagal baca info Bitmap Input");
+        return JNI_FALSE;
+    }
+
+    // 2. Baca info gambar tujuan (Bitmap Out)
+    if (AndroidBitmap_getInfo(env, bitmapOut, &infoOut) < 0) {
+        LOGE("Gagal baca info Bitmap Output");
+        return JNI_FALSE;
+    }
+
+    // Pastikan ukuran output 2x lebih besar dari input (karena model lu x2)
+    if (infoOut.width != infoIn.width * 2 || infoOut.height != infoIn.height * 2) {
+        LOGE("Ukuran Bitmap Output harus tepat 2x lipat dari Bitmap Input!");
+        return JNI_FALSE;
+    }
+
+    // 3. Kunci pixel gambar biar bisa dibaca mesin C++
+    AndroidBitmap_lockPixels(env, bitmapIn, &pixelsIn);
+    AndroidBitmap_lockPixels(env, bitmapOut, &pixelsOut);
+
+    // 4. Ubah pixel Android (RGBA) jadi format matriks NCNN (RGB)
+    ncnn::Mat in = ncnn::Mat::from_pixels((const unsigned char*)pixelsIn, ncnn::Mat::PIXEL_RGBA2RGB, infoIn.width, infoIn.height);
+
+    // 5. Mulai proses Upscale! (Ngunyah gambar)
+    ncnn::Extractor ex = realEsrganNet.create_extractor();
+    ex.set_light_mode(true); // Biar hemat RAM
+    
+    // Masukin gambar kotor ke mesin (Node input default biasanya "data")
+    ex.input("data", in);
+
+    // Tarik gambar bersih hasil upscale (Node output default biasanya "out")
+    ncnn::Mat out;
+    ex.extract("out", out);
+
+    // 6. Ubah balik matriks NCNN (RGB) jadi pixel Android (RGBA) dan masukin ke Bitmap Out
+    out.to_pixels((unsigned char*)pixelsOut, ncnn::Mat::PIXEL_RGB2RGBA);
+
+    // 7. Buka kunci pixel (Wajib biar memory gak bocor)
+    AndroidBitmap_unlockPixels(env, bitmapIn);
+    AndroidBitmap_unlockPixels(env, bitmapOut);
+
+    LOGD("Upscale frame berhasil dieksekusi!");
+    return JNI_TRUE;
+}
+
+extern "C"
 JNIEXPORT void JNICALL
-Java_com_example_ky_NcnnVideoBridge_destroyEngine(JNIEnv *env, jobject thiz) {
-    // Matiin mesin dan bersihin memori (Biar HP gak panas/RAM bocor)
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv *env, jobject thiz) {
+    // Matiin mesin dan bersihin memori biar RAM aman
     realEsrganNet.clear();
     ncnn::destroy_gpu_instance();
     LOGD("Mesin NCNN dimatikan dan memori dibersihkan.");
