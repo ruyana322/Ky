@@ -19,6 +19,14 @@ static int    g_width       = 0;
 static int    g_height      = 0;
 static int    g_rotation    = 0; // dikirim dari Kotlin via MediaMetadataRetriever
 
+// ─── Fungsi Helper buat ngelempar error dari C++ ke Kotlin ────────────────────
+void throwJavaException(JNIEnv *env, const char *msg) {
+    jclass exClass = env->FindClass("java/lang/RuntimeException");
+    if (exClass != nullptr) {
+        env->ThrowNew(exClass, msg);
+    }
+}
+
 // ─── Mat → Bitmap dengan rotation dari Kotlin ─────────────────────────────────
 static jobject matToBitmap(JNIEnv* env, cv::Mat& mat) {
     cv::Mat rotated;
@@ -73,7 +81,16 @@ Java_com_d4nzxml_kythera_service_OpenCvBridge_openVideoNative(
 
     if (g_cap.isOpened()) g_cap.release();
     g_cap.open(pathStr);
-    if (!g_cap.isOpened()) { LOGE("Failed open: %s", pathStr.c_str()); return nullptr; }
+    
+    // KALAU GAGAL BUKA, LANGSUNG LEMPAR ERROR KE KOTLIN UI
+    if (!g_cap.isOpened()) { 
+        LOGE("Failed open: %s", pathStr.c_str()); 
+        
+        std::string errMsg = "C++ Error: OpenCV gagal ngebuka video di path:\n" + pathStr + 
+                             "\n\nAlasan: Kemungkinan codec tidak didukung (seperti H.265/HEVC tertentu) atau file corrupt saat diproses.";
+        throwJavaException(env, errMsg.c_str());
+        return nullptr; 
+    }
 
     g_totalFrames = (int)g_cap.get(cv::CAP_PROP_FRAME_COUNT);
     g_fps         = g_cap.get(cv::CAP_PROP_FPS);
