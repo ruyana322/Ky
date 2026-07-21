@@ -71,16 +71,21 @@ enum class HdPreset(val label: String, val desc: String, val vf: String, val bit
 
 fun getRealPath(context: Context, uri: Uri): String? {
     return try {
-        val cursor = context.contentResolver.query(uri, arrayOf("_data"), null, null, null)
-        cursor?.use { if (it.moveToFirst()) it.getString(0) else null } ?: run {
-            val tmp = File(context.cacheDir, "ky_in_${System.currentTimeMillis()}.mp4")
-            context.contentResolver.openInputStream(uri)?.use { i ->
-                tmp.outputStream().use { o -> i.copyTo(o) }
+        // KITA PAKSA SEMUA VIDEO DI-COPY KE CACHE INTERNAL!
+        // Hapus logika 'cursor' yang ngambil path raw galeri, 
+        // karena C++ OpenCV nggak punya izin akses ke sana.
+        val tmp = File(context.cacheDir, "ky_in_${System.currentTimeMillis()}.mp4")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            tmp.outputStream().use { output -> 
+                input.copyTo(output) 
             }
-            tmp.absolutePath
         }
-    } catch (e: Exception) { null }
+        tmp.absolutePath // Path cache ini 100% halal dibaca sama C++
+    } catch (e: Exception) { 
+        null 
+    }
 }
+
 
 @Composable
 fun VideoEnhanceScreen() {
