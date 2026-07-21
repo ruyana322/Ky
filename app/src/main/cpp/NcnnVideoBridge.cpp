@@ -1,164 +1,109 @@
 #include <jni.h>
-#include <string>
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
+#include <string>
 
-// Include library inti NCNN
-#include "net.h"
-#include "gpu.h"
+// Header NCNN
+#include "ncnn/net.h"
+#include "ncnn/gpu.h"
 
-// Setup untuk log di Logcat Android Studio
-#define TAG "NcnnBridgeCPP"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define TAG "KytheraNCNN"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// Bikin instance mesin NCNN global biar gak di-load berulang kali
-static ncnn::Net realEsrganNet;
-static bool isGpuEnabled = false;
+// Variabel global mesin AI
+static ncnn::Net* g_net = nullptr;
+static bool g_has_gpu = false;
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(JNIEnv *env, jobject thiz, jobject assetManager) {
-    
-    // 1. Nyalain Mesin GPU (Vulkan)
-    ncnn::create_gpu_instance();
-    int gpu_count = ncnn::get_gpu_count();
-    
-    if (gpu_count > 0) {
-        LOGD("Mantap! Ditemukan %d GPU Vulkan. Mesin Turbo diaktifkan!", gpu_count);
-        realEsrganNet.opt.use_vulkan_compute = true;
-        isGpuEnabled = true;
-    } else {
-        LOGE("Waduh, GPU Vulkan gak ketemu. Terpaksa pakai CPU biasa.");
-        realEsrganNet.opt.use_vulkan_compute = false;
-        isGpuEnabled = false;
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(JNIEnv *env, jclass clazz, jobject assetManager) {
+    if (g_net != nullptr) {
+        delete g_net;
+        g_net = nullptr;
     }
 
-    // 2. Siapin AssetManager buat narik file dari folder assets
+    // Inisialisasi Vulkan GPU (Buat Poco X6 Pro lu)
+    ncnn::create_gpu_instance();
+    g_has_gpu = ncnn::get_gpu_count() > 0;
+
+    g_net = new ncnn::Net();
+    g_net->opt.use_vulkan_compute = g_has_gpu;
+
+    // Ambil AssetManager dari Kotlin
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
     
-    // 3. Load model anime v3 dari folder assets
-    // (Jalur ini disesuaikan dengan struktur di repo GitHub lu)
-    int ret_param = realEsrganNet.load_param(mgr, "realsr/models/realesr-animevideov3-x2.param");
-    int ret_bin = realEsrganNet.load_model(mgr, "realsr/models/realesr-animevideov3-x2.bin");
+    // Load model x2 dari folder assets sesuai screenshot lu
+    int ret_param = g_net->load_param(mgr, "realsr/models/realesr-animevideov3-x2.param");
+    int ret_bin   = g_net->load_model(mgr, "realsr/models/realesr-animevideov3-x2.bin");
 
     if (ret_param != 0 || ret_bin != 0) {
-        LOGE("Gagal memuat model Real-ESRGAN! Cek lagi lokasi file bin dan param-nya.");
-        return JNI_FALSE;
-    }
-    
-    LOGD("Model Real-ESRGAN Anime V3 sukses dimuat ke mesin!");
-    return JNI_TRUE;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processBitmap(JNIEnv *env, jobject thiz, jobject bitmapIn, jobject bitmapOut) {
-    AndroidBitmapInfo infoIn;
-    AndroidBitmapInfo infoOut;
-    void* pixelsIn;
-    void* pixelsOut;
-
-    // 1. Baca info gambar sumber (Bitmap In)
-    if (AndroidBitmap_getInfo(env, bitmapIn, &infoIn) < 0) {
-        LOGE("Gagal baca info Bitmap Input");
+        LOGE("Gagal load model NCNN dari assets! Cek path file-nya.");
         return JNI_FALSE;
     }
 
-    // 2. Baca info gambar tujuan (Bitmap Out)
-    if (AndroidBitmap_getInfo(env, bitmapOut, &infoOut) < 0) {
-        LOGE("Gagal baca info Bitmap Output");
-        return JNI_FALSE;
-    }
-
-    // Pastikan ukuran output 2x lebih besar dari input (karena model lu x2)
-    if (infoOut.width != infoIn.width * 2 || infoOut.height != infoIn.height * 2) {
-        LOGE("Ukuran Bitmap Output harus tepat 2x lipat dari Bitmap Input!");
-        return JNI_FALSE;
-    }
-
-    // 3. Kunci pixel gambar biar bisa dibaca mesin C++
-    AndroidBitmap_lockPixels(env, bitmapIn, &pixelsIn);
-    AndroidBitmap_lockPixels(env, bitmapOut, &pixelsOut);
-
-    // 4. Ubah pixel Android (RGBA) jadi format matriks NCNN (RGB)
-    ncnn::Mat in = ncnn::Mat::from_pixels((const unsigned char*)pixelsIn, ncnn::Mat::PIXEL_RGBA2RGB, infoIn.width, infoIn.height);
-
-    // 5. Mulai proses Upscale! (Ngunyah gambar)
-    ncnn::Extractor ex = realEsrganNet.create_extractor();
-    ex.set_light_mode(true); // Biar hemat RAM
-    
-    // Masukin gambar kotor ke mesin (Node input default biasanya "data")
-    ex.input("data", in);
-
-    // Tarik gambar bersih hasil upscale (Node output default biasanya "out")
-    ncnn::Mat out;
-    ex.extract("out", out);
-
-    // 6. Ubah balik matriks NCNN (RGB) jadi pixel Android (RGBA) dan masukin ke Bitmap Out
-    out.to_pixels((unsigned char*)pixelsOut, ncnn::Mat::PIXEL_RGB2RGBA);
-
-    // 7. Buka kunci pixel (Wajib biar memory gak bocor)
-    AndroidBitmap_unlockPixels(env, bitmapIn);
-    AndroidBitmap_unlockPixels(env, bitmapOut);
-
-    LOGD("Upscale frame berhasil dieksekusi!");
+    LOGI("Model NCNN Real-ESRGAN berhasil di-load! GPU Vulkan: %s", g_has_gpu ? "AKTIF" : "OFF");
     return JNI_TRUE;
 }
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv *env, jobject thiz) {
-    // Matiin mesin dan bersihin memori biar RAM aman
-    realEsrganNet.clear();
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv *env, jclass clazz) {
+    if (g_net != nullptr) {
+        delete g_net;
+        g_net = nullptr;
+    }
     ncnn::destroy_gpu_instance();
-    LOGD("Mesin NCNN dimatikan dan memori dibersihkan.");
+    LOGI("Mesin NCNN dimatikan.");
 }
-#include <jni.h>
-#include <android/bitmap.h>
-#include <android/log.h>
 
-// Ini pintu JNI yang dicari-cari sama Kotlin lu
 extern "C"
 JNIEXPORT jobject JNICALL
 Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(JNIEnv *env, jclass clazz, jobject bitmap, jboolean useGpu) {
-    
+    if (g_net == nullptr) {
+        LOGE("Mesin NCNN belum nyala!");
+        return nullptr;
+    }
+
     AndroidBitmapInfo info;
-    void* pixels;
+    void* pixels = nullptr;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0 || AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) {
+        LOGE("Gagal mengunci pixels dari Bitmap Kotlin.");
+        return nullptr;
+    }
+
+    // 1. Konversi Bitmap Android (RGBA) ke format matriks AI NCNN (RGB)
+    ncnn::Mat in = ncnn::Mat::from_pixels((const unsigned char*)pixels, ncnn::Mat::PIXEL_RGBA2RGB, info.width, info.height);
+    AndroidBitmap_unlockPixels(env, bitmap); // Lepas kunci gambar asli
+
+    // 2. EKSEKUSI AI UPSCALE
+    ncnn::Extractor ex = g_net->create_extractor();
+    ex.set_vulkan_compute(useGpu && g_has_gpu);
     
-    // 1. Kunci Bitmap dari Kotlin biar bisa dibaca C++
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "NcnnBridge", "Gagal baca info bitmap!");
-        return nullptr;
+    // Input node biasanya bernama "data", dan outputnya "out"
+    // (Jika output gambar nanti hitam/blank, ubah ini jadi "in0" dan "out0")
+    ex.input("data", in);
+    
+    ncnn::Mat out;
+    ex.extract("out", out);
+
+    // 3. Buat "Kanvas" Bitmap BARU di Kotlin untuk menampung gambar HD yang udah membesar
+    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
+    jclass configClass = env->FindClass("android/graphics/Bitmap$Config");
+    jfieldID fid = env->GetStaticFieldID(configClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
+    jobject argb8888 = env->GetStaticObjectField(configClass, fid);
+    jmethodID create = env->GetStaticMethodID(bitmapClass, "createBitmap", "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    
+    // out.w dan out.h sekarang udah berukuran 2x lipat (karena model x2)
+    jobject resultBitmap = env->CallStaticObjectMethod(bitmapClass, create, out.w, out.h, argb8888);
+
+    // 4. Tuangkan hasil AI (RGB) ke dalam Kanvas Bitmap Baru (RGBA)
+    void* resultPixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, resultBitmap, &resultPixels) >= 0) {
+        out.to_pixels((unsigned char*)resultPixels, ncnn::Mat::PIXEL_RGB2RGBA);
+        AndroidBitmap_unlockPixels(env, resultBitmap);
     }
-    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "NcnnBridge", "Gagal lock pixels!");
-        return nullptr;
-    }
 
-    // ==========================================================
-    // 2. DI SINI TEMPAT MESIN NCNN LU BEKERJA (UPSCALE)
-    // ==========================================================
-    // Logika Real-ESRGAN / AI Upscale lu taruh di sini, Kang.
-    // Variabel 'useGpu' (true/false) dari UI bisa lu pakai buat 
-    // ngaktifin Vulkan compute di NCNN.
-    //
-    // Contoh alurnya (harus disesuaikan sama model AI lu):
-    // ncnn::Mat in = ncnn::Mat::from_pixels(...);
-    // ncnn::Extractor ex = net.create_extractor();
-    // ex.set_vulkan_compute(useGpu);
-    // ex.input("in0", in);
-    // ncnn::Mat out;
-    // ex.extract("out0", out);
-    // out.to_pixels((unsigned char*)pixels, ...);
-    // ==========================================================
-
-    // 3. Lepas kunci Bitmap setelah selesai diproses
-    AndroidBitmap_unlockPixels(env, bitmap);
-
-    // 4. Balikin gambar hasil AI ke Kotlin
-    // (Sementara ini ngembaliin gambar aslinya biar aplikasi nggak force close)
-    return bitmap;
+    return resultBitmap; // Kirim balik gambar HD ke Kotlin!
 }
-
