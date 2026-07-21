@@ -18,7 +18,7 @@ include_directories(${NCNN_DIR}/${ANDROID_ABI}/include/ncnn)
 add_library(ncnn STATIC IMPORTED)
 set_target_properties(ncnn PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libncnn.a)
 
-# B. Komponen Penerjemah glslang & SPIRV (Cukup dua ini aja buat versi NCNN lu)
+# B. Komponen Penerjemah glslang & SPIRV
 add_library(glslang STATIC IMPORTED)
 set_target_properties(glslang PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libglslang.a)
 
@@ -42,7 +42,7 @@ find_library(vulkan-lib vulkan)
 # 4. RAKIT SEMUA JEMBATAN C++
 # ==========================================
 
-# A. Merakit Jembatan NCNN (Hanya nge-link glslang dan SPIRV)
+# A. Merakit Jembatan NCNN
 add_library(ncnn_bridge SHARED cpp/NcnnVideoBridge.cpp)
 target_link_libraries(ncnn_bridge
                       ncnn
@@ -53,16 +53,9 @@ target_link_libraries(ncnn_bridge
                       ${jnigraphics-lib}
                       ${android-lib})
 
-# B. Merakit Jembatan OpenCV
+# B. Merakit Jembatan OpenCV (Tetap dipertahankan untuk olah frame)
 add_library(opencv_bridge SHARED cpp/OpenCvBridge.cpp)
 target_link_libraries(opencv_bridge
-                      ${log-lib}
-                      ${jnigraphics-lib}
-                      ${android-lib})
-
-# C. Merakit Jembatan MNN Lama
-add_library(mnn_bridge SHARED cpp/MnnVideoBridge.cpp)
-target_link_libraries(mnn_bridge
                       ${log-lib}
                       ${jnigraphics-lib}
                       ${android-lib})
