@@ -18,18 +18,12 @@ include_directories(${NCNN_DIR}/${ANDROID_ABI}/include/ncnn)
 add_library(ncnn STATIC IMPORTED)
 set_target_properties(ncnn PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libncnn.a)
 
-# B. Komponen Penerjemah glslang & SPIRV (Wajib buat Vulkan)
+# B. Komponen Penerjemah glslang & SPIRV (Cukup dua ini aja buat versi NCNN lu)
 add_library(glslang STATIC IMPORTED)
 set_target_properties(glslang PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libglslang.a)
 
 add_library(SPIRV STATIC IMPORTED)
 set_target_properties(SPIRV PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libSPIRV.a)
-
-add_library(OGLCompiler STATIC IMPORTED)
-set_target_properties(OGLCompiler PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libOGLCompiler.a)
-
-add_library(OSDependent STATIC IMPORTED)
-set_target_properties(OSDependent PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libOSDependent.a)
 
 # ==========================================
 # 2. SETUP HEADER OPENCV
@@ -48,14 +42,12 @@ find_library(vulkan-lib vulkan)
 # 4. RAKIT SEMUA JEMBATAN C++
 # ==========================================
 
-# A. Merakit Jembatan NCNN (Sekarang dikunci sama semua penerjemahnya)
+# A. Merakit Jembatan NCNN (Hanya nge-link glslang dan SPIRV)
 add_library(ncnn_bridge SHARED cpp/NcnnVideoBridge.cpp)
 target_link_libraries(ncnn_bridge
                       ncnn
                       glslang
                       SPIRV
-                      OGLCompiler
-                      OSDependent
                       ${vulkan-lib}
                       ${log-lib}
                       ${jnigraphics-lib}
