@@ -14,7 +14,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -fopenmp")
 set(NCNN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cpp/Ncnn-vulkan)
 include_directories(${NCNN_DIR}/${ANDROID_ABI}/include/ncnn)
 
-# A. Mesin Utama
+# A. Mesin Utama NCNN
 add_library(ncnn STATIC IMPORTED)
 set_target_properties(ncnn PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libncnn.a)
 
@@ -26,9 +26,14 @@ add_library(SPIRV STATIC IMPORTED)
 set_target_properties(SPIRV PROPERTIES IMPORTED_LOCATION ${NCNN_DIR}/${ANDROID_ABI}/lib/libSPIRV.a)
 
 # ==========================================
-# 2. SETUP HEADER OPENCV
+# 2. SETUP OPENCV
 # ==========================================
+# A. Header OpenCV
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/cpp/include)
+
+# B. Mesin Utama OpenCV (Ini yang bikin error tadi, sekarang udah ditambahin)
+add_library(opencv_java4 SHARED IMPORTED)
+set_target_properties(opencv_java4 PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libopencv_java4.so)
 
 # ==========================================
 # 3. PANGGIL LIBRARY BAWAAN ANDROID
@@ -53,9 +58,10 @@ target_link_libraries(ncnn_bridge
                       ${jnigraphics-lib}
                       ${android-lib})
 
-# B. Merakit Jembatan OpenCV (Tetap dipertahankan untuk olah frame)
+# B. Merakit Jembatan OpenCV (Sekarang dilink ke mesin opencv_java4)
 add_library(opencv_bridge SHARED cpp/OpenCvBridge.cpp)
 target_link_libraries(opencv_bridge
+                      opencv_java4
                       ${log-lib}
                       ${jnigraphics-lib}
                       ${android-lib})
