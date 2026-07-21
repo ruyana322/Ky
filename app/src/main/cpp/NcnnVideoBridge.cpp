@@ -79,8 +79,7 @@ Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(JNIEnv *env, jclas
 
     // 2. EKSEKUSI AI UPSCALE
     ncnn::Extractor ex = g_net->create_extractor();
-    ex.set_vulkan_compute(useGpu && g_has_gpu);
-    
+   
     // Input node biasanya bernama "data", dan outputnya "out"
     // (Jika output gambar nanti hitam/blank, ubah ini jadi "in0" dan "out0")
     ex.input("data", in);
