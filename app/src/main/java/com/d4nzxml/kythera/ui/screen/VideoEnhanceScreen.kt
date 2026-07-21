@@ -127,28 +127,45 @@ fun VideoEnhanceScreen() {
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+      val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             inputUriStr = it.toString()
             isSuccess = false; outputUri = null; errorLog = null
             videoMeta = null; totalFrames = 0
+            
             scope.launch(Dispatchers.IO) {
                 val path = getRealPath(context, it)
                 if (path != null) {
-                    val meta = OpenCvBridge.openVideo(path)
-                    withContext(Dispatchers.Main) {
-                        if (meta != null) {
-                            videoMeta   = meta
-                            totalFrames = meta.totalFrames
-                            statusMsg   = "${meta.displayRes} · ${meta.displayFps} · ${meta.displayDur} · ${meta.totalFrames} frames"
-                        } else {
-                            statusMsg = "Gagal baca metadata"
+                    try {
+                        // Coba buka video, kalau C++ error, dia bakal lari ke 'catch'
+                        val meta = OpenCvBridge.openVideo(path)
+                        
+                        withContext(Dispatchers.Main) {
+                            if (meta != null) {
+                                videoMeta   = meta
+                                totalFrames = meta.totalFrames
+                                statusMsg   = "${meta.displayRes} · ${meta.displayFps} · ${meta.displayDur} · ${meta.totalFrames} frames"
+                            } else {
+                                statusMsg = "Gagal baca metadata (Nilai Null)"
+                            }
                         }
+                    } catch (e: Exception) {
+                        // NANGKAP ERROR DARI C++ DAN TAMPILIN KE UI
+                        withContext(Dispatchers.Main) {
+                            statusMsg = "OpenCV Error!"
+                            errorLog = e.message // Ini bakal nampilin teks dari throwJavaException C++
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        statusMsg = "Gagal memproses URI Video"
+                        errorLog = "Fungsi getRealPath mengembalikan nilai null."
                     }
                 }
             }
         }
     }
+
 
     fun processAI() {
         val uri  = inputUri ?: return
