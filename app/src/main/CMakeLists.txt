@@ -1,38 +1,39 @@
-cmake_minimum_required(VERSION 3.22.1)
-project("kythera_native")
+# Versi minimum CMake bawaan Android Studio
+cmake_minimum_required(VERSION 3.10.2)
 
-# CMAKE_SOURCE_DIR = /home/runner/work/Ky/Ky/app/src/main
-# jniLibs ada di app/src/main/jniLibs/ — SAME FOLDER!
-# Jadi path = ${CMAKE_SOURCE_DIR}/jniLibs/
+# Nama proyek C++ lu
+project("kythera_ncnn")
 
-set(JNILIBS_DIR ${CMAKE_SOURCE_DIR}/jniLibs/${ANDROID_ABI})
+# Aktifin flag OpenMP dan optimasi level 3 (-O3) biar mesin AI lari sekencang mungkin
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O3 -fopenmp")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -fopenmp")
 
-message(STATUS ">>> JNI libs dir: ${JNILIBS_DIR}")
+# 1. Path ke folder mesin NCNN yang udah lu dietin (sejajar sama file ini)
+set(NCNN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Ncnn-vulkan)
 
-# ─── Import libMNN.so ─────────────────────────────────────────────────────────
-add_library(MNN SHARED IMPORTED)
-set_target_properties(MNN PROPERTIES
-    IMPORTED_LOCATION ${JNILIBS_DIR}/libMNN.so
-)
+# 2. Kasih tau CMake di mana letak file header (.h) nya NCNN
+include_directories(${NCNN_DIR}/${ANDROID_ABI}/include/ncnn)
 
-# ─── Import libopencv_java4.so ────────────────────────────────────────────────
-add_library(opencv_java4 SHARED IMPORTED)
-set_target_properties(opencv_java4 PROPERTIES
-    IMPORTED_LOCATION ${JNILIBS_DIR}/libopencv_java4.so
-)
+# 3. Import mesin inti NCNN (.a) berdasarkan arsitektur HP (arm64-v8a)
+add_library(ncnn STATIC IMPORTED)
+set_target_properties(ncnn PROPERTIES IMPORTED_LOCATION
+    ${NCNN_DIR}/${ANDROID_ABI}/lib/libncnn.a)
 
-# ─── MNN Video Bridge ─────────────────────────────────────────────────────────
-add_library(kythera_mnn SHARED cpp/MnnVideoBridge.cpp)
-target_include_directories(kythera_mnn PRIVATE
-    ${CMAKE_SOURCE_DIR}/cpp/include
-    ${CMAKE_SOURCE_DIR}/cpp/include/MNN
-)
-target_link_libraries(kythera_mnn MNN android jnigraphics log)
+# 4. Cari library bawaan Android yang wajib dipakai
+find_library(log-lib log)
+find_library(jnigraphics-lib jnigraphics) # Buat ngolah gambar/Bitmap
+find_library(android-lib android)         # Buat baca file model dari folder assets
+find_library(vulkan-lib vulkan)           # Mesin penggerak GPU!
 
-# ─── OpenCV Video Bridge ──────────────────────────────────────────────────────
-add_library(kythera_cv SHARED cpp/OpenCvBridge.cpp)
-target_include_directories(kythera_cv PRIVATE
-    ${CMAKE_SOURCE_DIR}/cpp/include
-    ${CMAKE_SOURCE_DIR}/cpp/include/opencv2
-)
-target_link_libraries(kythera_cv opencv_java4 android jnigraphics log)
+# 5. Daftarin file C++ lu (Jembatannya)
+# (Gua kasih nama NcnnVideoBridge.cpp, pastikan file ini ada di folder cpp lu)
+add_library(ncnn_bridge SHARED
+            NcnnVideoBridge.cpp)
+
+# 6. Ikat semuanya jadi satu kesatuan
+target_link_libraries(ncnn_bridge
+                      ncnn
+                      ${vulkan-lib}
+                      ${log-lib}
+                      ${jnigraphics-lib}
+                      ${android-lib})
