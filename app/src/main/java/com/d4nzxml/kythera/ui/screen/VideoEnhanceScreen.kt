@@ -40,12 +40,11 @@ import androidx.compose.ui.unit.sp
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
-
-// KITA GANTI MNN JADI NCNN DI SINI!
+import com.d4nzxml.kythera.superresolution.RealEsrganBridge
+import com.d4nzxml.kythera.superresolution.VideoUpscaleProcessor
 import com.d4nzxml.kythera.service.NcnnVideoBridge
 import com.d4nzxml.kythera.service.NcnnVideoBridge.Accelerator
 import com.d4nzxml.kythera.service.NcnnVideoBridge.VideoScale
-
 import com.d4nzxml.kythera.service.OpenCvBridge
 import com.d4nzxml.kythera.ui.components.*
 import com.d4nzxml.kythera.ui.theme.KColor
@@ -114,21 +113,36 @@ fun VideoEnhanceScreen() {
 
     val inputUri = inputUriStr?.let { Uri.parse(it) }
 
+    // Processor instance — created when scale changes, per-instance Mutex inside
+    val processor = remember(videoScale) {
+        VideoUpscaleProcessor(
+            scale = if (videoScale == VideoScale.X2) 2 else 4,
+            modelName = "realesr-animevideov3",
+            useFaceRestore = false
+        )
+    }
+    val processorProgress by processor.progress.collectAsState()
+    val processorFps by processor.fps.collectAsState()
+
     LaunchedEffect(Unit) {
-        statusMsg   = "Memuat engine..."
-        // PANGGIL NCNN DI SINI
-        engineReady = NcnnVideoBridge.setup(context, VideoScale.X2)
-        statusMsg   = if (engineReady) "" else "Fast HD aktif"
-        if (!engineReady) mode = EnhanceMode.FAST_HD
+        // Engine was preloaded in MainActivity — just read the ready flag
+        engineReady = RealEsrganBridge.isReady()
+        statusMsg = if (engineReady) "" else "AI engine loading..."
+        if (!engineReady) {
+            // Wait for engine to be ready (preloaded in background)
+            withContext(Dispatchers.IO) {
+                engineReady = RealEsrganBridge.loadModel(context.assets)
+            }
+            statusMsg = if (engineReady) "" else "Fast HD aktif"
+            if (!engineReady) mode = EnhanceMode.FAST_HD
+        }
     }
 
-    LaunchedEffect(videoScale) {
-        if (!isProcessing) {
-            engineReady = false
-            statusMsg   = "Memuat model ${videoScale.label}..."
-            // PANGGIL NCNN DI SINI
-            engineReady = NcnnVideoBridge.switchScale(context, videoScale)
-            statusMsg   = ""
+    // Sync processorProgress → progressPct for the existing UI
+    LaunchedEffect(processorProgress) {
+        if (isProcessing) {
+            progressPct = 0.03f + (0.72f * processorProgress)
+            processFps = processorFps
         }
     }
 
@@ -179,10 +193,11 @@ fun VideoEnhanceScreen() {
             isProcessing = true; isCancelled = false; isSuccess = false
             outputUri = null; errorLog = null
             doneFrames = 0; progressPct = 0f; processFps = 0f
+            processor.resetProgress()
 
-            val nativeOutFile = File(context.cacheDir, "ky_native_out_${System.currentTimeMillis()}.mp4")
             val outName = "Kythera_${System.currentTimeMillis()}.mp4"
             val outFile = File(context.getExternalFilesDir(null), outName)
+            val framesDir = File(context.cacheDir, "ky_frames")
 
             try {
                 val path = withContext(Dispatchers.IO) { getRealPath(context, uri) }
@@ -195,65 +210,59 @@ fun VideoEnhanceScreen() {
                     errorLog = "Gagal buka video"; isProcessing = false; return@launch
                 }
 
-                statusMsg = "Memproses frames..."; progressPct = 0.03f
-                val startTime = System.currentTimeMillis()
-                
-                val framesDir = File(context.cacheDir, "ky_frames")
-                if (!framesDir.exists()) framesDir.mkdirs() else { framesDir.listFiles()?.forEach { it.delete() } }
+                statusMsg = "Memproses frames... (realesr-animevideov3 ${videoScale.label})"
+                progressPct = 0.03f
 
-                val mutex = kotlinx.coroutines.sync.Mutex()
+                // Prepare frames directory
+                withContext(Dispatchers.IO) {
+                    if (!framesDir.exists()) framesDir.mkdirs()
+                    else framesDir.listFiles()?.forEach { it.delete() }
+                }
+
                 var frameIdx = 0
+                val totalF = openedMeta.totalFrames
 
                 withContext(Dispatchers.IO) {
                     while (true) {
                         if (isCancelled) break
-                        
-                        val frame = OpenCvBridge.readFrame() ?: break
-                        
-                        mutex.lock()
-                        try {
-                            // PRE-SCALING: PixelHD's Secret to Fast Processing
-                            val maxSide = 540f
-                            val scale = maxSide / Math.max(frame.width, frame.height)
-                            val targetW = if (scale < 1f) (frame.width * scale).toInt() else frame.width
-                            val targetH = if (scale < 1f) (frame.height * scale).toInt() else frame.height
-                            
-                            val scaledFrame = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(frame, targetW, targetH, true) else frame
 
-                            val enhanced = NcnnVideoBridge.processFrame(scaledFrame, true)
+                        val frame: Bitmap = OpenCvBridge.readFrame() ?: break
 
-                            if (enhanced != null) {
-                                val outFile = File(framesDir, String.format("frame_%05d.jpg", frameIdx))
-                                java.io.FileOutputStream(outFile).use { fos ->
-                                    enhanced.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, fos)
-                                }
+                        // VideoUpscaleProcessor handles pre-scaling, Mutex, and bitmap recycling
+                        val enhanced: Bitmap? = processor.processFrame(
+                            bitmap = frame,
+                            frameIndex = frameIdx,
+                            totalFrames = totalF
+                        )
+
+                        if (enhanced != null && !enhanced.isRecycled) {
+                            val frameFile = File(framesDir, String.format("frame_%05d.jpg", frameIdx))
+                            FileOutputStream(frameFile).use { fos ->
+                                enhanced.compress(Bitmap.CompressFormat.JPEG, 92, fos)
                             }
-                            frameIdx++
-                            
-                            withContext(Dispatchers.Main) {
-                                doneFrames = frameIdx
-                                progressPct = 0.03f + (0.72f * frameIdx / openedMeta.totalFrames)
-                                val elapsed = (System.currentTimeMillis() - startTime) / 1000f
-                                if (elapsed > 0) processFps = frameIdx / elapsed
-                            }
-                        } finally {
-                            mutex.unlock()
+                            enhanced.recycle()
+                        }
+                        frameIdx++
+
+                        withContext(Dispatchers.Main) {
+                            doneFrames = frameIdx
                         }
                     }
                     OpenCvBridge.close()
                 }
 
                 if (isCancelled) {
-                    statusMsg = "Dibatalkan"; isProcessing = false
-                    framesDir.deleteRecursively()
-                    return@launch
+                    statusMsg = "Dibatalkan"
+                    withContext(Dispatchers.IO) { framesDir.deleteRecursively() }
+                    isProcessing = false; return@launch
                 }
 
                 progressPct = 0.77f; statusMsg = "Encoding video HD..."
 
                 val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
-                val fps    = openedMeta.fps
+                val fps = openedMeta.fps
 
+                // Mux frames + audio via FFmpegKit
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
                         "-y " +
@@ -267,6 +276,7 @@ fun VideoEnhanceScreen() {
                     )
                 }
 
+                // Fallback: video-only if audio mux fails
                 val finalSession = if (!ReturnCode.isSuccess(encodeSession.returnCode)) {
                     withContext(Dispatchers.IO) {
                         FFmpegKit.execute(
@@ -309,7 +319,6 @@ fun VideoEnhanceScreen() {
                 errorLog = "${e.javaClass.simpleName}: ${e.message}"
                 statusMsg = "Error"
                 withContext(Dispatchers.IO) {
-                    val framesDir = File(context.cacheDir, "ky_frames")
                     if (framesDir.exists()) framesDir.deleteRecursively()
                     if (outFile.exists()) outFile.delete()
                 }

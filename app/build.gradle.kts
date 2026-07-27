@@ -89,7 +89,8 @@ android {
                 "lib/arm64-v8a/libopencv_java4.so",
                 "lib/arm64-v8a/libncnn.so",
                 "lib/arm64-v8a/libomp.so",
-                "lib/arm64-v8a/librife.so"
+                "lib/arm64-v8a/librife.so",
+                "lib/arm64-v8a/librealesrganappncnn.so"
             )
         }
     }

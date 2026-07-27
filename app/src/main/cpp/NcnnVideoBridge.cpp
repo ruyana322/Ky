@@ -1,119 +1,184 @@
-#include <jni.h>
+﻿#include <jni.h>
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
 #include <string>
+#include <time.h>
 
-// Header NCNN
+// NCNN
 #include "net.h"
 #include "gpu.h"
 
-
-
-#define TAG "KytheraNCNN"
+#define TAG "KytheraRE"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// Variabel global mesin AI
-static ncnn::Net* g_net = nullptr;
-static bool g_has_gpu = false;
+// Two nets, PixelHD style: preload both x2 & x4 at launch
+static ncnn::Net* g_net_x2  = nullptr;
+static ncnn::Net* g_net_x4  = nullptr;
+static bool       g_has_gpu = false;
+static bool       g_loaded  = false;
 
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(JNIEnv *env, jclass clazz, jobject assetManager) {
-    if (g_net != nullptr) {
-        delete g_net;
-        g_net = nullptr;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+static ncnn::Mat bitmapToMat(JNIEnv* env, jobject bitmap) {
+    AndroidBitmapInfo info;
+    void* pixels = nullptr;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return ncnn::Mat();
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return ncnn::Mat();
+    ncnn::Mat mat = ncnn::Mat::from_pixels(
+        (const unsigned char*)pixels, ncnn::Mat::PIXEL_RGBA2RGB, info.width, info.height);
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return mat;
+}
+
+static jobject matToBitmap(JNIEnv* env, const ncnn::Mat& mat) {
+    if (mat.empty()) return nullptr;
+    jclass bitmapClass  = env->FindClass("android/graphics/Bitmap");
+    jclass configClass  = env->FindClass("android/graphics/Bitmap$Config");
+    jfieldID fid        = env->GetStaticFieldID(configClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
+    jobject argb8888    = env->GetStaticObjectField(configClass, fid);
+    jmethodID createMid = env->GetStaticMethodID(bitmapClass, "createBitmap",
+                          "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    jobject result = env->CallStaticObjectMethod(bitmapClass, createMid, mat.w, mat.h, argb8888);
+    if (result == nullptr) return nullptr;
+    void* rp = nullptr;
+    if (AndroidBitmap_lockPixels(env, result, &rp) >= 0) {
+        mat.to_pixels((unsigned char*)rp, ncnn::Mat::PIXEL_RGB2RGBA);
+        AndroidBitmap_unlockPixels(env, result);
     }
+    return result;
+}
 
-    // Inisialisasi Vulkan GPU
+static void configNet(ncnn::Net* net, bool gpu) {
+    net->opt.use_vulkan_compute   = gpu;
+    net->opt.use_fp16_packed      = gpu;
+    net->opt.use_fp16_storage     = gpu;
+    net->opt.use_fp16_arithmetic  = gpu;
+}
+
+// ─── RealEsrganBridge.loadModelNative ─────────────────────────────────────────
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_loadModelNative(
+        JNIEnv* env, jobject thiz, jobject assetManager) {
+
+    if (g_loaded) { LOGI("Already loaded."); return JNI_TRUE; }
+
     ncnn::create_gpu_instance();
     g_has_gpu = ncnn::get_gpu_count() > 0;
+    LOGI("Vulkan GPU: %s", g_has_gpu ? "YES" : "NO");
 
-    g_net = new ncnn::Net();
-    g_net->opt.use_vulkan_compute = g_has_gpu;
-
-    // Ambil AssetManager dari Kotlin
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
-    
-    // Load model x2 dari folder assets
-    int ret_param = g_net->load_param(mgr, "realsr/models/realesr-animevideov3-x2.param");
-    int ret_bin   = g_net->load_model(mgr, "realsr/models/realesr-animevideov3-x2.bin");
 
-    if (ret_param != 0 || ret_bin != 0) {
-        LOGE("Gagal load model NCNN dari assets! Cek path file-nya.");
+    // x2
+    g_net_x2 = new ncnn::Net(); configNet(g_net_x2, g_has_gpu);
+    if (g_net_x2->load_param(mgr, "realsr/models/realesr-animevideov3-x2.param") != 0 ||
+        g_net_x2->load_model(mgr, "realsr/models/realesr-animevideov3-x2.bin")   != 0) {
+        LOGE("FATAL: x2 model load failed!");
+        delete g_net_x2; g_net_x2 = nullptr;
+        ncnn::destroy_gpu_instance();
         return JNI_FALSE;
     }
+    LOGI("x2 model OK.");
 
-    LOGI("Model NCNN Real-ESRGAN berhasil di-load! GPU Vulkan: %s", g_has_gpu ? "AKTIF" : "OFF");
+    // x4 (non-fatal if missing)
+    g_net_x4 = new ncnn::Net(); configNet(g_net_x4, g_has_gpu);
+    if (g_net_x4->load_param(mgr, "realsr/models/x4.param") != 0 ||
+        g_net_x4->load_model(mgr, "realsr/models/x4.bin")   != 0) {
+        LOGE("x4 model failed (non-fatal).");
+        delete g_net_x4; g_net_x4 = nullptr;
+    } else { LOGI("x4 model OK."); }
+
+    g_loaded = true;
+    LOGI("Engine ready. GPU=%s", g_has_gpu ? "Vulkan" : "CPU");
     return JNI_TRUE;
 }
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv *env, jclass clazz) {
-    if (g_net != nullptr) {
-        delete g_net;
-        g_net = nullptr;
+// ─── RealEsrganBridge.processImage ────────────────────────────────────────────
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_processImage(
+        JNIEnv* env, jobject thiz,
+        jobject bitmap, jint scale, jstring modelName, jboolean useFaceRestore) {
+
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+
+    ncnn::Net* net = (scale == 4 && g_net_x4) ? g_net_x4 : g_net_x2;
+    if (!net) { LOGE("processImage: engine not loaded!"); return nullptr; }
+
+    ncnn::Mat in = bitmapToMat(env, bitmap);
+    if (in.empty()) { LOGE("processImage: bitmap to mat failed"); return nullptr; }
+
+    // Normalize [0,255] -> [0,1]
+    const float norm[3] = { 1/255.f, 1/255.f, 1/255.f };
+    in.substract_mean_normalize(0, norm);
+
+    ncnn::Extractor ex = net->create_extractor();
+    ex.input("data", in);
+    ncnn::Mat out;
+    ex.extract("output", out);
+
+    if (out.empty()) { LOGE("processImage: empty output!"); return nullptr; }
+
+    // Denormalize [0,1] -> [0,255] and clamp
+    float* d = (float*)out.data;
+    int total = out.w * out.h * out.c;
+    for (int i = 0; i < total; i++) {
+        d[i] *= 255.f;
+        if (d[i] < 0.f) d[i] = 0.f; else if (d[i] > 255.f) d[i] = 255.f;
     }
-    ncnn::destroy_gpu_instance();
-    LOGI("Mesin NCNN dimatikan.");
+
+    jobject result = matToBitmap(env, out);
+
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    long long ms = ((long long)t1.tv_sec*1000 + t1.tv_nsec/1000000)
+                 - ((long long)t0.tv_sec*1000 + t0.tv_nsec/1000000);
+    LOGI("processImage x%d: %lld ms [%s]", (int)scale, ms, g_has_gpu?"Vulkan":"CPU");
+    return result;
 }
 
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(JNIEnv *env, jclass clazz, jobject bitmap, jboolean useGpu) {
-    if (g_net == nullptr) {
-        LOGE("Mesin NCNN belum nyala!");
-        return nullptr;
-    }
+// ─── RealEsrganBridge.releaseNative ───────────────────────────────────────────
+extern "C" JNIEXPORT void JNICALL
+Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_releaseNative(JNIEnv* env, jobject thiz) {
+    if (g_net_x2) { delete g_net_x2; g_net_x2 = nullptr; }
+    if (g_net_x4) { delete g_net_x4; g_net_x4 = nullptr; }
+    ncnn::destroy_gpu_instance();
+    g_loaded = false;
+    LOGI("Engine released.");
+}
 
-    AndroidBitmapInfo info;
-    void* pixels = nullptr;
-    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0 || AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) {
-        LOGE("Gagal mengunci pixels dari Bitmap Kotlin.");
-        return nullptr;
-    }
+// ─── FaceRestoreBridge stubs (same .so) ──────────────────────────────────────
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_d4nzxml_kythera_superresolution_FaceRestoreBridge_loadModelNative(
+        JNIEnv* env, jobject thiz, jobject assetManager) {
+    LOGI("FaceRestoreBridge.loadModelNative: stub (GFPGAN not integrated)");
+    return JNI_FALSE;
+}
 
-    // 1. Konversi Bitmap Android (RGBA) ke format matriks AI NCNN (RGB)
-    ncnn::Mat in = ncnn::Mat::from_pixels((const unsigned char*)pixels, ncnn::Mat::PIXEL_RGBA2RGB, info.width, info.height);
-    
-    // Lepas kunci gambar asli di sini (Cukup 1x aja!)
-    AndroidBitmap_unlockPixels(env, bitmap); 
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_d4nzxml_kythera_superresolution_FaceRestoreBridge_processImageNative(
+        JNIEnv* env, jobject thiz, jobject bitmap, jboolean enhance) {
+    return bitmap; // passthrough
+}
 
-    // 2. EKSEKUSI AI UPSCALE
-    ncnn::Extractor ex = g_net->create_extractor();
-    
-    // Pintu masuknya pakai "data"
-    ex.input("data", in); 
-    
-    ncnn::Mat out;
-    // Pintu keluarnya pakai "output"
-    ex.extract("output", out); 
+extern "C" JNIEXPORT void JNICALL
+Java_com_d4nzxml_kythera_superresolution_FaceRestoreBridge_releaseNative(JNIEnv* env, jobject thiz) {}
 
-    // Keamanan biar nggak force close kalau gagal
-    if (out.empty()) {
-        LOGE("WADUH! Gambar AI kosong. Ekstraksi gagal!");
-        // Baris unlock dihapus dari sini biar nggak crash
-        return nullptr;
-    }
+// ─── Legacy NcnnVideoBridge stubs (backward compat, called by old code) ───────
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(
+        JNIEnv* env, jclass clazz, jobject assetManager) {
+    return Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_loadModelNative(
+        env, nullptr, assetManager);
+}
 
-    // 3. Buat "Kanvas" Bitmap BARU di Kotlin untuk menampung gambar HD yang udah membesar
-    jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
-    jclass configClass = env->FindClass("android/graphics/Bitmap$Config");
-    jfieldID fid = env->GetStaticFieldID(configClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
-    jobject argb8888 = env->GetStaticObjectField(configClass, fid);
-    jmethodID create = env->GetStaticMethodID(bitmapClass, "createBitmap", "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
-    
-    // out.w dan out.h sekarang udah berukuran 2x lipat (karena model x2)
-    jobject resultBitmap = env->CallStaticObjectMethod(bitmapClass, create, out.w, out.h, argb8888);
+extern "C" JNIEXPORT void JNICALL
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv* env, jclass clazz) {
+    Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_releaseNative(env, nullptr);
+}
 
-    // 4. Tuangkan hasil AI (RGB) ke dalam Kanvas Bitmap Baru (RGBA)
-    void* resultPixels = nullptr;
-    if (AndroidBitmap_lockPixels(env, resultBitmap, &resultPixels) >= 0) {
-        out.to_pixels((unsigned char*)resultPixels, ncnn::Mat::PIXEL_RGB2RGBA);
-        AndroidBitmap_unlockPixels(env, resultBitmap);
-    }
-
-    return resultBitmap; // Kirim balik gambar HD ke Kotlin!
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(
+        JNIEnv* env, jclass clazz, jobject bitmap, jboolean useGpu) {
+    return Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_processImage(
+        env, nullptr, bitmap, 2, nullptr, JNI_FALSE);
 }

@@ -1,15 +1,21 @@
-package com.d4nzxml.kythera.service
+﻿package com.d4nzxml.kythera.service
 
 import android.content.Context
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.util.Log
+import com.d4nzxml.kythera.superresolution.RealEsrganBridge
 
+/**
+ * Facade / compatibility wrapper around RealEsrganBridge.
+ * Keeps existing VideoEnhanceScreen.kt code working without changes.
+ * New code should use RealEsrganBridge directly.
+ */
 class NcnnVideoBridge {
-    // 1. Bikin ulang Enum yang dibutuhin sama UI
+
     enum class Accelerator(val label: String, val desc: String) {
         CPU("CPU", "Aman tapi lambat"),
-        GPU("Vulkan GPU", "Kencang (Poco X6 Pro pasti ngebut!)") 
+        GPU("Vulkan GPU", "Kencang (Poco X6 Pro pasti ngebut!)")
     }
 
     enum class VideoScale(val label: String) {
@@ -20,39 +26,31 @@ class NcnnVideoBridge {
     companion object {
         private const val TAG = "NcnnBridgeKotlin"
 
-        init {
-            try {
-                System.loadLibrary("ncnn_bridge") 
-                Log.d(TAG, "Library NCNN sukses di-load!")
-            } catch (e: UnsatisfiedLinkError) {
-                Log.e(TAG, "Waduh, gagal nge-load library C++: ${e.message}")
-            }
-        }
+        // ── Library is loaded by RealEsrganBridge.init{} ──
+        // The new .so name is "realesrganappncnn"
+        // We keep this companion for backward-compat references
 
         private var isInitialized = false
 
-        // 2. Bikin fungsi pembantu (wrapper) biar UI nggak error pas manggil
+        /** Preload wrapper — safe to call multiple times (no-op after first). */
         fun setup(context: Context, scale: VideoScale): Boolean {
             if (isInitialized) return true
-            isInitialized = initEngine(context.assets)
+            isInitialized = RealEsrganBridge.loadModel(context.assets)
+            Log.d(TAG, "setup(): engine ready = $isInitialized")
             return isInitialized
         }
 
-        fun switchScale(context: Context, scale: VideoScale): Boolean {
-            // Placeholder: Kalau engine NCNN lu butuh muat ulang model saat ganti scale
-            return true
-        }
+        fun switchScale(context: Context, scale: VideoScale): Boolean = true
 
         fun enhance(frame: Bitmap, accelerator: Accelerator): Bitmap? {
-            val useGpu = accelerator == Accelerator.GPU
-            return processFrame(frame, useGpu)
+            return RealEsrganBridge.processImage(frame, 2, "realesr-animevideov3", false)
         }
 
-        // 3. Deklarasi fungsi JNI asli yang nyambung ke C++
+        fun isReady(): Boolean = RealEsrganBridge.isReady()
+
+        // ── JNI stubs kept for any code still calling these directly ──
         @JvmStatic external fun initEngine(assetManager: AssetManager): Boolean
-        
         @JvmStatic external fun destroyEngine()
-        // Ini jembatan paling krusial buat nge-proses gambar ke C++
         @JvmStatic external fun processFrame(bitmap: Bitmap, useGpu: Boolean): Bitmap?
     }
 }

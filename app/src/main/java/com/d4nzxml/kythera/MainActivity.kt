@@ -60,10 +60,12 @@ class MainActivity : ComponentActivity() {
                     appStatus = "CHECKING"
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
-                            com.d4nzxml.kythera.service.NcnnVideoBridge.setup(context, com.d4nzxml.kythera.service.NcnnVideoBridge.VideoScale.X2)
-                            android.util.Log.d("KytheraApp", "NCNN Preloaded Successfully in Background!")
+                            // PixelHD pattern: preload AI engine before user enters the screen
+                            val modelOk = com.d4nzxml.kythera.superresolution.RealEsrganBridge
+                                .loadModel(context.assets)
+                            android.util.Log.i("KytheraRE", "RealEsrgan preload: ${if (modelOk) "SUCCESS" else "FAILED"}")
                         } catch(e: Exception) {
-                            android.util.Log.e("KytheraApp", "Failed to preload NCNN", e)
+                            android.util.Log.e("KytheraRE", "RealEsrgan preload exception", e)
                         }
                         
                         try {
