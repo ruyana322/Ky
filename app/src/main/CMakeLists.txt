@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.10.2)
+cmake_minimum_required(VERSION 3.10.2)
 project("kythera_engine")
 
 # Optimization flags — match PixelHD: O3 + OpenMP
@@ -45,6 +45,11 @@ add_library(opencv_java4 SHARED IMPORTED)
 set_target_properties(opencv_java4 PROPERTIES IMPORTED_LOCATION
     ${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libopencv_java4.so)
 
+# libMNN.so (used by mnn_bridge)
+add_library(MNN SHARED IMPORTED)
+set_target_properties(MNN PROPERTIES IMPORTED_LOCATION
+    ${CMAKE_CURRENT_SOURCE_DIR}/jniLibs/${ANDROID_ABI}/libMNN.so)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. PRIMARY: librealesrganappncnn.so
 #    Contains RealEsrganBridge + FaceRestoreBridge + legacy NcnnVideoBridge stubs
@@ -82,6 +87,8 @@ add_library(mnn_bridge SHARED
     cpp/MnnVideoBridge.cpp)
 
 target_link_libraries(mnn_bridge
+    MNN
     ${log-lib}
     ${jnigraphics-lib}
     ${android-lib})
+
