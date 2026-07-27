@@ -56,7 +56,8 @@ target_link_libraries(ncnn_bridge
                       ${vulkan-lib}
                       ${log-lib}
                       ${jnigraphics-lib}
-                      ${android-lib})
+                      ${android-lib}
+                      opencv_java4)
 
 # B. Merakit Jembatan OpenCV (Sekarang dilink ke mesin opencv_java4)
 add_library(opencv_bridge SHARED cpp/OpenCvBridge.cpp)
