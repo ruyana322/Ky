@@ -29,9 +29,13 @@ class NcnnVideoBridge {
             }
         }
 
+        private var isInitialized = false
+
         // 2. Bikin fungsi pembantu (wrapper) biar UI nggak error pas manggil
         fun setup(context: Context, scale: VideoScale): Boolean {
-            return initEngine(context.assets)
+            if (isInitialized) return true
+            isInitialized = initEngine(context.assets)
+            return isInitialized
         }
 
         fun switchScale(context: Context, scale: VideoScale): Boolean {
@@ -48,20 +52,7 @@ class NcnnVideoBridge {
         @JvmStatic external fun initEngine(assetManager: AssetManager): Boolean
         
         @JvmStatic external fun destroyEngine()
-        
         // Ini jembatan paling krusial buat nge-proses gambar ke C++
         @JvmStatic external fun processFrame(bitmap: Bitmap, useGpu: Boolean): Bitmap?
-        
-        // Jembatan baru untuk memproses seluruh video secara native C++ tanpa lag
-        @JvmStatic external fun processVideoNative(
-            inPath: String, 
-            outPath: String, 
-            rotation: Int,
-            callback: NativeVideoCallback
-        ): Boolean
-    }
-
-    interface NativeVideoCallback {
-        fun onProgress(frameIdx: Int, fps: Float)
     }
 }

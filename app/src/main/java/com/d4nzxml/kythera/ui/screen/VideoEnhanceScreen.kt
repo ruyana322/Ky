@@ -197,34 +197,55 @@ fun VideoEnhanceScreen() {
 
                 statusMsg = "Memproses frames..."; progressPct = 0.03f
                 val startTime = System.currentTimeMillis()
+                
+                val framesDir = File(context.cacheDir, "ky_frames")
+                if (!framesDir.exists()) framesDir.mkdirs() else { framesDir.listFiles()?.forEach { it.delete() } }
+
+                val mutex = kotlinx.coroutines.sync.Mutex()
+                var frameIdx = 0
 
                 withContext(Dispatchers.IO) {
-                    val success = NcnnVideoBridge.processVideoNative(
-                        path,
-                        nativeOutFile.absolutePath,
-                        openedMeta.rotation,
-                        object : NcnnVideoBridge.NativeVideoCallback {
-                            override fun onProgress(frameIdx: Int, fps: Float) {
-                                // Gak bisa langsung panggil Main dispatcher dari thread JNI tanpa scope
-                                scope.launch(Dispatchers.Main) {
-                                    if (!isCancelled) {
-                                        doneFrames = frameIdx
-                                        progressPct = 0.03f + (0.72f * frameIdx / openedMeta.totalFrames)
-                                        processFps = fps
-                                    }
+                    while (true) {
+                        if (isCancelled) break
+                        
+                        val frame = OpenCvBridge.readFrame() ?: break
+                        
+                        mutex.lock()
+                        try {
+                            // PRE-SCALING: PixelHD's Secret to Fast Processing
+                            val maxSide = 540f
+                            val scale = maxSide / Math.max(frame.width, frame.height)
+                            val targetW = if (scale < 1f) (frame.width * scale).toInt() else frame.width
+                            val targetH = if (scale < 1f) (frame.height * scale).toInt() else frame.height
+                            
+                            val scaledFrame = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(frame, targetW, targetH, true) else frame
+
+                            val enhanced = NcnnVideoBridge.processFrame(scaledFrame, true)
+
+                            if (enhanced != null) {
+                                val outFile = File(framesDir, String.format("frame_%05d.jpg", frameIdx))
+                                java.io.FileOutputStream(outFile).use { fos ->
+                                    enhanced.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, fos)
                                 }
                             }
+                            frameIdx++
+                            
+                            withContext(Dispatchers.Main) {
+                                doneFrames = frameIdx
+                                progressPct = 0.03f + (0.72f * frameIdx / openedMeta.totalFrames)
+                                val elapsed = (System.currentTimeMillis() - startTime) / 1000f
+                                if (elapsed > 0) processFps = frameIdx / elapsed
+                            }
+                        } finally {
+                            mutex.unlock()
                         }
-                    )
-                    if (!success) {
-                        isCancelled = true
-                        errorLog = "Native C++ processing failed"
                     }
+                    OpenCvBridge.close()
                 }
 
                 if (isCancelled) {
                     statusMsg = "Dibatalkan"; isProcessing = false
-                    if (nativeOutFile.exists()) nativeOutFile.delete()
+                    framesDir.deleteRecursively()
                     return@launch
                 }
 
@@ -236,10 +257,10 @@ fun VideoEnhanceScreen() {
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
                         "-y " +
-                        "-i \"${nativeOutFile.absolutePath}\" " +
+                        "-framerate $fps -i \"${framesDir.absolutePath}/frame_%05d.jpg\" " +
                         "-i \"$safUrl\" " +
                         "-map 0:v -map 1:a? " +
-                        "-c:v copy " +
+                        "-c:v libx264 -preset fast -crf 18 " +
                         "-c:a aac -b:a 192k " +
                         "-movflags +faststart -shortest " +
                         "\"${outFile.absolutePath}\""
@@ -250,15 +271,15 @@ fun VideoEnhanceScreen() {
                     withContext(Dispatchers.IO) {
                         FFmpegKit.execute(
                             "-y " +
-                            "-i \"${nativeOutFile.absolutePath}\" " +
-                            "-c:v copy " +
+                            "-framerate $fps -i \"${framesDir.absolutePath}/frame_%05d.jpg\" " +
+                            "-c:v libx264 -preset fast -crf 18 " +
                             "-movflags +faststart " +
                             "\"${outFile.absolutePath}\""
                         )
                     }
                 } else encodeSession
 
-                withContext(Dispatchers.IO) { if (nativeOutFile.exists()) nativeOutFile.delete() }
+                withContext(Dispatchers.IO) { framesDir.deleteRecursively() }
 
                 if (!ReturnCode.isSuccess(finalSession.returnCode)) {
                     errorLog = finalSession.allLogsAsString
@@ -288,7 +309,9 @@ fun VideoEnhanceScreen() {
                 errorLog = "${e.javaClass.simpleName}: ${e.message}"
                 statusMsg = "Error"
                 withContext(Dispatchers.IO) {
-                    if (nativeOutFile.exists()) nativeOutFile.delete()
+                    val framesDir = File(context.cacheDir, "ky_frames")
+                    if (framesDir.exists()) framesDir.deleteRecursively()
+                    if (outFile.exists()) outFile.delete()
                 }
             }
             isProcessing = false

@@ -60,6 +60,13 @@ class MainActivity : ComponentActivity() {
                     appStatus = "CHECKING"
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
+                            com.d4nzxml.kythera.service.NcnnVideoBridge.setup(context, com.d4nzxml.kythera.service.NcnnVideoBridge.VideoScale.X2)
+                            android.util.Log.d("KytheraApp", "NCNN Preloaded Successfully in Background!")
+                        } catch(e: Exception) {
+                            android.util.Log.e("KytheraApp", "Failed to preload NCNN", e)
+                        }
+                        
+                        try {
                             // 🔥 1. Nembak Link Abadi Gist Lu
                             val url = java.net.URL("https://gist.githubusercontent.com/ruyana322/b44b44244f13d1feb2e18f19fcfa61a0/raw/kythera_status.json")
                             val conn = url.openConnection() as java.net.HttpURLConnection

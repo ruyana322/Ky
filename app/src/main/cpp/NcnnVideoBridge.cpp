@@ -8,10 +8,7 @@
 #include "net.h"
 #include "gpu.h"
 
-// OpenCV Headers
-#include "opencv2/core.hpp"
-#include "opencv2/videoio.hpp"
-#include "opencv2/imgproc.hpp"
+
 
 #define TAG "KytheraNCNN"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
@@ -119,108 +116,4 @@ Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processFrame(JNIEnv *env, jclas
     }
 
     return resultBitmap; // Kirim balik gambar HD ke Kotlin!
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_d4nzxml_kythera_service_NcnnVideoBridge_processVideoNative(JNIEnv *env, jclass clazz, jstring inPath, jstring outPath, jint rotation, jobject callback) {
-    if (g_net == nullptr) {
-        LOGE("Mesin NCNN belum nyala!");
-        return JNI_FALSE;
-    }
-
-    const char* inStr = env->GetStringUTFChars(inPath, nullptr);
-    const char* outStr = env->GetStringUTFChars(outPath, nullptr);
-    std::string inputPath(inStr);
-    std::string outputPath(outStr);
-    env->ReleaseStringUTFChars(inPath, inStr);
-    env->ReleaseStringUTFChars(outPath, outStr);
-
-    cv::VideoCapture cap;
-    cap.open(inputPath);
-    if (!cap.isOpened()) {
-        LOGE("Gagal buka input video: %s", inputPath.c_str());
-        return JNI_FALSE;
-    }
-
-    int totalFrames = (int)cap.get(cv::CAP_PROP_FRAME_COUNT);
-    double fps = cap.get(cv::CAP_PROP_FPS);
-    int width = (int)cap.get(cv::CAP_PROP_FRAME_WIDTH);
-    int height = (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT);
-
-    if (fps <= 0 || fps > 120) fps = 30.0;
-
-    int outW = (rotation == 90 || rotation == 270) ? height : width;
-    int outH = (rotation == 90 || rotation == 270) ? width : height;
-    
-    // Karena model x2, ukuran output jadi 2x lipat
-    outW *= 2;
-    outH *= 2;
-
-    cv::VideoWriter writer;
-    int fourcc = cv::VideoWriter::fourcc('H','2','6','4');
-    writer.open(outputPath, fourcc, fps, cv::Size(outW, outH));
-    if (!writer.isOpened()) {
-        fourcc = cv::VideoWriter::fourcc('a','v','c','1');
-        writer.open(outputPath, fourcc, fps, cv::Size(outW, outH));
-    }
-    if (!writer.isOpened()) {
-        LOGE("Gagal buka output video writer!");
-        cap.release();
-        return JNI_FALSE;
-    }
-
-    jclass cbClass = env->GetObjectClass(callback);
-    jmethodID onProgress = env->GetMethodID(cbClass, "onProgress", "(IF)V");
-
-    int frameIdx = 0;
-    cv::Mat frame;
-    
-    // Ambil waktu mulai
-    double t_start = (double)cv::getTickCount();
-
-    ncnn::Extractor ex = g_net->create_extractor();
-
-    while (cap.read(frame)) {
-        if (frame.empty()) break;
-        
-        cv::Mat rotated;
-        switch (rotation) {
-            case 90:  cv::rotate(frame, rotated, cv::ROTATE_90_CLOCKWISE); break;
-            case 180: cv::rotate(frame, rotated, cv::ROTATE_180); break;
-            case 270: cv::rotate(frame, rotated, cv::ROTATE_90_COUNTERCLOCKWISE); break;
-            default:  rotated = frame; break;
-        }
-
-        // BGR (OpenCV) -> RGB (NCNN)
-        ncnn::Mat in = ncnn::Mat::from_pixels(rotated.data, ncnn::Mat::PIXEL_BGR2RGB, rotated.cols, rotated.rows);
-
-        ex.input("data", in);
-        ncnn::Mat out;
-        ex.extract("output", out);
-
-        if (out.empty()) {
-            LOGE("Frame AI kosong, skip.");
-            continue;
-        }
-
-        // NCNN (RGB) -> OpenCV (BGR)
-        cv::Mat outMat(out.h, out.w, CV_8UC3);
-        out.to_pixels(outMat.data, ncnn::Mat::PIXEL_RGB2BGR);
-
-        writer.write(outMat);
-
-        frameIdx++;
-
-        if (frameIdx % 2 == 0) {
-            double elapsed = ((double)cv::getTickCount() - t_start) / cv::getTickFrequency();
-            float processFps = (elapsed > 0) ? (float)(frameIdx / elapsed) : 0.0f;
-            env->CallVoidMethod(callback, onProgress, frameIdx, processFps);
-        }
-    }
-
-    cap.release();
-    writer.release();
-    
-    return JNI_TRUE;
 }
