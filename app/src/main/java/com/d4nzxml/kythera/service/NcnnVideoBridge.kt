@@ -51,5 +51,17 @@ class NcnnVideoBridge {
         
         // Ini jembatan paling krusial buat nge-proses gambar ke C++
         @JvmStatic external fun processFrame(bitmap: Bitmap, useGpu: Boolean): Bitmap?
+        
+        // Jembatan baru untuk memproses seluruh video secara native C++ tanpa lag
+        @JvmStatic external fun processVideoNative(
+            inPath: String, 
+            outPath: String, 
+            rotation: Int,
+            callback: NativeVideoCallback
+        ): Boolean
+    }
+
+    interface NativeVideoCallback {
+        fun onProgress(frameIdx: Int, fps: Float)
     }
 }

@@ -32,6 +32,9 @@ find_library(jnigraphics-lib jnigraphics)
 find_library(android-lib android)         
 find_library(vulkan-lib vulkan)           
 
+add_library(opencv_java4 SHARED IMPORTED)
+set_target_properties(opencv_java4 PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libopencv_java4.so)
+
 # ==========================================
 # 4. RAKIT SEMUA JEMBATAN C++ (BRIDGE)
 # ==========================================
@@ -43,7 +46,8 @@ target_link_libraries(ncnn_bridge
                       ${vulkan-lib}
                       ${log-lib}
                       ${jnigraphics-lib}
-                      ${android-lib})
+                      ${android-lib}
+                      opencv_java4)
 
 # B. Merakit Jembatan OpenCV (Biar gak error di Kotlin)
 add_library(opencv_bridge SHARED OpenCvBridge.cpp)

@@ -180,8 +180,7 @@ fun VideoEnhanceScreen() {
             outputUri = null; errorLog = null
             doneFrames = 0; progressPct = 0f; processFps = 0f
 
-            val framesDir = File(context.cacheDir, "ky_frames_${System.currentTimeMillis()}")
-            framesDir.mkdirs()
+            val nativeOutFile = File(context.cacheDir, "ky_native_out_${System.currentTimeMillis()}.mp4")
             val outName = "Kythera_${System.currentTimeMillis()}.mp4"
             val outFile = File(context.getExternalFilesDir(null), outName)
 
@@ -200,38 +199,33 @@ fun VideoEnhanceScreen() {
                 val startTime = System.currentTimeMillis()
 
                 withContext(Dispatchers.IO) {
-                    var frameIdx = 0
-                    while (true) {
-                        if (isCancelled) break
-
-                        val frame = OpenCvBridge.readFrame() ?: break
-                        // PANGGIL NCNN DI SINI
-                        val enhanced = try { NcnnVideoBridge.enhance(frame, accelerator) } catch (e: Exception) { null }
-                        val toSave = enhanced ?: frame
-
-                        val imgFile = File(framesDir, "frame_%05d.jpg".format(frameIdx))
-                        FileOutputStream(imgFile).use { fos ->
-                            toSave.compress(Bitmap.CompressFormat.JPEG, 95, fos)
+                    val success = NcnnVideoBridge.processVideoNative(
+                        path,
+                        nativeOutFile.absolutePath,
+                        openedMeta.rotation,
+                        object : NcnnVideoBridge.NativeVideoCallback {
+                            override fun onProgress(frameIdx: Int, fps: Float) {
+                                // Gak bisa langsung panggil Main dispatcher dari thread JNI tanpa scope
+                                scope.launch(Dispatchers.Main) {
+                                    if (!isCancelled) {
+                                        doneFrames = frameIdx
+                                        progressPct = 0.03f + (0.72f * frameIdx / openedMeta.totalFrames)
+                                        processFps = fps
+                                    }
+                                }
+                            }
                         }
-
-                        frame.recycle()
-                        if (enhanced != null && enhanced != frame) enhanced.recycle()
-
-                        frameIdx++
-                        withContext(Dispatchers.Main) {
-                            doneFrames  = frameIdx
-                            progressPct = 0.03f + (0.72f * frameIdx / openedMeta.totalFrames)
-                            val elapsed = System.currentTimeMillis() - startTime
-                            processFps  = if (elapsed > 0) frameIdx * 1000f / elapsed else 0f
-                        }
+                    )
+                    if (!success) {
+                        isCancelled = true
+                        errorLog = "Native C++ processing failed"
                     }
                 }
 
-                withContext(Dispatchers.IO) { OpenCvBridge.close() }
-
                 if (isCancelled) {
                     statusMsg = "Dibatalkan"; isProcessing = false
-                    framesDir.deleteRecursively(); return@launch
+                    if (nativeOutFile.exists()) nativeOutFile.delete()
+                    return@launch
                 }
 
                 progressPct = 0.77f; statusMsg = "Encoding video HD..."
@@ -241,12 +235,11 @@ fun VideoEnhanceScreen() {
 
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
-                        "-y -framerate $fps " +
-                        "-i \"${framesDir.absolutePath}/frame_%05d.jpg\" " +
+                        "-y " +
+                        "-i \"${nativeOutFile.absolutePath}\" " +
                         "-i \"$safUrl\" " +
-                        "-map 0:v -map 1:a " +
-                        "-vf scale=1080:-2 -c:v libx264 -preset fast -crf 18 " +
-                        "-pix_fmt yuv420p " +
+                        "-map 0:v -map 1:a? " +
+                        "-c:v copy " +
                         "-c:a aac -b:a 192k " +
                         "-movflags +faststart -shortest " +
                         "\"${outFile.absolutePath}\""
@@ -256,17 +249,16 @@ fun VideoEnhanceScreen() {
                 val finalSession = if (!ReturnCode.isSuccess(encodeSession.returnCode)) {
                     withContext(Dispatchers.IO) {
                         FFmpegKit.execute(
-                            "-y -framerate $fps " +
-                            "-i \"${framesDir.absolutePath}/frame_%05d.jpg\" " +
-                            "-vf scale=1080:-2 -c:v libx264 -preset fast -crf 18 " +
-                            "-pix_fmt yuv420p " +
+                            "-y " +
+                            "-i \"${nativeOutFile.absolutePath}\" " +
+                            "-c:v copy " +
                             "-movflags +faststart " +
                             "\"${outFile.absolutePath}\""
                         )
                     }
                 } else encodeSession
 
-                withContext(Dispatchers.IO) { framesDir.deleteRecursively() }
+                withContext(Dispatchers.IO) { if (nativeOutFile.exists()) nativeOutFile.delete() }
 
                 if (!ReturnCode.isSuccess(finalSession.returnCode)) {
                     errorLog = finalSession.allLogsAsString
@@ -296,8 +288,7 @@ fun VideoEnhanceScreen() {
                 errorLog = "${e.javaClass.simpleName}: ${e.message}"
                 statusMsg = "Error"
                 withContext(Dispatchers.IO) {
-                    OpenCvBridge.close()
-                    framesDir.deleteRecursively()
+                    if (nativeOutFile.exists()) nativeOutFile.delete()
                 }
             }
             isProcessing = false
