@@ -483,8 +483,11 @@ fun VideoEnhanceScreen() {
                                     listOf(KColor.Accent.copy(0.3f), KColor.Accent.copy(0.1f))))
                                 .border(2.dp, KColor.Accent.copy(0.6f), CircleShape),
                                 contentAlignment = Alignment.Center) {
-                                Text("$doneFrames\n/$totalFrames", color = Color.White, fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, lineHeight = 20.sp)
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    val pct = (progressPct * 100).toInt()
+                                    Text("$pct%", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                                    Text("$doneFrames / $totalFrames", color = Color.White.copy(0.8f), fontSize = 9.sp)
+                                }
                             }
                         } else { CircularProgressIndicator(color = KColor.Accent) }
                     }
