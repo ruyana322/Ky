@@ -95,7 +95,7 @@ fun VideoEnhanceScreen() {
     var inputUriStr  by rememberSaveable { mutableStateOf<String?>(null) }
     var videoMeta    by remember { mutableStateOf<OpenCvBridge.VideoMeta?>(null) }
     var engineReady  by remember { mutableStateOf(false) }
-    var mode         by remember { mutableStateOf(EnhanceMode.AI_QUALITY) }
+    var mode         by remember { mutableStateOf(EnhanceMode.FAST_HD) }
     var accelerator  by remember { mutableStateOf(Accelerator.GPU) }
     var videoScale   by remember { mutableStateOf(VideoScale.X2) }
     var hdPreset     by remember { mutableStateOf(HdPreset.SHARP) }
@@ -209,9 +209,9 @@ fun VideoEnhanceScreen() {
                         val enhanced = try { NcnnVideoBridge.enhance(frame, accelerator) } catch (e: Exception) { null }
                         val toSave = enhanced ?: frame
 
-                        val pngFile = File(framesDir, "frame_%05d.png".format(frameIdx))
-                        FileOutputStream(pngFile).use { fos ->
-                            toSave.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                        val imgFile = File(framesDir, "frame_%05d.jpg".format(frameIdx))
+                        FileOutputStream(imgFile).use { fos ->
+                            toSave.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                         }
 
                         frame.recycle()
@@ -242,7 +242,7 @@ fun VideoEnhanceScreen() {
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
                         "-y -framerate $fps " +
-                        "-i \"${framesDir.absolutePath}/frame_%05d.png\" " +
+                        "-i \"${framesDir.absolutePath}/frame_%05d.jpg\" " +
                         "-i \"$safUrl\" " +
                         "-map 0:v -map 1:a " +
                         "-vf scale=1080:-2 -c:v libx264 -preset fast -crf 18 " +
@@ -257,7 +257,7 @@ fun VideoEnhanceScreen() {
                     withContext(Dispatchers.IO) {
                         FFmpegKit.execute(
                             "-y -framerate $fps " +
-                            "-i \"${framesDir.absolutePath}/frame_%05d.png\" " +
+                            "-i \"${framesDir.absolutePath}/frame_%05d.jpg\" " +
                             "-vf scale=1080:-2 -c:v libx264 -preset fast -crf 18 " +
                             "-pix_fmt yuv420p " +
                             "-movflags +faststart " +
