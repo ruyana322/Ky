@@ -107,13 +107,12 @@ fun VideoEnhanceScreen() {
     // Animated progress for smooth bar
     val animatedProgress by animateFloatAsState(targetValue = progressPct, label = "progress")
 
-    // Engine ready check (reloads if GPU toggle changes)
     LaunchedEffect(useGpuAccel) {
         engineReady = false
-        statusMsg = "Memuat AI engine..."
+        statusMsg = "Memuat AI engine (MNN)..."
         withContext(Dispatchers.IO) { 
-            RealEsrganBridge.release()
-            engineReady = RealEsrganBridge.loadModel(context.assets, useGpuAccel) 
+            com.d4nzxml.kythera.service.MnnVideoBridge.release()
+            engineReady = com.d4nzxml.kythera.service.MnnVideoBridge.setup(context, com.d4nzxml.kythera.service.MnnVideoBridge.VideoScale.X2)
         }
         statusMsg = if (engineReady) "" else "⚠️ AI engine gagal dimuat"
     }

@@ -55,7 +55,7 @@ class VideoUpscaleProcessor(
         val t0 = System.nanoTime()
 
         val result = mutex.withLock {
-            if (!RealEsrganBridge.isReady()) {
+            if (!com.d4nzxml.kythera.service.MnnVideoBridge.ready) {
                 Log.e(TAG, "processFrame[$frameIndex]: engine not ready!")
                 return@withLock null
             }
@@ -99,9 +99,9 @@ class VideoUpscaleProcessor(
             Log.d(TAG, "Frame[$frameIndex] mode=$targetResMode original=${bitmap.width}x${bitmap.height} " +
                 "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
-            // NCNN inference with Tiling to prevent GPU OOM and speed up processing
+            // MNN inference (MnnVideoBridge handles its own 1024x1024 C++ tiling internally)
             val enhanced = try {
-                processTiledImage(inputBitmap, scale, modelName, useFaceRestore)
+                com.d4nzxml.kythera.service.MnnVideoBridge.enhance(inputBitmap)
             } catch (e: Exception) {
                 Log.e(TAG, "processFrame[$frameIndex] inference error: ${e.message}")
                 null

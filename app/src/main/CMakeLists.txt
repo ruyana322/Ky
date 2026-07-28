@@ -80,15 +80,13 @@ target_link_libraries(opencv_bridge
     ${android-lib})
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. MNN Bridge stub (keeps Kotlin MnnVideoBridge.kt from crashing on load)
-#    Empty stub — MNN logic removed but .so still expected by System.loadLibrary
+# 6. MNN Bridge
 # ─────────────────────────────────────────────────────────────────────────────
-add_library(mnn_bridge SHARED
+add_library(kythera_mnn SHARED
     cpp/MnnVideoBridge.cpp)
 
-target_link_libraries(mnn_bridge
+target_link_libraries(kythera_mnn
     MNN
     ${log-lib}
     ${jnigraphics-lib}
     ${android-lib})
-
