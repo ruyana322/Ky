@@ -188,50 +188,72 @@ fun VideoEnhanceScreen() {
                 val path = withContext(Dispatchers.IO) { getRealPath(context, uri) }
                 if (path == null) { errorLog = "Tidak bisa akses file"; isProcessing = false; return@launch }
 
-                withContext(Dispatchers.IO) { try { OpenCvBridge.close() } catch (_: Exception) {} }
                 val openedMeta = withContext(Dispatchers.IO) { OpenCvBridge.openVideo(path) }
+                val fps = openedMeta?.fps ?: 30f
+                withContext(Dispatchers.IO) { try { OpenCvBridge.close() } catch (_: Exception) {} }
+                
                 if (openedMeta == null) { errorLog = "Gagal buka video"; isProcessing = false; return@launch }
 
-                statusMsg = "Memproses frames AI..."; progressPct = 0.05f
-
+                statusMsg = "Mengekstrak frame..."; progressPct = 0.02f
+                val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
+                
+                val inputFramesDir = File(context.cacheDir, "ky_input_frames")
                 withContext(Dispatchers.IO) {
+                    if (!inputFramesDir.exists()) inputFramesDir.mkdirs()
+                    else inputFramesDir.listFiles()?.forEach { it.delete() }
+                    
                     if (!framesDir.exists()) framesDir.mkdirs()
                     else framesDir.listFiles()?.forEach { it.delete() }
                 }
 
-                var frameIdx = 0
-                val totalF   = openedMeta.totalFrames
+                // EXTRACT ALL FRAMES
+                val extractSession = withContext(Dispatchers.IO) {
+                    FFmpegKit.execute("-y -i \"$safUrl\" -qscale:v 2 \"${inputFramesDir.absolutePath}/frame_%05d.jpg\"")
+                }
+                if (!ReturnCode.isSuccess(extractSession.returnCode)) {
+                    errorLog = "Gagal ekstrak frame video"; isProcessing = false; return@launch
+                }
+                
+                val inputFiles = inputFramesDir.listFiles()?.filter { it.extension == "jpg" }?.sortedBy { it.name } ?: emptyList()
+                val totalF = inputFiles.size
+
+                if (totalF == 0) {
+                    errorLog = "Tidak ada frame yang diekstrak"; isProcessing = false; return@launch
+                }
+
+                statusMsg = "Memproses $totalF frame AI..."; progressPct = 0.05f
 
                 withContext(Dispatchers.IO) {
-                    while (true) {
+                    for ((frameIdx, file) in inputFiles.withIndex()) {
                         if (isCancelled) break
-                        val frame: Bitmap = OpenCvBridge.readFrame() ?: break
+                        
+                        val frame = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                        if (frame == null) continue
+                        
                         val enhanced: Bitmap? = processor.processFrame(
                             bitmap = frame, frameIndex = frameIdx, totalFrames = totalF,
                             targetResMode = targetResMode
                         )
                         if (enhanced != null && !enhanced.isRecycled) {
                             FileOutputStream(File(framesDir, String.format("frame_%05d.jpg", frameIdx))).use { fos ->
-                                enhanced.compress(Bitmap.CompressFormat.JPEG, 85, fos)
+                                enhanced.compress(Bitmap.CompressFormat.JPEG, 90, fos)
                             }
                             enhanced.recycle()
                         }
-                        frameIdx++
-                        withContext(Dispatchers.Main) { doneFrames = frameIdx }
+                        withContext(Dispatchers.Main) { doneFrames = frameIdx + 1 }
                     }
-                    OpenCvBridge.close()
                 }
 
                 if (isCancelled) {
                     statusMsg = "Dibatalkan"
-                    withContext(Dispatchers.IO) { framesDir.deleteRecursively() }
+                    withContext(Dispatchers.IO) { 
+                        framesDir.deleteRecursively() 
+                        inputFramesDir.deleteRecursively()
+                    }
                     isProcessing = false; return@launch
                 }
 
                 progressPct = 0.77f; statusMsg = "Encoding video..."
-
-                val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
-                val fps    = openedMeta.fps
 
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
@@ -251,7 +273,10 @@ fun VideoEnhanceScreen() {
                     }
                 } else encodeSession
 
-                withContext(Dispatchers.IO) { framesDir.deleteRecursively() }
+                withContext(Dispatchers.IO) { 
+                    framesDir.deleteRecursively() 
+                    inputFramesDir.deleteRecursively()
+                }
 
                 if (!ReturnCode.isSuccess(finalSession.returnCode)) {
                     errorLog = finalSession.allLogsAsString
