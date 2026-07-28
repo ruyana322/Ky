@@ -54,7 +54,8 @@ static void configNet(ncnn::Net* net, bool gpu) {
     net->opt.use_fp16_packed      = gpu;
     net->opt.use_fp16_storage     = gpu;
     net->opt.use_fp16_arithmetic  = gpu;
-    net->opt.num_threads          = gpu ? 1 : 4;
+    // Always use all available CPU cores in case Vulkan falls back to CPU internally
+    net->opt.num_threads          = ncnn::get_cpu_count();
 }
 
 // ─── loadModelNative ──────────────────────────────────────────────────────────

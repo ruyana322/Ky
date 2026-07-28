@@ -99,9 +99,9 @@ class VideoUpscaleProcessor(
             Log.d(TAG, "Frame[$frameIndex] mode=$targetResMode original=${bitmap.width}x${bitmap.height} " +
                 "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
-            // NCNN inference
+            // NCNN inference with Tiling to prevent GPU OOM and speed up processing
             val enhanced = try {
-                RealEsrganBridge.processImage(inputBitmap, scale, modelName, useFaceRestore)
+                processTiledImage(inputBitmap, scale, modelName, useFaceRestore)
             } catch (e: Exception) {
                 Log.e(TAG, "processFrame[$frameIndex] inference error: ${e.message}")
                 null
@@ -135,5 +135,66 @@ class VideoUpscaleProcessor(
 
     fun setProgress(value: Float) {
         _progress.value = value.coerceIn(0f, 1f)
+    }
+
+    private fun processTiledImage(
+        input: Bitmap, scale: Int, modelName: String, useFaceRestore: Boolean
+    ): Bitmap? {
+        // Tile size configuration (balances JNI overhead vs GPU VRAM limits)
+        val TILE_SIZE = 400
+        val PADDING = 16
+
+        val outW = input.width * scale
+        val outH = input.height * scale
+        val output = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(output)
+        val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+
+        var y = 0
+        while (y < input.height) {
+            val h = minOf(TILE_SIZE, input.height - y)
+            var x = 0
+            while (x < input.width) {
+                val w = minOf(TILE_SIZE, input.width - x)
+
+                // Calculate padded bounds for this tile
+                val px = maxOf(0, x - PADDING)
+                val py = maxOf(0, y - PADDING)
+                val pw = minOf(input.width - px, w + (x - px) + PADDING)
+                val ph = minOf(input.height - py, h + (y - py) + PADDING)
+
+                // Crop padded tile
+                val paddedTile = Bitmap.createBitmap(input, px, py, pw, ph)
+
+                // Infer via JNI
+                val enhancedTile = RealEsrganBridge.processImage(paddedTile, scale, modelName, useFaceRestore)
+                paddedTile.recycle()
+
+                if (enhancedTile != null) {
+                    // Extract the core part (remove padding)
+                    // The padding in output space is multiplied by scale
+                    val padLeftOut = (x - px) * scale
+                    val padTopOut = (y - py) * scale
+                    val coreWOut = w * scale
+                    val coreHOut = h * scale
+
+                    val srcRect = android.graphics.Rect(
+                        padLeftOut, padTopOut, padLeftOut + coreWOut, padTopOut + coreHOut
+                    )
+                    val dstRect = android.graphics.Rect(
+                        x * scale, y * scale, (x + w) * scale, (y + h) * scale
+                    )
+                    canvas.drawBitmap(enhancedTile, srcRect, dstRect, paint)
+                    enhancedTile.recycle()
+                } else {
+                    // Fallback or error, abort
+                    output.recycle()
+                    return null
+                }
+                x += TILE_SIZE
+            }
+            y += TILE_SIZE
+        }
+        return output
     }
 }
