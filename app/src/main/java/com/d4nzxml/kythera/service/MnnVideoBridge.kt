@@ -109,7 +109,13 @@ object MnnVideoBridge {
 
     private external fun loadModel(modelPath: String, gpuMode: Int): Boolean
     private external fun enhanceFrame(bitmap: Bitmap): Bitmap?
-    external fun release()
+    
+    private external fun releaseNative()
+    fun release() {
+        if (!isLibLoaded) return
+        try { releaseNative() } catch (_: Exception) {}
+        isModelReady = false
+    }
 }
 
 // NOTE: Default scale sudah X2 bukan X4

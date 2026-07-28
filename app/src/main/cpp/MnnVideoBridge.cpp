@@ -243,9 +243,9 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_enhanceFrame(
     return outBitmap;
 }
 
-// ─── JNI: release ─────────────────────────────────────────────────────────────
+// ─── JNI: releaseNative ─────────────────────────────────────────────────────────────
 extern "C" JNIEXPORT void JNICALL
-Java_com_d4nzxml_kythera_service_MnnVideoBridge_release(JNIEnv*, jobject) {
+Java_com_d4nzxml_kythera_service_MnnVideoBridge_releaseNative(JNIEnv*, jobject) {
     if (g_net && g_session) { g_net->releaseSession(g_session); g_session = nullptr; }
     if (g_net) { MNN::Interpreter::destroy(g_net); g_net = nullptr; }
     g_modelPath.clear();
