@@ -79,6 +79,7 @@ fun VideoEnhanceScreen() {
     var thumbnail    by remember { mutableStateOf<Bitmap?>(null) }
     var engineReady  by remember { mutableStateOf(false) }
     var useGpuAccel  by remember { mutableStateOf(true) }
+    var targetResMode by remember { mutableStateOf("1080p") } // "original", "1080p", "2x"
 
     var isProcessing by rememberSaveable { mutableStateOf(false) }
     var isCancelled  by remember { mutableStateOf(false) }
@@ -206,7 +207,9 @@ fun VideoEnhanceScreen() {
                         if (isCancelled) break
                         val frame: Bitmap = OpenCvBridge.readFrame() ?: break
                         val enhanced: Bitmap? = processor.processFrame(
-                            bitmap = frame, frameIndex = frameIdx, totalFrames = totalF)
+                            bitmap = frame, frameIndex = frameIdx, totalFrames = totalF,
+                            targetResMode = targetResMode
+                        )
                         if (enhanced != null && !enhanced.isRecycled) {
                             FileOutputStream(File(framesDir, String.format("frame_%05d.jpg", frameIdx))).use { fos ->
                                 enhanced.compress(Bitmap.CompressFormat.JPEG, 85, fos)
@@ -469,6 +472,36 @@ fun VideoEnhanceScreen() {
                                     color = if (engineReady) Color(0xFF69F0AE) else Color(0xFFFF9800),
                                     fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
+                        }
+
+                        Divider(color = Color.White.copy(0.07f))
+
+                        // Target Resolution Selector
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Target Resolusi Output", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("original" to "Asli", "1080p" to "1080p", "2x" to "Max 2x").forEach { (mode, label) ->
+                                    val selected = targetResMode == mode
+                                    Box(modifier = Modifier.weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
+                                        .clickable { targetResMode = mode }
+                                        .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(label, color = if (selected) Color.White else Color.White.copy(0.7f), 
+                                            fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                                    }
+                                }
+                            }
+                            Text(
+                                text = when(targetResMode) {
+                                    "original" -> "Resolusi output = resolusi video asli (Sangat Cepat)"
+                                    "1080p" -> "Resolusi output maks 1080p (Seimbang)"
+                                    else -> "Resolusi output 2x lipat dari asli (Sangat Lambat)"
+                                },
+                                color = KColor.Text2, fontSize = 11.sp
+                            )
                         }
 
                         Divider(color = Color.White.copy(0.07f))

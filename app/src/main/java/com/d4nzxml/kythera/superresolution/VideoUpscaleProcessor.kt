@@ -49,7 +49,8 @@ class VideoUpscaleProcessor(
     suspend fun processFrame(
         bitmap: Bitmap,
         frameIndex: Int = 0,
-        totalFrames: Int = 1
+        totalFrames: Int = 1,
+        targetResMode: String = "1080p"
     ): Bitmap? = withContext(Dispatchers.IO) {
         val t0 = System.nanoTime()
 
@@ -59,13 +60,43 @@ class VideoUpscaleProcessor(
                 return@withLock null
             }
 
-            // ─── NO PRE-SCALING ───────────────────────────────────────────────
-            // User explicit request: true 2x upscale of original resolution.
-            // Example: 720p (720x1280) -> 1440x2560
-            // Example: 1080p (1080x1920) -> 2160x3840
-            val inputBitmap = bitmap
+            // ─── TARGET RESOLUTION LOGIC ──────────────────────────────────────────
+            // NCNN x2 model ALWAYS outputs 2x the input size. 
+            // So to control the OUTPUT size, we must scale the INPUT size before inference.
+            
+            val originalLongest = maxOf(bitmap.width, bitmap.height).toFloat()
+            
+            val inputBitmap = when (targetResMode) {
+                "original" -> {
+                    // Output = original. So Input = original / 2
+                    val downScale = (originalLongest / scale) / originalLongest
+                    val w = (bitmap.width * downScale).toInt().coerceAtLeast(8)
+                    val h = (bitmap.height * downScale).toInt().coerceAtLeast(8)
+                    val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
+                    bitmap.recycle()
+                    scaled
+                }
+                "1080p" -> {
+                    // Output max 1920 (1080p). So Input max = 1920 / scale = 960
+                    val maxInputSide = 1920f / scale
+                    if (originalLongest > maxInputSide) {
+                        val downScale = maxInputSide / originalLongest
+                        val w = (bitmap.width * downScale).toInt().coerceAtLeast(8)
+                        val h = (bitmap.height * downScale).toInt().coerceAtLeast(8)
+                        val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
+                        bitmap.recycle()
+                        scaled
+                    } else {
+                        bitmap
+                    }
+                }
+                else -> {
+                    // "2x" mode: Output = 2x original. So Input = original
+                    bitmap
+                }
+            }
 
-            Log.d(TAG, "Frame[$frameIndex] original=${bitmap.width}x${bitmap.height} " +
+            Log.d(TAG, "Frame[$frameIndex] mode=$targetResMode original=${bitmap.width}x${bitmap.height} " +
                 "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
             // NCNN inference
