@@ -52,8 +52,10 @@ static jobject matToBitmap(JNIEnv* env, const ncnn::Mat& mat) {
 
 static void configNet(ncnn::Net* net, bool gpu) {
     net->opt.use_vulkan_compute   = gpu;
-    // DO NOT force FP16. Let NCNN auto-detect capabilities via set_vulkan_device.
-    // Forcing it on unsupported GPUs causes Vulkan to fail and fallback to CPU!
+    net->opt.use_fp16_packed      = true;
+    net->opt.use_fp16_storage     = true;
+    net->opt.use_fp16_arithmetic  = true;
+    net->opt.use_int8_storage     = true;
     net->opt.num_threads          = ncnn::get_cpu_count();
 
     if (gpu) {
