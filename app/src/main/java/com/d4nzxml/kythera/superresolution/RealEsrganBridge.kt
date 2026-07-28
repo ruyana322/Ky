@@ -1,4 +1,4 @@
-﻿package com.d4nzxml.kythera.superresolution
+package com.d4nzxml.kythera.superresolution
 
 import android.content.res.AssetManager
 import android.graphics.Bitmap
@@ -31,9 +31,9 @@ object RealEsrganBridge {
      * Safe to call multiple times — subsequent calls are no-ops.
      * Call this on Dispatchers.IO at app launch.
      */
-    fun loadModel(assets: AssetManager): Boolean {
+    fun loadModel(assets: AssetManager, useGpu: Boolean = true): Boolean {
         if (isLoaded) { Log.d(TAG, "Already loaded"); return true }
-        val ok = loadModelNative(assets)
+        val ok = loadModelNative(assets, useGpu)
         isLoaded = ok
         Log.i(TAG, if (ok) "Model loaded OK!" else "Model load FAILED!")
         return ok
@@ -48,7 +48,7 @@ object RealEsrganBridge {
     fun isReady(): Boolean = isLoaded
 
     // ─── Native JNI — names match C++ function signatures exactly ──────────────
-    @JvmStatic private external fun loadModelNative(assets: AssetManager): Boolean
+    @JvmStatic private external fun loadModelNative(assets: AssetManager, useGpu: Boolean): Boolean
 
     /**
      * Process one frame through Real-ESRGAN.

@@ -1,4 +1,4 @@
-﻿#include <jni.h>
+#include <jni.h>
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
@@ -60,13 +60,20 @@ static void configNet(ncnn::Net* net, bool gpu) {
 // ─── loadModelNative ──────────────────────────────────────────────────────────
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_loadModelNative(
-        JNIEnv* env, jobject thiz, jobject assetManager) {
-
-    if (g_loaded) { LOGI("Already loaded."); return JNI_TRUE; }
+        JNIEnv* env, jobject thiz, jobject assetManager, jboolean useGpu) {
 
     ncnn::create_gpu_instance();
-    g_has_gpu = ncnn::get_gpu_count() > 0;
-    LOGI("Vulkan GPU: %s", g_has_gpu ? "YES" : "NO");
+    bool deviceHasGpu = ncnn::get_gpu_count() > 0;
+    g_has_gpu = useGpu && deviceHasGpu;
+
+    if (g_loaded) { 
+        LOGI("Already loaded. GPU: %s (Device: %s)", g_has_gpu ? "YES" : "NO", deviceHasGpu ? "YES" : "NO"); 
+        // Note: Currently we don't hot-reload if the user toggled the switch. We just use the first loaded state. 
+        // For true hot-reloading, we'd need to recreate the net. For now, it respects the launch state.
+        return JNI_TRUE; 
+    }
+
+    LOGI("Vulkan GPU enabled: %s", g_has_gpu ? "YES" : "NO");
 
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
 
@@ -170,7 +177,7 @@ Java_com_d4nzxml_kythera_superresolution_FaceRestoreBridge_releaseNative(JNIEnv*
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_d4nzxml_kythera_service_NcnnVideoBridge_initEngine(
         JNIEnv* env, jclass clazz, jobject assetManager) {
-    return Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_loadModelNative(env, nullptr, assetManager);
+    return Java_com_d4nzxml_kythera_superresolution_RealEsrganBridge_loadModelNative(env, nullptr, assetManager, JNI_TRUE);
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_d4nzxml_kythera_service_NcnnVideoBridge_destroyEngine(JNIEnv* env, jclass clazz) {

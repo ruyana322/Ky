@@ -59,38 +59,14 @@ class VideoUpscaleProcessor(
                 return@withLock null
             }
 
-            // ─── PRE-SCALING STRATEGY ─────────────────────────────────────────
-            // Goal: output dari NCNN ≥ resolusi original video
-            //
-            // Untuk x2 model: output = input × 2
-            // Jadi input_ideal = original / 2  →  output = original
-            //
-            // Contoh untuk 720p (720×1280):
-            //   input_ideal = 360×640  →  output = 720×1280  ✓ (sama dengan original)
-            //
-            // Contoh untuk 1080p (1080×1920):
-            //   input_ideal = 540×960  →  output = 1080×1920  ✓
-            //   Tapi di-cap di 720px input = 1440px output (aman untuk HP)
-            //
-            // Cap maksimum 720px input side untuk mencegah OOM di HP midrange
-            val originalLongest = maxOf(bitmap.width, bitmap.height).toFloat()
-            val idealInputSide  = originalLongest / scale.toFloat()   // target: output = original
-            val maxInputCap     = 720f                                  // cap 720px → max output 1440px
-            val effectiveInput  = minOf(idealInputSide, maxInputCap)
-
-            val downScale = if (originalLongest > effectiveInput) effectiveInput / originalLongest else 1f
-            val inputBitmap = if (downScale < 1f) {
-                val w = (bitmap.width * downScale).toInt().coerceAtLeast(8)
-                val h = (bitmap.height * downScale).toInt().coerceAtLeast(8)
-                val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
-                bitmap.recycle() // original no longer needed
-                scaled
-            } else {
-                bitmap
-            }
+            // ─── NO PRE-SCALING ───────────────────────────────────────────────
+            // User explicit request: true 2x upscale of original resolution.
+            // Example: 720p (720x1280) -> 1440x2560
+            // Example: 1080p (1080x1920) -> 2160x3840
+            val inputBitmap = bitmap
 
             Log.d(TAG, "Frame[$frameIndex] original=${bitmap.width}x${bitmap.height} " +
-                "→ input=${inputBitmap.width}x${inputBitmap.height} (scale=${"%.2f".format(downScale)})")
+                "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
             // NCNN inference
             val enhanced = try {

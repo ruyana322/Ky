@@ -105,14 +105,15 @@ fun VideoEnhanceScreen() {
     // Animated progress for smooth bar
     val animatedProgress by animateFloatAsState(targetValue = progressPct, label = "progress")
 
-    // Engine ready check
-    LaunchedEffect(Unit) {
-        engineReady = RealEsrganBridge.isReady()
-        if (!engineReady) {
-            statusMsg = "Memuat AI engine..."
-            withContext(Dispatchers.IO) { engineReady = RealEsrganBridge.loadModel(context.assets) }
-            statusMsg = if (engineReady) "" else "⚠️ AI engine gagal dimuat"
+    // Engine ready check (reloads if GPU toggle changes)
+    LaunchedEffect(useGpuAccel) {
+        engineReady = false
+        statusMsg = "Memuat AI engine..."
+        withContext(Dispatchers.IO) { 
+            RealEsrganBridge.release()
+            engineReady = RealEsrganBridge.loadModel(context.assets, useGpuAccel) 
         }
+        statusMsg = if (engineReady) "" else "⚠️ AI engine gagal dimuat"
     }
 
     // Elapsed timer — updates every second while processing
