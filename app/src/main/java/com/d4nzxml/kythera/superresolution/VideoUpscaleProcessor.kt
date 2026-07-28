@@ -141,7 +141,9 @@ class VideoUpscaleProcessor(
         input: Bitmap, scale: Int, modelName: String, useFaceRestore: Boolean
     ): Bitmap? {
         // Tile size configuration (balances JNI overhead vs GPU VRAM limits)
-        val TILE_SIZE = 400
+        // realesr-animevideov3 is very small and doesn't require aggressive tiling.
+        // A tile size of 1500 prevents tiling overhead for inputs up to 1080p.
+        val TILE_SIZE = 1500
         val PADDING = 16
 
         val outW = input.width * scale

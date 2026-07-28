@@ -57,7 +57,11 @@ static void configNet(ncnn::Net* net, bool gpu) {
     net->opt.num_threads          = ncnn::get_cpu_count();
 
     if (gpu) {
-        net->set_vulkan_device(ncnn::get_gpu_device(0));
+        ncnn::VulkanDevice* vkdev = ncnn::get_gpu_device(0);
+        net->set_vulkan_device(vkdev);
+        net->opt.blob_vkallocator = vkdev->allocator();
+        net->opt.workspace_vkallocator = vkdev->allocator();
+        net->opt.staging_vkallocator = vkdev->staging_allocator();
     }
 }
 
