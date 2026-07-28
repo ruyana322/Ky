@@ -362,9 +362,8 @@ fun VideoEnhanceScreen() {
                 }
             }
 
-            // Processing overlay on top of thumbnail
-            AnimatedVisibility(visible = isProcessing, enter = fadeIn(), exit = fadeOut(),
-                modifier = Modifier.fillMaxSize()) {
+            // Processing overlay on top of thumbnail (plain if — no scope receiver ambiguity)
+            if (isProcessing) {
                 Box(modifier = Modifier.fillMaxSize().background(Color(0xDD000000)),
                     contentAlignment = Alignment.Center) {
 
