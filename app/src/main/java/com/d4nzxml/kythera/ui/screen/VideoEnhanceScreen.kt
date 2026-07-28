@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
-import com.d4nzxml.kythera.superresolution.RealEsrganBridge
+
 import com.d4nzxml.kythera.superresolution.VideoUpscaleProcessor
 import com.d4nzxml.kythera.service.OpenCvBridge
 import com.d4nzxml.kythera.ui.components.*
@@ -99,7 +99,7 @@ fun VideoEnhanceScreen() {
     val inputUri = inputUriStr?.let { Uri.parse(it) }
 
     val processor = remember {
-        VideoUpscaleProcessor(scale = 2, modelName = "realesr-animevideov3", useFaceRestore = false)
+        VideoUpscaleProcessor(scale = 2, modelName = "resrgan_srvggx1_d2u2_1024.mnn", useFaceRestore = false)
     }
     val processorProgress by processor.progress.collectAsState()
     val processorFps      by processor.fps.collectAsState()
@@ -496,7 +496,7 @@ fun VideoEnhanceScreen() {
                             verticalAlignment = Alignment.CenterVertically) {
                             Column {
                                 Text("Model AI", color = KColor.Text2, fontSize = 11.sp)
-                                Text("realesr-animevideov3  ·  2x", color = KColor.Text,
+                                Text("MNN OpenCL (Super Fast)  •  2x", color = KColor.Text,
                                     fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
                             Box(modifier = Modifier.clip(RoundedCornerShape(20.dp))
