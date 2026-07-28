@@ -1,4 +1,4 @@
-﻿package com.d4nzxml.kythera.superresolution
+package com.d4nzxml.kythera.superresolution
 
 import android.graphics.Bitmap
 import android.util.Log
@@ -59,9 +59,11 @@ class VideoUpscaleProcessor(
                 return@withLock null
             }
 
-            // PRE-SCALING: cap input at 540px on longest side
-            // This is the key PixelHD trick — prevent VRAM OOM on large frames
-            val maxSide = 540f
+            // PRE-SCALING: cap input at 360px on longest side
+            // 360px → NCNN inference ~2.25x faster than 540px
+            // x2 model output: 720px HD — x4 model output: 1440px
+            // Lower = faster + less thermal throttle = less lag
+            val maxSide = 360f
             val longestSide = maxOf(bitmap.width, bitmap.height).toFloat()
             val downScale = if (longestSide > maxSide) maxSide / longestSide else 1f
             val inputBitmap = if (downScale < 1f) {

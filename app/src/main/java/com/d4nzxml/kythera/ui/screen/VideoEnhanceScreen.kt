@@ -238,7 +238,8 @@ fun VideoEnhanceScreen() {
                         if (enhanced != null && !enhanced.isRecycled) {
                             val frameFile = File(framesDir, String.format("frame_%05d.jpg", frameIdx))
                             FileOutputStream(frameFile).use { fos ->
-                                enhanced.compress(Bitmap.CompressFormat.JPEG, 92, fos)
+                                // Q=85: saves ~15% disk I/O vs Q=92, negligible quality difference
+                                enhanced.compress(Bitmap.CompressFormat.JPEG, 85, fos)
                             }
                             enhanced.recycle()
                         }
