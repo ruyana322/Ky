@@ -263,6 +263,7 @@ fun VideoEnhanceScreen() {
                 }
 
                 progressPct = 0.77f; statusMsg = "Encoding video..."
+                val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
 
                 val encodeSession = withContext(Dispatchers.IO) {
                     FFmpegKit.execute(
