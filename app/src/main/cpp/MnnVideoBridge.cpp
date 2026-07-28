@@ -67,7 +67,7 @@ static bool runTile(const uint8_t* tileIn,
         floatIn[2*N+i] = tileIn[i*4+2] / 255.0f; // B
     }
 
-    auto* inputTensor = g_net->getSessionInput(g_session, "input");
+    auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
     if (!inputTensor) { LOGE("No input tensor"); return false; }
 
     auto* hostIn = MNN::Tensor::create<float>(
@@ -77,7 +77,7 @@ static bool runTile(const uint8_t* tileIn,
 
     g_net->runSession(g_session);
 
-    auto* outTensor = g_net->getSessionOutput(g_session, "output");
+    auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
     if (!outTensor) { LOGE("No output tensor"); return false; }
 
     auto shape = outTensor->shape();
@@ -126,7 +126,7 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
     if (!g_net) { LOGE("Load failed"); return JNI_FALSE; }
 
     // Set fixed input size
-    auto* inputTensor = g_net->getSessionInput(nullptr, "input");
+    auto* inputTensor = g_net->getSessionInput(nullptr, nullptr);
     if (inputTensor) {
         g_net->resizeTensor(inputTensor, {1, 3, TILE, TILE});
     }
