@@ -82,6 +82,7 @@ fun VideoEnhanceScreen() {
     var targetResMode by remember { mutableStateOf("1080p") } // "original", "1080p", "2x"
 
     var isProcessing by rememberSaveable { mutableStateOf(false) }
+    var isExtracting by remember { mutableStateOf(false) }
     var isCancelled  by remember { mutableStateOf(false) }
     var statusMsg    by remember { mutableStateOf("") }
     var progressPct  by remember { mutableStateOf(0f) }
@@ -161,11 +162,33 @@ fun VideoEnhanceScreen() {
                     withContext(Dispatchers.Main) {
                         if (meta != null) {
                             videoMeta   = meta
-                            totalFrames = meta.totalFrames
+                            statusMsg = "Mengekstrak frame video..."
+                            isExtracting = true
                         } else { statusMsg = "Gagal baca metadata video" }
                     }
+                    
+                    if (meta != null) {
+                        val safUrl = FFmpegKitConfig.getSafParameterForRead(context, it)
+                        val inputFramesDir = File(context.cacheDir, "ky_input_frames")
+                        
+                        if (!inputFramesDir.exists()) inputFramesDir.mkdirs()
+                        else inputFramesDir.listFiles()?.forEach { f -> f.delete() }
+                        
+                        FFmpegKit.execute("-y -i \"$safUrl\" -qscale:v 2 \"${inputFramesDir.absolutePath}/frame_%05d.jpg\"")
+                        
+                        val inputFiles = inputFramesDir.listFiles()?.filter { f -> f.extension == "jpg" }?.sortedBy { f -> f.name } ?: emptyList()
+                        
+                        withContext(Dispatchers.Main) {
+                            isExtracting = false
+                            totalFrames = inputFiles.size
+                            statusMsg = "Siap diproses (${inputFiles.size} frame)"
+                        }
+                    }
                 } catch (e: Exception) {
-                    withContext(Dispatchers.Main) { statusMsg = "Error: ${e.message}" }
+                    withContext(Dispatchers.Main) { 
+                        isExtracting = false
+                        statusMsg = "Error: ${e.message}" 
+                    }
                 }
             }
         }
@@ -194,31 +217,17 @@ fun VideoEnhanceScreen() {
                 
                 if (openedMeta == null) { errorLog = "Gagal buka video"; isProcessing = false; return@launch }
 
-                statusMsg = "Mengekstrak frame..."; progressPct = 0.02f
-                val safUrl = FFmpegKitConfig.getSafParameterForRead(context, uri)
-                
                 val inputFramesDir = File(context.cacheDir, "ky_input_frames")
-                withContext(Dispatchers.IO) {
-                    if (!inputFramesDir.exists()) inputFramesDir.mkdirs()
-                    else inputFramesDir.listFiles()?.forEach { it.delete() }
-                    
-                    if (!framesDir.exists()) framesDir.mkdirs()
-                    else framesDir.listFiles()?.forEach { it.delete() }
-                }
-
-                // EXTRACT ALL FRAMES
-                val extractSession = withContext(Dispatchers.IO) {
-                    FFmpegKit.execute("-y -i \"$safUrl\" -qscale:v 2 \"${inputFramesDir.absolutePath}/frame_%05d.jpg\"")
-                }
-                if (!ReturnCode.isSuccess(extractSession.returnCode)) {
-                    errorLog = "Gagal ekstrak frame video"; isProcessing = false; return@launch
-                }
-                
                 val inputFiles = inputFramesDir.listFiles()?.filter { it.extension == "jpg" }?.sortedBy { it.name } ?: emptyList()
                 val totalF = inputFiles.size
-
+                
                 if (totalF == 0) {
-                    errorLog = "Tidak ada frame yang diekstrak"; isProcessing = false; return@launch
+                    errorLog = "Frame video belum terekstrak"; isProcessing = false; return@launch
+                }
+
+                withContext(Dispatchers.IO) {
+                    if (!framesDir.exists()) framesDir.mkdirs()
+                    else framesDir.listFiles()?.forEach { it.delete() }
                 }
 
                 statusMsg = "Memproses $totalF frame AI..."; progressPct = 0.05f
@@ -601,10 +610,11 @@ fun VideoEnhanceScreen() {
                     label = when {
                         !engineReady      -> "⏳ Engine Loading..."
                         inputUri == null  -> "Pilih Video Dulu"
+                        isExtracting      -> "⏳ Mengekstrak Frame..."
                         else              -> "✨ Mulai AI Enhance"
                     },
                     icon = Icons.Rounded.AutoAwesome,
-                    enabled = inputUri != null && videoMeta != null && engineReady,
+                    enabled = inputUri != null && videoMeta != null && engineReady && !isExtracting,
                     onClick = ::processAI)
             }
         }
