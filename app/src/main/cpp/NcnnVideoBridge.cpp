@@ -8,6 +8,7 @@
 // NCNN
 #include "net.h"
 #include "gpu.h"
+#include "cpu.h"
 
 #define TAG "KytheraRE"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
