@@ -60,12 +60,11 @@ class VideoUpscaleProcessor(
                 return@withLock null
             }
 
-            // ─── TARGET RESOLUTION LOGIC ──────────────────────────────────────────
             // 1. Determine expected output dimensions
             val expectedOutW: Int
             val expectedOutH: Int
             when (targetResMode) {
-                TargetResMode.FHD_1080P -> {
+                "1080p" -> {
                     expectedOutW = bitmap.width * 4
                     expectedOutH = bitmap.height * 4
                 }
@@ -75,36 +74,22 @@ class VideoUpscaleProcessor(
                 }
             }
 
-            // 2. Prepare the input bitmap based on AI engine capabilities
-            val inputBitmap = if (activeEngine == AiEngine.MNN) {
-                // MNN models are 1x scale. To get HD output, we pre-scale the image so the AI sharpens the high-res pixels.
-                if (bitmap.width < expectedOutW) {
-                    Bitmap.createScaledBitmap(bitmap, expectedOutW, expectedOutH, true)
-                } else {
-                    bitmap
+            // 2. Prepare the input bitmap for NCNN (which natively outputs 2x)
+            val inputBitmap = when (targetResMode) {
+                "1080p" -> {
+                    if (bitmap.width * 2 < 2000) {
+                        Bitmap.createScaledBitmap(bitmap, bitmap.width * 2, bitmap.height * 2, true)
+                    } else bitmap
                 }
-            } else {
-                // NCNN models are 2x scale natively.
-                when (targetResMode) {
-                    TargetResMode.FHD_1080P -> {
-                        if (bitmap.width * 2 < 2000) {
-                            Bitmap.createScaledBitmap(bitmap, bitmap.width * 2, bitmap.height * 2, true)
-                        } else bitmap
-                    }
-                    else -> bitmap
-                }
+                else -> bitmap
             }
 
             Log.d(TAG, "Frame[$frameIndex] mode=$targetResMode original=${bitmap.width}x${bitmap.height} " +
                 "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
-            // 3. Inference
+            // 3. Inference (Using NCNN Anime Video V3 with fast TILE_SIZE=1000)
             var enhanced = try {
-                if (activeEngine == AiEngine.MNN) {
-                    com.d4nzxml.kythera.service.MnnVideoBridge.enhance(inputBitmap)
-                } else {
-                    processTiledImage(inputBitmap, 2, "realesr-animevideov3-x2", useFaceRestore)
-                }
+                processTiledImage(inputBitmap, 2, "realesr-animevideov3-x2", false)
             } catch (e: Exception) {
                 Log.e(TAG, "processFrame[$frameIndex] inference error: ${e.message}")
                 null
