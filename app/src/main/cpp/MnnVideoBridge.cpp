@@ -59,12 +59,12 @@ static bool runTile(const uint8_t* tileIn,
     int out = TILE * g_scale;
     int ON  = out * out;
 
-    // RGBA → float NCHW [0,1]
+    // RGBA → float NCHW [0, 255]
     std::vector<float> floatIn(3 * N);
     for (int i = 0; i < N; i++) {
-        floatIn[0*N+i] = tileIn[i*4+0] / 255.0f; // R
-        floatIn[1*N+i] = tileIn[i*4+1] / 255.0f; // G
-        floatIn[2*N+i] = tileIn[i*4+2] / 255.0f; // B
+        floatIn[0*N+i] = (float)tileIn[i*4+0]; // R
+        floatIn[1*N+i] = (float)tileIn[i*4+1]; // G
+        floatIn[2*N+i] = (float)tileIn[i*4+2]; // B
     }
 
     auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
@@ -102,9 +102,9 @@ static bool runTile(const uint8_t* tileIn,
     // float NCHW → RGBA uint8
     tileOut.resize((size_t)(realOW * realOH * 4));
     for (int i = 0; i < realON; i++) {
-        tileOut[i*4+0] = (uint8_t)(std::max(0.f,std::min(1.f,floatOut[0*realON+i]))*255.f+.5f);
-        tileOut[i*4+1] = (uint8_t)(std::max(0.f,std::min(1.f,floatOut[1*realON+i]))*255.f+.5f);
-        tileOut[i*4+2] = (uint8_t)(std::max(0.f,std::min(1.f,floatOut[2*realON+i]))*255.f+.5f);
+        tileOut[i*4+0] = (uint8_t)(std::max(0.f, std::min(255.f, floatOut[0*realON+i])) + 0.5f);
+        tileOut[i*4+1] = (uint8_t)(std::max(0.f, std::min(255.f, floatOut[1*realON+i])) + 0.5f);
+        tileOut[i*4+2] = (uint8_t)(std::max(0.f, std::min(255.f, floatOut[2*realON+i])) + 0.5f);
         tileOut[i*4+3] = 255;
     }
     return true;
