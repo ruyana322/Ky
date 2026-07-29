@@ -83,7 +83,14 @@ static bool runTile(const uint8_t* tileIn,
     auto shape = outTensor->shape();
     if (shape.size() < 4) { LOGE("Bad shape"); return false; }
 
-    int realOH = shape[2], realOW = shape[3];
+    int realOH, realOW;
+    if (outTensor->getDimensionType() == MNN::Tensor::TENSORFLOW) {
+        realOH = shape[1];
+        realOW = shape[2];
+    } else {
+        realOH = shape[2];
+        realOW = shape[3];
+    }
     int realON = realOH * realOW;
 
     std::vector<float> floatOut(3 * realON);
@@ -111,8 +118,6 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
     const char* p = env->GetStringUTFChars(modelPath, nullptr);
     std::string path(p);
     env->ReleaseStringUTFChars(modelPath, p);
-
-    g_scale = (path.find("d4u4") != std::string::npos) ? 4 : 2;
 
     if (g_net && g_session && g_modelPath == path) {
         LOGI("Already loaded scale=%dx", g_scale);
@@ -157,6 +162,17 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
         g_net->resizeTensor(inputTensor, {1, 3, TILE, TILE});
         g_net->resizeSession(g_session);
     }
+    // Dynamically calculate scale from the output tensor
+    auto* outTensor = g_net->getSessionOutput(g_session, nullptr);
+    if (outTensor) {
+        auto shape = outTensor->shape();
+        if (shape.size() >= 4) {
+            int maxDim = std::max({shape[1], shape[2], shape[3]});
+            g_scale = maxDim / TILE;
+            if (g_scale < 1) g_scale = 1;
+        }
+    }
+
     g_modelPath = path;
     LOGI("Loaded OK scale=%dx", g_scale);
     return JNI_TRUE;
