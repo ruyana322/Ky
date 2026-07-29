@@ -125,11 +125,7 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
     g_net = MNN::Interpreter::createFromFile(path.c_str());
     if (!g_net) { LOGE("Load failed"); return JNI_FALSE; }
 
-    // Set fixed input size
-    auto* inputTensor = g_net->getSessionInput(nullptr, nullptr);
-    if (inputTensor) {
-        g_net->resizeTensor(inputTensor, {1, 3, TILE, TILE});
-    }
+
 
     MNN::ScheduleConfig config;
     MNN::BackendConfig backendCfg;
@@ -155,7 +151,12 @@ Java_com_d4nzxml_kythera_service_MnnVideoBridge_loadModel(
         return JNI_FALSE;
     }
 
-    g_net->resizeSession(g_session);
+    // Set fixed input size
+    auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
+    if (inputTensor) {
+        g_net->resizeTensor(inputTensor, {1, 3, TILE, TILE});
+        g_net->resizeSession(g_session);
+    }
     g_modelPath = path;
     LOGI("Loaded OK scale=%dx", g_scale);
     return JNI_TRUE;
