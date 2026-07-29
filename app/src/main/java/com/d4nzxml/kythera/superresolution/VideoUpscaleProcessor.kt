@@ -61,63 +61,56 @@ class VideoUpscaleProcessor(
             }
 
             // ─── TARGET RESOLUTION LOGIC ──────────────────────────────────────────
-            // NCNN x2 model ALWAYS outputs 2x the input size. 
-            // So to control the OUTPUT size, we must scale the INPUT size before inference.
-            
-            val originalLongest = maxOf(bitmap.width, bitmap.height).toFloat()
-            
-            val inputBitmap = when (targetResMode) {
-                "original" -> {
-                    // Output = original. So Input = original / 2
-                    val downScale = (originalLongest / scale) / originalLongest
-                    val w = (bitmap.width * downScale).toInt().coerceAtLeast(8)
-                    val h = (bitmap.height * downScale).toInt().coerceAtLeast(8)
-                    val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
-                    bitmap.recycle()
-                    scaled
-                }
-                "1080p" -> {
-                    // Output max 1920 (1080p). So Input max = 1920 / scale = 960
-                    val maxInputSide = 1920f / scale
-                    if (originalLongest > maxInputSide) {
-                        val downScale = maxInputSide / originalLongest
-                        val w = (bitmap.width * downScale).toInt().coerceAtLeast(8)
-                        val h = (bitmap.height * downScale).toInt().coerceAtLeast(8)
-                        val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
-                        bitmap.recycle()
-                        scaled
-                    } else {
-                        bitmap
-                    }
+            // 1. Determine expected output dimensions
+            val expectedOutW: Int
+            val expectedOutH: Int
+            when (targetResMode) {
+                TargetResMode.FHD_1080P -> {
+                    expectedOutW = bitmap.width * 4
+                    expectedOutH = bitmap.height * 4
                 }
                 else -> {
-                    // "2x" mode: Output = 2x original. So Input = original
+                    expectedOutW = bitmap.width * 2
+                    expectedOutH = bitmap.height * 2
+                }
+            }
+
+            // 2. Prepare the input bitmap based on AI engine capabilities
+            val inputBitmap = if (activeEngine == AiEngine.MNN) {
+                // MNN models are 1x scale. To get HD output, we pre-scale the image so the AI sharpens the high-res pixels.
+                if (bitmap.width < expectedOutW) {
+                    Bitmap.createScaledBitmap(bitmap, expectedOutW, expectedOutH, true)
+                } else {
                     bitmap
+                }
+            } else {
+                // NCNN models are 2x scale natively.
+                when (targetResMode) {
+                    TargetResMode.FHD_1080P -> {
+                        if (bitmap.width * 2 < 2000) {
+                            Bitmap.createScaledBitmap(bitmap, bitmap.width * 2, bitmap.height * 2, true)
+                        } else bitmap
+                    }
+                    else -> bitmap
                 }
             }
 
             Log.d(TAG, "Frame[$frameIndex] mode=$targetResMode original=${bitmap.width}x${bitmap.height} " +
                 "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
-            val expectedOutW = inputBitmap.width * 2
-            val expectedOutH = inputBitmap.height * 2
-
-            // MNN inference (MnnVideoBridge handles its own 1024x1024 C++ tiling internally)
+            // 3. Inference
             var enhanced = try {
-                com.d4nzxml.kythera.service.MnnVideoBridge.enhance(inputBitmap)
+                if (activeEngine == AiEngine.MNN) {
+                    com.d4nzxml.kythera.service.MnnVideoBridge.enhance(inputBitmap)
+                } else {
+                    processTiledImage(inputBitmap, 2, "realesr-animevideov3-x2", useFaceRestore)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "processFrame[$frameIndex] inference error: ${e.message}")
                 null
             } finally {
-                // Recycle the (possibly scaled) input
-                if (!inputBitmap.isRecycled) inputBitmap.recycle()
-            }
-
-            // If the model was 1x scale (like TimeCut's MNN models), upscale it using Android to match the expected 2x target
-            if (enhanced != null && enhanced.width < expectedOutW) {
-                val scaled = Bitmap.createScaledBitmap(enhanced, expectedOutW, expectedOutH, true)
-                enhanced.recycle()
-                enhanced = scaled
+                // Recycle the (possibly scaled) input if it's not the original
+                if (inputBitmap !== bitmap && !inputBitmap.isRecycled) inputBitmap.recycle()
             }
 
             enhanced
