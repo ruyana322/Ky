@@ -99,8 +99,11 @@ class VideoUpscaleProcessor(
             Log.d(TAG, "Frame[$frameIndex] mode=$targetResMode original=${bitmap.width}x${bitmap.height} " +
                 "→ input=${inputBitmap.width}x${inputBitmap.height}")
 
+            val expectedOutW = inputBitmap.width * 2
+            val expectedOutH = inputBitmap.height * 2
+
             // MNN inference (MnnVideoBridge handles its own 1024x1024 C++ tiling internally)
-            val enhanced = try {
+            var enhanced = try {
                 com.d4nzxml.kythera.service.MnnVideoBridge.enhance(inputBitmap)
             } catch (e: Exception) {
                 Log.e(TAG, "processFrame[$frameIndex] inference error: ${e.message}")
@@ -108,6 +111,13 @@ class VideoUpscaleProcessor(
             } finally {
                 // Recycle the (possibly scaled) input
                 if (!inputBitmap.isRecycled) inputBitmap.recycle()
+            }
+
+            // If the model was 1x scale (like TimeCut's MNN models), upscale it using Android to match the expected 2x target
+            if (enhanced != null && enhanced.width < expectedOutW) {
+                val scaled = Bitmap.createScaledBitmap(enhanced, expectedOutW, expectedOutH, true)
+                enhanced.recycle()
+                enhanced = scaled
             }
 
             enhanced
