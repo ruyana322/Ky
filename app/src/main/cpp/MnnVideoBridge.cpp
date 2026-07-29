@@ -59,12 +59,13 @@ static bool runTile(const uint8_t* tileIn,
     int out = TILE * g_scale;
     int ON  = out * out;
 
-    // RGBA → float NCHW [0, 255]
+    // RGBA → float NCHW/NHWC [0, 1]
     std::vector<float> floatIn(3 * N);
     for (int i = 0; i < N; i++) {
-        floatIn[0*N+i] = (float)tileIn[i*4+0]; // R
-        floatIn[1*N+i] = (float)tileIn[i*4+1]; // G
-        floatIn[2*N+i] = (float)tileIn[i*4+2]; // B
+        // We feed CAFFE (NCHW) to MNN, let MNN handle conversion internally
+        floatIn[0*N+i] = tileIn[i*4+0] / 255.0f; // R
+        floatIn[1*N+i] = tileIn[i*4+1] / 255.0f; // G
+        floatIn[2*N+i] = tileIn[i*4+2] / 255.0f; // B
     }
 
     auto* inputTensor = g_net->getSessionInput(g_session, nullptr);
@@ -84,7 +85,8 @@ static bool runTile(const uint8_t* tileIn,
     if (shape.size() < 4) { LOGE("Bad shape"); return false; }
 
     int realOH, realOW;
-    if (outTensor->getDimensionType() == MNN::Tensor::TENSORFLOW) {
+    auto dimType = outTensor->getDimensionType();
+    if (dimType == MNN::Tensor::TENSORFLOW) {
         realOH = shape[1];
         realOW = shape[2];
     } else {
@@ -94,18 +96,30 @@ static bool runTile(const uint8_t* tileIn,
     int realON = realOH * realOW;
 
     std::vector<float> floatOut(3 * realON);
-    auto* hostOut = MNN::Tensor::create<float>(
-        {1, 3, realOH, realOW}, floatOut.data(), MNN::Tensor::CAFFE);
+    
+    // Create host tensor with EXACT SAME shape array and dimension type to guarantee safe copy
+    auto* hostOut = MNN::Tensor::create<float>(shape, floatOut.data(), dimType);
     outTensor->copyToHostTensor(hostOut);
     delete hostOut;
 
-    // float NCHW → RGBA uint8
+    // float → RGBA uint8
     tileOut.resize((size_t)(realOW * realOH * 4));
-    for (int i = 0; i < realON; i++) {
-        tileOut[i*4+0] = (uint8_t)(std::max(0.f, std::min(255.f, floatOut[0*realON+i])) + 0.5f);
-        tileOut[i*4+1] = (uint8_t)(std::max(0.f, std::min(255.f, floatOut[1*realON+i])) + 0.5f);
-        tileOut[i*4+2] = (uint8_t)(std::max(0.f, std::min(255.f, floatOut[2*realON+i])) + 0.5f);
-        tileOut[i*4+3] = 255;
+    if (dimType == MNN::Tensor::TENSORFLOW) {
+        // NHWC layout (RGB RGB RGB ...)
+        for (int i = 0; i < realON; i++) {
+            tileOut[i*4+0] = (uint8_t)(std::max(0.f, std::min(1.f, floatOut[i*3+0])) * 255.f + 0.5f);
+            tileOut[i*4+1] = (uint8_t)(std::max(0.f, std::min(1.f, floatOut[i*3+1])) * 255.f + 0.5f);
+            tileOut[i*4+2] = (uint8_t)(std::max(0.f, std::min(1.f, floatOut[i*3+2])) * 255.f + 0.5f);
+            tileOut[i*4+3] = 255;
+        }
+    } else {
+        // CAFFE layout (RRR... GGG... BBB...)
+        for (int i = 0; i < realON; i++) {
+            tileOut[i*4+0] = (uint8_t)(std::max(0.f, std::min(1.f, floatOut[0*realON+i])) * 255.f + 0.5f);
+            tileOut[i*4+1] = (uint8_t)(std::max(0.f, std::min(1.f, floatOut[1*realON+i])) * 255.f + 0.5f);
+            tileOut[i*4+2] = (uint8_t)(std::max(0.f, std::min(1.f, floatOut[2*realON+i])) * 255.f + 0.5f);
+            tileOut[i*4+3] = 255;
+        }
     }
     return true;
 }
