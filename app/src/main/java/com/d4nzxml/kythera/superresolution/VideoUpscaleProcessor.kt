@@ -129,9 +129,9 @@ class VideoUpscaleProcessor(
         input: Bitmap, scale: Int, modelName: String, useFaceRestore: Boolean
     ): Bitmap? {
         // Tile size configuration (balances JNI overhead vs GPU VRAM limits)
-        // We now use a larger tile size (1000) which massively improves speed (1 JNI call for 540p)
-        // Modern mobile GPUs can easily handle this without OOM.
-        val TILE_SIZE = 1000
+        // Reverted back to 300. Larger tiles (e.g. 1000) cause memory thrashing or CPU fallback 
+        // on mobile GPUs due to the heavy computation of the x2 NCNN model.
+        val TILE_SIZE = 300
         val PADDING = 16
 
         val outW = input.width * scale
