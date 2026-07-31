@@ -22,28 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.viewinterop.AndroidView
 
-// Gunakan Mobile UA agar TikTok Studio tampil versi mobile — pas di HP, tidak terpotong
-private const val UA_MOBILE =
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) " +
-    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-    "Chrome/126.0.0.0 Mobile Safari/537.36"
-
-// Langsung ke Studio. Jika belum login, TikTok otomatis redirect ke Login.
-private const val URL_STUDIO = "https://www.tiktok.com/tiktokstudio/upload"
-
-// JS: auto-click file input setelah halaman Studio selesai dimuat
-private const val JS_AUTO_CLICK = """
-(function() {
-    var tries = 0;
-    var t = setInterval(function() {
-        tries++;
-        var fi = document.querySelector('input[type="file"]');
-        if (fi) { clearInterval(t); fi.click(); return; }
-        if (tries > 15) clearInterval(t);
-    }, 800);
-})();
-"""
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TikTokScreen() {
@@ -56,12 +34,17 @@ fun TikTokScreen() {
             factory = { ctx ->
                 WebView(ctx).apply {
 
+                    // Hardware rendering
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                     setBackgroundColor(android.graphics.Color.WHITE)
 
-                    // Cookie — wajib diaktifkan sebelum loadUrl
-                    val cookieManager = CookieManager.getInstance()
-                    cookieManager.setAcceptCookie(true)
-                    cookieManager.setAcceptThirdPartyCookies(this, true) // this = WebView
+                    // Initial zoom 30% agar seluruh halaman desktop muat di layar HP
+                    setInitialScale(30)
+
+                    // Cookie
+                    val cm = CookieManager.getInstance()
+                    cm.setAcceptCookie(true)
+                    cm.setAcceptThirdPartyCookies(this, true)
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -70,13 +53,21 @@ fun TikTokScreen() {
                         allowFileAccess = true
                         allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        userAgentString = UA_MOBILE
-                        // Mobile mode: tidak perlu zoom / wideViewPort
-                        loadWithOverviewMode = false
-                        useWideViewPort = false
+
+                        // Desktop UA — TikTok Studio hanya ada di versi desktop
+                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/126.0.0.0 Safari/537.36"
+
+                        // Wide viewport agar seluruh halaman desktop ter-render
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+
+                        // Zoom support agar user bisa pinch-to-zoom
                         setSupportZoom(true)
                         builtInZoomControls = true
                         displayZoomControls = false
+
                         cacheMode = WebSettings.LOAD_DEFAULT
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                             safeBrowsingEnabled = false
@@ -85,17 +76,26 @@ fun TikTokScreen() {
 
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
-                            view: WebView?, request: WebResourceRequest?
-                        ): Boolean = false // Tetap di dalam WebView
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): Boolean = false
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isLoading = false
 
-                            // Hanya inject auto-click saat sudah di halaman Studio
+                            // Auto-click file input hanya saat di Studio dan ada video
                             if (url?.contains("tiktokstudio") == true &&
                                 SharedUploadState.processedVideoUri != null) {
-                                view?.evaluateJavascript(JS_AUTO_CLICK, null)
+                                view?.evaluateJavascript("""
+                                    (function() {
+                                        var t = setInterval(function() {
+                                            var fi = document.querySelector('input[type="file"]');
+                                            if (fi) { clearInterval(t); fi.click(); }
+                                        }, 800);
+                                        setTimeout(function(){ clearInterval(t); }, 15000);
+                                    })();
+                                """.trimIndent(), null)
                             }
                         }
                     }
@@ -122,7 +122,8 @@ fun TikTokScreen() {
                         }
                     }
 
-                    loadUrl(URL_STUDIO)
+                    // Langsung ke Studio. Jika belum login, TikTok redirect ke Login otomatis.
+                    loadUrl("https://www.tiktok.com/tiktokstudio/upload")
                 }
             }
         )
