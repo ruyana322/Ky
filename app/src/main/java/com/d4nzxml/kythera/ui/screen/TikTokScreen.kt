@@ -520,11 +520,12 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 // JS SNIPPETS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// 🔥 Critical JS: Anti-Zoom (Lebih Aman), Desktop Fix & Sembunyikan Elemen Luar TikTok
+// 🔥 Critical JS: Anti-Zoom, Desktop Fix & Sembunyikan Elemen Luar TikTok
 private val JS_CRITICAL = """
     (function() {
-        // 🔥 Ubah viewport supaya tidak sekecil 1280px, sehingga form bisa terlihat lebih jelas di mobile
-        var vpContent = 'width=1024, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes';
+        // 🔥 FIX VIEWPORT: Hapus initial-scale agar WebView otomatis zoom-out (fit to screen)
+        // Lebar 960px pas untuk menampung form upload TikTok tanpa membuat teks terlalu kecil
+        var vpContent = 'width=960, user-scalable=no';
         var meta = document.querySelector('meta[name="viewport"]');
         
         if (meta) { 
@@ -545,46 +546,43 @@ private val JS_CRITICAL = """
         `;
         document.head.appendChild(style);
 
-        // 🔥 INJEKSI JS AGRESIF: Sembunyikan elemen berulang kali karena TikTok pakai React yang sering re-render
+        // 🔥 INJEKSI JS AGRESIF & EFISIEN: 
+        // Menggunakan selector case-insensitive untuk menghapus Sidebar, Header, dan Promo yang di-render React
         setInterval(function() {
             try {
-                // Sembunyikan Header, Sider, Footer, Promo berdasarkan class name yang umum di TikTok Studio
-                var allDivs = document.querySelectorAll('div, header, nav, aside, footer');
-                for (var i = 0; i < allDivs.length; i++) {
-                    var el = allDivs[i];
-                    var cn = (el.className || '').toString().toLowerCase();
-                    
-                    // Filter elemen pengganggu
-                    if (
-                        el.tagName.toLowerCase() === 'header' || 
-                        el.tagName.toLowerCase() === 'nav' || 
-                        el.tagName.toLowerCase() === 'aside' || 
-                        el.tagName.toLowerCase() === 'footer' ||
-                        cn.includes('layout-header') || 
-                        cn.includes('layout-sider') || 
-                        cn.includes('tiktok-sider') || 
-                        cn.includes('tiktok-header') ||
-                        cn.includes('side-nav') ||
-                        cn.includes('promo-banner') ||
-                        cn.includes('capcut') ||
-                        cn.includes('header-container')
-                    ) {
-                        // Jangan sembunyikan jika elemen ini adalah container konten / form utama
-                        if (!cn.includes('content') && !cn.includes('upload') && !cn.includes('main')) {
-                            el.style.setProperty('display', 'none', 'important');
-                        }
+                // 1. Sembunyikan Sidebar / Sider / Nav
+                document.querySelectorAll('aside, nav, [class*="sider" i], [class*="sidenav" i], [data-e2e*="sider" i]').forEach(function(e) {
+                    e.style.setProperty('display', 'none', 'important');
+                });
+                
+                // 2. Sembunyikan Header (kecuali teks/title di dalam form)
+                document.querySelectorAll('header, [class*="header" i], [data-e2e*="header" i]').forEach(function(e) {
+                    var cn = (e.className || '').toString().toLowerCase();
+                    if (!cn.includes('text') && !cn.includes('title') && !cn.includes('content') && !cn.includes('upload')) {
+                        e.style.setProperty('display', 'none', 'important');
                     }
-
-                    // Lebarkan kontainer utama agar pas di layar (menghilangkan sisa margin dari sidebar)
-                    if (cn.includes('layout-content') || cn.includes('main-layout') || cn.includes('page-container')) {
-                        el.style.setProperty('margin', '0', 'important');
-                        el.style.setProperty('padding', '0', 'important');
-                        el.style.setProperty('min-width', '100%', 'important');
-                        el.style.setProperty('width', '100%', 'important');
-                    }
-                }
+                });
+                
+                // 3. Sembunyikan Banners & Promos (seperti banner CapCut / 1 video panjang)
+                document.querySelectorAll('[class*="promo" i], [class*="banner" i], [class*="notice" i], [class*="capcut" i]').forEach(function(e) {
+                    e.style.setProperty('display', 'none', 'important');
+                });
+                
+                // 4. Perlebar kontainer utama agar memenuhi layar WebView
+                document.querySelectorAll('main, [class*="layout-content" i], [class*="main-layout" i], [class*="page-container" i]').forEach(function(e) {
+                    e.style.setProperty('margin', '0', 'important');
+                    e.style.setProperty('padding', '0', 'important');
+                    e.style.setProperty('width', '100%', 'important');
+                    e.style.setProperty('min-width', '100%', 'important');
+                    e.style.setProperty('max-width', '100%', 'important');
+                });
+                
+                // 5. Tengahkan Upload Container
+                document.querySelectorAll('[class*="upload-container" i], [class*="UploadContainer" i]').forEach(function(e) {
+                    e.style.setProperty('margin', '0 auto', 'important');
+                });
             } catch(e) {}
-        }, 500);
+        }, 800);
     })();
 
     (function() {
