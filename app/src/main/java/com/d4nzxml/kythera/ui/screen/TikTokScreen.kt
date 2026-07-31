@@ -9,7 +9,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,167 +22,88 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.viewinterop.AndroidView
 
-// User Agent Mobile Chrome Android — TikTok akan render versi mobile yang pas di layar HP
+// Gunakan Mobile UA agar TikTok Studio tampil versi mobile — pas di HP, tidak terpotong
 private const val UA_MOBILE =
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) " +
     "AppleWebKit/537.36 (KHTML, like Gecko) " +
-    "Chrome/126.0.0.64 Mobile Safari/537.36"
+    "Chrome/126.0.0.0 Mobile Safari/537.36"
 
+// Langsung ke Studio. Jika belum login, TikTok otomatis redirect ke Login.
 private const val URL_STUDIO = "https://www.tiktok.com/tiktokstudio/upload"
-private const val URL_LOGIN  = "https://www.tiktok.com/login"
-private const val URL_HOME   = "https://www.tiktok.com"
 
-// JS: fix minimal — hanya hapus tanda WebView
-private val JS_SPOOF = """
-(function() {
-    try { if (window.Android) delete window.Android; } catch(e) {}
-})();
-""".trimIndent()
-
-// JS: Sembunyikan header & sidebar khusus di TikTok Studio
-private val JS_HIDE_ELEMENTS = """
-(function() {
-    try {
-        ['header','[class*="sidebar"]','.side-nav'].forEach(function(sel) {
-            var el = document.querySelector(sel);
-            if (el) el.style.display = 'none';
-        });
-    } catch(e) {}
-})();
-""".trimIndent()
-
-// JS: cek cookie login lalu redirect ke studio
-private val JS_CHECK_LOGIN = """
-(function() {
-    var cookies = document.cookie;
-    var loggedIn = cookies.indexOf('sid_guard') !== -1 ||
-                   cookies.indexOf('uid_tt')    !== -1 ||
-                   cookies.indexOf('sessionid') !== -1;
-    if (loggedIn) {
-        window.location.href = '$URL_STUDIO';
-    }
-})();
-""".trimIndent()
-
-// JS: auto-click file input
-private val JS_AUTO_CLICK = """
+// JS: auto-click file input setelah halaman Studio selesai dimuat
+private const val JS_AUTO_CLICK = """
 (function() {
     var tries = 0;
     var t = setInterval(function() {
         tries++;
         var fi = document.querySelector('input[type="file"]');
-        if (fi || tries > 20) {
-            clearInterval(t);
-            if (fi) fi.click();
-        }
+        if (fi) { clearInterval(t); fi.click(); return; }
+        if (tries > 15) clearInterval(t);
     }, 800);
 })();
-""".trimIndent()
+"""
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TikTokScreen() {
     var isLoading by remember { mutableStateOf(true) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
 
-                    // ── Rendering ──────────────────────────────────────────
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                     setBackgroundColor(android.graphics.Color.WHITE)
 
-                    // ── Cookie: WAJIB aktif sebelum loadUrl ────────────────
-                    val cookieManager = CookieManager.getInstance()
-                    cookieManager.setAcceptCookie(true)
-                    cookieManager.setAcceptThirdPartyCookies(this, true) // this = WebView ✓
+                    // Cookie — wajib diaktifkan sebelum loadUrl
+                    CookieManager.getInstance().apply {
+                        setAcceptCookie(true)
+                        setAcceptThirdPartyCookies(this@apply, true)
+                    }
 
-                    // ── Settings ───────────────────────────────────────────
                     settings.apply {
-                        javaScriptEnabled                    = true
-                        domStorageEnabled                    = true
-                        databaseEnabled                      = true
-                        allowFileAccess                      = true
-                        allowContentAccess                   = true
-                        mixedContentMode                     = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        javaScriptCanOpenWindowsAutomatically = true
-                        mediaPlaybackRequiresUserGesture     = false
-                        userAgentString                      = UA_MOBILE
-                        loadWithOverviewMode                 = false
-                        useWideViewPort                      = false
-                        setSupportZoom(false)
-                        builtInZoomControls                  = false
-                        displayZoomControls                  = false
-                        cacheMode                            = WebSettings.LOAD_DEFAULT
-
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        databaseEnabled = true
+                        allowFileAccess = true
+                        allowContentAccess = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        userAgentString = UA_MOBILE
+                        // Mobile mode: tidak perlu zoom / wideViewPort
+                        loadWithOverviewMode = false
+                        useWideViewPort = false
+                        setSupportZoom(true)
+                        builtInZoomControls = true
+                        displayZoomControls = false
+                        cacheMode = WebSettings.LOAD_DEFAULT
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                             safeBrowsingEnabled = false
                         }
                     }
 
-                    // ── WebViewClient ──────────────────────────────────────
                     webViewClient = object : WebViewClient() {
-
                         override fun shouldOverrideUrlLoading(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): Boolean = false // Semua URL tetap di WebView
+                            view: WebView?, request: WebResourceRequest?
+                        ): Boolean = false // Tetap di dalam WebView
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isLoading = false
 
-                            // Selalu inject spoof dulu di setiap halaman
-                            view?.evaluateJavascript(JS_SPOOF, null)
-
-                            when {
-                                // Sudah di Studio — sembunyikan elemen mengganggu & inject auto-click kalau ada video
-                                url?.contains("tiktokstudio") == true -> {
-                                    view?.evaluateJavascript(JS_HIDE_ELEMENTS, null)
-                                    if (SharedUploadState.processedVideoUri != null) {
-                                        view?.evaluateJavascript(JS_AUTO_CLICK, null)
-                                    }
-                                }
-
-                                // Di halaman TikTok biasa (home/explore) — cek login lalu redirect
-                                url?.contains("tiktok.com") == true &&
-                                url.contains("tiktokstudio").not() &&
-                                url.contains("login").not() -> {
-                                    view?.evaluateJavascript(JS_CHECK_LOGIN, null)
-                                }
-
-                                // Di halaman login — biarkan user login, setelah itu
-                                // onPageFinished akan fire lagi dengan URL baru
-                                url?.contains("login") == true -> { /* tunggu user login */ }
+                            // Hanya inject auto-click saat sudah di halaman Studio
+                            if (url?.contains("tiktokstudio") == true &&
+                                SharedUploadState.processedVideoUri != null) {
+                                view?.evaluateJavascript(JS_AUTO_CLICK, null)
                             }
-
-                            android.util.Log.d("KytheraWebView", "onPageFinished: $url")
-                        }
-
-                        @Suppress("DEPRECATION")
-                        override fun onReceivedError(
-                            view: WebView?,
-                            errorCode: Int,
-                            description: String?,
-                            failingUrl: String?
-                        ) {
-                            super.onReceivedError(view, errorCode, description, failingUrl)
-                            android.util.Log.e("KytheraWebView", "Error $errorCode: $description | $failingUrl")
                         }
                     }
 
-                    // ── WebChromeClient ────────────────────────────────────
                     webChromeClient = object : WebChromeClient() {
-
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            super.onProgressChanged(view, newProgress)
-                            // Sembunyikan loading indicator setelah 80%+
-                            if (newProgress >= 80) isLoading = false
+                            if (newProgress >= 90) isLoading = false
                         }
 
                         override fun onShowFileChooser(
@@ -193,31 +113,25 @@ fun TikTokScreen() {
                         ): Boolean {
                             val uri = SharedUploadState.processedVideoUri
                             return if (uri != null) {
-                                // Injeksi URI video patch langsung ke form upload TikTok
                                 filePathCallback?.onReceiveValue(arrayOf(uri))
                                 SharedUploadState.processedVideoUri = null
                                 true
                             } else {
-                                // Batalkan — tidak ada video patch
                                 filePathCallback?.onReceiveValue(null)
                                 true
                             }
                         }
                     }
 
-                    // ── Load: Langsung ke TikTok Studio ──
-                    // Jika belum login, TikTok otomatis melempar ke halaman Login.
-                    // Setelah sukses login, jika nyasar ke Home, JS_CHECK_LOGIN akan melempar kembali ke Studio.
                     loadUrl(URL_STUDIO)
                 }
             }
         )
 
-        // Loading indicator sementara halaman belum siap
         if (isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
-                color = Color(0xFF00E5A0) // Kythera green mint
+                color = Color(0xFF00E5A0)
             )
         }
     }
