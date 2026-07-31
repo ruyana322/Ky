@@ -427,7 +427,7 @@ object Mp4Patcher {
         val oldMdatPayload = data.copyOfRange(mdat.contentStart, mdat.end)
         
         val newMdatPayloadStart = ftyp.size + moovPlaceholder.size + preservedBytes.size + 8
-        var delta = newMdatPayloadStart - oldMdatPayloadStart
+        var delta = (newMdatPayloadStart - oldMdatPayloadStart).toInt()
         var fakeOffset = newMdatPayloadStart.toLong() + oldMdatPayload.size.toLong()
 
         var finalReplacements = fixedReplacements.toMutableMap()
@@ -435,7 +435,7 @@ object Mp4Patcher {
 
         var moovNew = rebuildBox(moov, finalReplacements)
         val recalculatedMdatPayloadStart = ftyp.size + moovNew.size + preservedBytes.size + 8
-        delta = recalculatedMdatPayloadStart - oldMdatPayloadStart
+        delta = (recalculatedMdatPayloadStart - oldMdatPayloadStart).toInt()
         fakeOffset = recalculatedMdatPayloadStart.toLong() + oldMdatPayload.size.toLong()
 
         finalReplacements = fixedReplacements.toMutableMap()
