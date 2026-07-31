@@ -59,10 +59,9 @@ fun TikTokScreen() {
                     setBackgroundColor(android.graphics.Color.WHITE)
 
                     // Cookie — wajib diaktifkan sebelum loadUrl
-                    CookieManager.getInstance().apply {
-                        setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(this@apply, true)
-                    }
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.setAcceptCookie(true)
+                    cookieManager.setAcceptThirdPartyCookies(this, true) // this = WebView
 
                     settings.apply {
                         javaScriptEnabled = true
