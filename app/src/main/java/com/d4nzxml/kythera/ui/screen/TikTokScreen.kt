@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -24,7 +23,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TikTokScreen() {
-    // ✅ DIPERBAIKI: pakai .value langsung, TANPA "by" delegasi
+    // ✅ Menggunakan .value langsung, TANPA "by" delegasi
     val isLoading = remember { mutableStateOf(true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -58,7 +57,7 @@ fun TikTokScreen() {
                         // User-Agent desktop → TikTok kasih versi Studio
                         userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
                         
-                        // Biarkan halaman muncul dulu
+                        // Biarkan halaman muncul dulu & setelan untuk desktop view
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         setSupportZoom(true)
@@ -81,14 +80,28 @@ fun TikTokScreen() {
                             super.onPageFinished(view, url)
                             isLoading.value = false // ✅ pakai .value
 
-                            // Paksa scroll berfungsi
+                            // ✅ Injeksi JS untuk memaksa ukuran kanvas jadi 1200px (Desktop)
+                            // Supaya tidak acak-acakan di layar sempit
                             view?.evaluateJavascript("""
                                 (function(){
+                                    // 1. Modifikasi atau tambahkan meta viewport
+                                    var meta = document.querySelector('meta[name="viewport"]');
+                                    if (meta) {
+                                        meta.setAttribute('content', 'width=1200');
+                                    } else {
+                                        meta = document.createElement('meta');
+                                        meta.name = 'viewport';
+                                        meta.content = 'width=1200';
+                                        document.head.appendChild(meta);
+                                    }
+
+                                    // 2. Paksa ukuran body dan overflow
+                                    document.body.style.width = '1200px';
                                     document.body.style.overflow = 'auto';
                                     document.documentElement.style.overflow = 'auto';
                                     document.body.style.touchAction = 'pan-x pan-y';
-                                    document.body.style.minWidth = '100%';
                                     
+                                    // 3. Auto-click file upload
                                     if (window.location.href.indexOf('tiktokstudio') !== -1) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
