@@ -300,7 +300,7 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
                                         val realPath = PathUtils.getPath(context, selectedVideoUri!!) ?: return@launch
                                         val res = ffmpegService.applyFakeSample(realPath)
                                         if (res.success) {
-                                            val outUri = FileProvider.getUriForFile(context, "${context.packageName}.provider", File(res.outputPath))
+                                            val outUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(res.outputPath))
                                             SharedUploadState.processedVideoUri = outUri
                                             showUploadDialog = false
                                             isProcessing = false
@@ -331,7 +331,7 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
                                             processProgress = prog
                                         }
                                         if (res.success) {
-                                            val outUri = FileProvider.getUriForFile(context, "${context.packageName}.provider", File(res.outputPath))
+                                            val outUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(res.outputPath))
                                             SharedUploadState.processedVideoUri = outUri
                                             showUploadDialog = false
                                             isProcessing = false
