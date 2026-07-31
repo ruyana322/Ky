@@ -23,6 +23,7 @@ fun TikTokScreen() {
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             WebView(ctx).apply {
+                setBackgroundColor(android.graphics.Color.parseColor("#121212")) // Background gelap
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
