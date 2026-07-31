@@ -24,7 +24,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TikTokScreen() {
-    var isLoading by remember { mutableStateOf(true) }
+    // ✅ DIPERBAIKI: pakai .value langsung, TANPA "by" delegasi
+    val isLoading = remember { mutableStateOf(true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
 
@@ -33,15 +34,15 @@ fun TikTokScreen() {
             factory = { ctx ->
                 WebView(ctx).apply {
 
-                    // ✅ Pengaturan dasar — biarkan halaman muncul duluan
+                    // Scroll penuh segala arah
                     isVerticalScrollBarEnabled = true
                     isHorizontalScrollBarEnabled = true
                     scrollBarStyle = WebView.SCROLLBARS_INSIDE_OVERLAY
                     overScrollMode = WebView.OVER_SCROLL_ALWAYS
                     setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
-                    setBackgroundColor(android.graphics.Color.parseColor("#FFFFFF")) // Putih sementara sampai halaman muncul
+                    setBackgroundColor(android.graphics.Color.parseColor("#FFFFFF"))
 
-                    // ✅ Cookie — benar & aman
+                    // Cookie — benar & aman
                     val cm = CookieManager.getInstance()
                     cm.setAcceptCookie(true)
                     cm.setAcceptThirdPartyCookies(this, true)
@@ -54,10 +55,10 @@ fun TikTokScreen() {
                         allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-                        // ✅ User-Agent desktop — biar TikTok kasih versi Studio
+                        // User-Agent desktop → TikTok kasih versi Studio
                         userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
                         
-                        // ✅ JANGAN paksa lebar — biarkan halaman render dulu
+                        // Biarkan halaman muncul dulu
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         setSupportZoom(true)
@@ -71,7 +72,6 @@ fun TikTokScreen() {
                     }
 
                     webViewClient = object : WebViewClient() {
-                        // ✅ Hilangkan favicon — ini penyebab halaman kosong!
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?
@@ -79,20 +79,16 @@ fun TikTokScreen() {
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            isLoading = false
+                            isLoading.value = false // ✅ pakai .value
 
-                            // ✅ TUNGGU halaman muncul dulu, baru atur scroll & lebar
+                            // Paksa scroll berfungsi
                             view?.evaluateJavascript("""
                                 (function(){
-                                    // Scroll bebas segala arah
                                     document.body.style.overflow = 'auto';
                                     document.documentElement.style.overflow = 'auto';
                                     document.body.style.touchAction = 'pan-x pan-y';
-                                    
-                                    // Lebar cukup untuk sidebar + konten
                                     document.body.style.minWidth = '100%';
                                     
-                                    // Auto klik file
                                     if (window.location.href.indexOf('tiktokstudio') !== -1) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
@@ -107,7 +103,7 @@ fun TikTokScreen() {
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            isLoading = newProgress < 90
+                            isLoading.value = newProgress < 90 // ✅ pakai .value
                         }
 
                         override fun onShowFileChooser(
@@ -127,13 +123,12 @@ fun TikTokScreen() {
                         }
                     }
 
-                    // ✅ Muat halaman
                     loadUrl("https://www.tiktok.com/tiktokstudio/upload")
                 }
             }
         )
 
-        if (isLoading) {
+        if (isLoading.value) { // ✅ pakai .value
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
                 color = Color(0xFF00E5A0)
