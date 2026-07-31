@@ -239,7 +239,7 @@ class FfmpegService(private val context: Context) {
     // ─── 4. FAKE SAMPLE (Bypass Duplicate / FYP TikTok) ──────────────────────
     suspend fun applyFakeSample(inputPath: String): FfmpegResult = withContext(Dispatchers.IO) {
         val ts = System.currentTimeMillis()
-        val outputPath = tempPath("Kythera_Fakesample_$ts.mp4")
+        val outputPath = tempPath("Kythera_Kece_$ts.mp4")
         
         try {
             // Membaca seluruh file ke dalam memory (aman karena largeHeap=true)

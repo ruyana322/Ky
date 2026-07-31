@@ -61,6 +61,12 @@ fun TikTokScreen() {
                                 newMeta.content = 'width=1024, initial-scale=0.3, maximum-scale=5.0, user-scalable=yes';
                                 document.head.appendChild(newMeta);
                                 
+                                // Paksa warna background TikTok menjadi transparan agar background gelap kita terlihat, & paksa tinggi 100vh
+                                var css = 'html, body, #root, #app { min-height: 100vh !important; background-color: transparent !important; }';
+                                var style = document.createElement('style');
+                                style.appendChild(document.createTextNode(css));
+                                document.head.appendChild(style);
+                                
                                 try {
                                     var header = document.querySelector('header');
                                     if (header) header.style.display = 'none';
