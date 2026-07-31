@@ -44,15 +44,8 @@ private val JS_SPOOF = """
         if (m) m.remove();
         var nm = document.createElement('meta');
         nm.name    = 'viewport';
-        nm.content = 'width=1024, initial-scale=0.3, maximum-scale=5.0, user-scalable=yes';
+        nm.content = 'width=1440, initial-scale=0.1, maximum-scale=5.0, user-scalable=yes';
         document.head.appendChild(nm);
-    } catch(e) {}
-
-    // Perbaikan layar terpotong (Pastikan kontainer membentang ke bawah)
-    try {
-        var s = document.createElement('style');
-        s.textContent = 'html,body,#root,#app{min-height:100vh!important; width:100%!important;}';
-        document.head.appendChild(s);
     } catch(e) {}
 })();
 """.trimIndent()
