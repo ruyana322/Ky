@@ -29,6 +29,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import java.io.File
+import kotlinx.coroutines.launch
+import com.d4nzxml.kythera.service.FfmpegService
+import com.arthenica.ffmpegkit.FFmpegKitConfig
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COLORS — Dark futuristic glassmorphism (consistent dengan Kythera)
@@ -112,11 +117,15 @@ fun UploadPrepareScreen(
     var izinKomentar by remember { mutableStateOf(true) }
     var izinDuet by remember { mutableStateOf(false) }
     var tambahLokasi by remember { mutableStateOf(false) }
+    var gunakanFakesample by remember { mutableStateOf(true) }
 
     var showSuccessSnackbar by remember { mutableStateOf(false) }
     var snackbarMessage by remember { mutableStateOf("") }
+    var isProcessing by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val ffmpegService = remember { FfmpegService(context) }
 
     // ── Background gradient ─────────────────────────────────────────────
     Box(
@@ -283,6 +292,8 @@ fun UploadPrepareScreen(
                     KyToggleRow("Izinkan duet & jahit", izinDuet) { izinDuet = it }
                     KyDivider()
                     KyToggleRow("Tambah lokasi", tambahLokasi) { tambahLokasi = it }
+                    KyDivider()
+                    KyToggleRow("Gunakan Fakesample (Anti-Duplikat)", gunakanFakesample) { gunakanFakesample = it }
                 }
             }
 
@@ -316,26 +327,56 @@ fun UploadPrepareScreen(
             // Tombol utama: Unggah ke TikTok
             Button(
                 onClick = {
+                    if (isProcessing) return@Button
                     val caption = buildCaption(judulVideo, deskripsi, hashtag)
                     copyToClipboard(context, caption)
-                    shareVideoToTikTok(context, videoUri, caption)
-                    snackbarMessage = "Caption disalin! Paste di TikTok Studio ✓"
-                    showSuccessSnackbar = true
+                    
+                    if (gunakanFakesample) {
+                        isProcessing = true
+                        snackbarMessage = "Menerapkan fakesample (Anti-Duplikat)..."
+                        showSuccessSnackbar = true
+                        
+                        scope.launch {
+                            val inputPath = FFmpegKitConfig.getSafParameterForRead(context, videoUri)
+                            val result = ffmpegService.applyFakeSample(inputPath)
+                            isProcessing = false
+                            
+                            if (result.success) {
+                                val newVideoUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(result.outputPath))
+                                shareVideoToTikTok(context, newVideoUri, caption)
+                                snackbarMessage = "Fakesample berhasil! Buka TikTok..."
+                            } else {
+                                shareVideoToTikTok(context, videoUri, caption)
+                                snackbarMessage = "Fakesample gagal, mengirim video asli..."
+                            }
+                            showSuccessSnackbar = true
+                        }
+                    } else {
+                        shareVideoToTikTok(context, videoUri, caption)
+                        snackbarMessage = "Caption disalin! Buka TikTok..."
+                        showSuccessSnackbar = true
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentPurple
+                    containerColor = if (isProcessing) AccentPurple.copy(alpha = 0.5f) else AccentPurple
                 )
             ) {
-                Text(
-                    text = "🚀 Unggah ke TikTok",
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                if (isProcessing) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Memproses...", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Text(
+                        text = "🚀 Unggah ke TikTok",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             // Tombol sekunder: Salin Caption saja

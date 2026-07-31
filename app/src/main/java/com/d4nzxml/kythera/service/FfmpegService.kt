@@ -180,6 +180,20 @@ class FfmpegService(private val context: Context) {
         }
     }
     
+    // ─── Eksekusi Biasa ──────────────────────────────────────────────────────
+    private fun executeCommand(
+        cmd: String,
+        outputPath: String
+    ): FfmpegResult {
+        val session = FFmpegKit.execute(cmd)
+        return if (ReturnCode.isSuccess(session.returnCode)) {
+            FfmpegResult(success = true, outputPath = outputPath)
+        } else {
+            val tail = session.logs.takeLast(10).joinToString("\n") { it.message }
+            FfmpegResult(success = false, errorMessage = tail)
+        }
+    }
+    
     // ─── Executor Baru (Untuk Realtime 1-100%) ──────────────────────────────
     private fun executeWithPercentage(
         cmd: String,
@@ -218,6 +232,27 @@ class FfmpegService(private val context: Context) {
         } else {
             val logs = session.allLogsAsString ?: "No logs"
             val tail = if (logs.length > 200) logs.takeLast(200) else logs
+            FfmpegResult(success = false, errorMessage = tail)
+        }
+    }
+
+    // ─── 4. FAKE SAMPLE (Bypass Duplicate / FYP TikTok) ──────────────────────
+    suspend fun applyFakeSample(inputPath: String): FfmpegResult = withContext(Dispatchers.IO) {
+        val ts = System.currentTimeMillis()
+        val outputPath = tempPath("Kythera_Fakesample_$ts.mp4")
+        
+        // Buat UUID acak supaya MD5 hash video selalu berubah 100% unik
+        val randomHash = java.util.UUID.randomUUID().toString().substring(0, 8)
+        
+        // Menggunakan -c copy agar prosesnya instan (tidak re-encode video/audio)
+        // Menambahkan metadata acak + faststart agar ramah web
+        val cmd = "-y -i \"$inputPath\" -c copy -metadata comment=\"KyFk_$randomHash\" -metadata description=\"Bypass_$ts\" -movflags +faststart \"$outputPath\""
+        
+        val session = FFmpegKit.execute(cmd)
+        if (ReturnCode.isSuccess(session.returnCode)) {
+            FfmpegResult(success = true, outputPath = outputPath)
+        } else {
+            val tail = session.logs.takeLast(10).joinToString("\n") { it.message }
             FfmpegResult(success = false, errorMessage = tail)
         }
     }
