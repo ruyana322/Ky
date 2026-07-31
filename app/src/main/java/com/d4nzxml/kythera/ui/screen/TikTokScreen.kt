@@ -539,17 +539,22 @@ private fun shareVideoToTikTok(context: Context, videoUri: Uri) {
         type = "video/mp4"
         putExtra(Intent.EXTRA_STREAM, videoUri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        setPackage("com.zhiliaoapp.musically") // TikTok package
+        setPackage("com.zhiliaoapp.musically") // TikTok package Global
     }
-
-    // Fallback ke chooser kalau TikTok ga ada
-    val chooser = Intent.createChooser(shareIntent, "Bagikan ke TikTok")
-    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     try {
         context.startActivity(shareIntent)
     } catch (e: Exception) {
-        // TikTok tidak terinstall, fallback ke chooser
+        // TikTok tidak terinstall atau beda package (misal: TikTok Asia com.ss.android.ugc.trill)
+        // Fallback ke chooser TANPA batasan package
+        val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_STREAM, videoUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(fallbackIntent, "Bagikan ke TikTok")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        
         try {
             context.startActivity(chooser)
         } catch (_: Exception) {}
