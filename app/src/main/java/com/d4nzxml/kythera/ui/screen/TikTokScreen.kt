@@ -38,6 +38,7 @@ fun TikTokScreen() {
                     setSupportZoom(true)
                     builtInZoomControls = true
                     displayZoomControls = false
+                    layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
                 }
 
                 webViewClient = object : WebViewClient() {
@@ -51,6 +52,14 @@ fun TikTokScreen() {
                         // Injeksi Javascript: Auto-click upload & Sembunyikan elemen mengganggu
                         val js = """
                             javascript:(function() {
+                                // Paksa hapus batasan Zoom dari TikTok
+                                var meta = document.querySelector('meta[name="viewport"]');
+                                if (meta) { meta.remove(); }
+                                var newMeta = document.createElement('meta');
+                                newMeta.name = 'viewport';
+                                newMeta.content = 'width=1024, initial-scale=0.3, maximum-scale=5.0, user-scalable=yes';
+                                document.head.appendChild(newMeta);
+                                
                                 try {
                                     var header = document.querySelector('header');
                                     if (header) header.style.display = 'none';
