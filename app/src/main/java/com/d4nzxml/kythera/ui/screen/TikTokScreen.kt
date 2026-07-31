@@ -586,7 +586,8 @@ private fun shareVideoToTikTok(context: Context, videoUri: Uri, caption: String)
         val pkgName = resolveInfo.activityInfo.packageName.lowercase()
         if (pkgName.contains("zhiliaoapp.musically") || 
             pkgName.contains("ugc.trill") || 
-            pkgName.contains("tiktok.studio")) {
+            pkgName.contains("tiktok.studio") ||
+            pkgName.contains("tt.creator")) {
             targetPackage = resolveInfo.activityInfo.packageName
             break
         }
