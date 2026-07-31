@@ -23,30 +23,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.viewinterop.AndroidView
 
-private const val UA_DESKTOP =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+// User Agent Mobile Chrome Android — TikTok akan render versi mobile yang pas di layar HP
+private const val UA_MOBILE =
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) " +
     "AppleWebKit/537.36 (KHTML, like Gecko) " +
-    "Chrome/126.0.0.0 Safari/537.36"
+    "Chrome/126.0.0.64 Mobile Safari/537.36"
 
 private const val URL_STUDIO = "https://www.tiktok.com/tiktokstudio/upload"
 private const val URL_LOGIN  = "https://www.tiktok.com/login"
 private const val URL_HOME   = "https://www.tiktok.com"
 
-// JS: Fix viewport agar bisa dizoom
+// JS: fix minimal — hanya hapus tanda WebView
 private val JS_SPOOF = """
 (function() {
-    // Hapus tanda WebView
     try { if (window.Android) delete window.Android; } catch(e) {}
-
-    // Fix viewport TikTok
-    try {
-        var m = document.querySelector('meta[name="viewport"]');
-        if (m) m.remove();
-        var nm = document.createElement('meta');
-        nm.name    = 'viewport';
-        nm.content = 'width=1440, initial-scale=0.1, maximum-scale=5.0, user-scalable=yes';
-        document.head.appendChild(nm);
-    } catch(e) {}
 })();
 """.trimIndent()
 
@@ -123,13 +113,12 @@ fun TikTokScreen() {
                         mixedContentMode                     = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         javaScriptCanOpenWindowsAutomatically = true
                         mediaPlaybackRequiresUserGesture     = false
-                        userAgentString                      = UA_DESKTOP
-                        loadWithOverviewMode                 = true
-                        useWideViewPort                      = true
-                        setSupportZoom(true)
-                        builtInZoomControls                  = true
+                        userAgentString                      = UA_MOBILE
+                        loadWithOverviewMode                 = false
+                        useWideViewPort                      = false
+                        setSupportZoom(false)
+                        builtInZoomControls                  = false
                         displayZoomControls                  = false
-                        layoutAlgorithm                      = WebSettings.LayoutAlgorithm.NORMAL
                         cacheMode                            = WebSettings.LOAD_DEFAULT
 
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
