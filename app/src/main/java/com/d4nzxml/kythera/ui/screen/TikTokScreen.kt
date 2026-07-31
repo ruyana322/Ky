@@ -34,9 +34,13 @@ fun TikTokScreen() {
             factory = { ctx ->
                 WebView(ctx).apply {
 
-                    // Hardware rendering
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    setBackgroundColor(android.graphics.Color.parseColor("#121212")) // Warna gelap agar ruang kosong tidak putih
+                    // ✅ Aktifkan scroll penuh & perbaiki rendering
+                    setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
+                    setBackgroundColor(android.graphics.Color.parseColor("#121212"))
+                    isVerticalScrollBarEnabled = true
+                    isHorizontalScrollBarEnabled = true
+                    scrollBarStyle = WebView.SCROLLBARS_INSIDE_OVERLAY
+                    overScrollMode = WebView.OVER_SCROLL_ALWAYS // Bisa tarik ke bawah/atas
 
                     // Cookie
                     val cm = CookieManager.getInstance()
@@ -51,19 +55,21 @@ fun TikTokScreen() {
                         allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-                        // Desktop UA — TikTok Studio hanya ada di versi desktop
+                        // ✅ Lebar viewport sesuai layar HP tapi render versi desktop
                         userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                             "AppleWebKit/537.36 (KHTML, like Gecko) " +
                             "Chrome/126.0.0.0 Safari/537.36"
 
-                        // Wide viewport agar seluruh halaman desktop ter-render
-                        loadWithOverviewMode = true
+                        // ✅ Perbaiki ukuran agar konten tidak terpotong
+                        loadWithOverviewMode = false // ❗ JANGAN auto-skala, biar penuh
                         useWideViewPort = true
-
-                        // Zoom support agar user bisa pinch-to-zoom
                         setSupportZoom(true)
                         builtInZoomControls = true
                         displayZoomControls = false
+
+                        // ✅ Set lebar minimal agar versi desktop muat & bisa digeser
+                        minimumFontSize = 12
+                        defaultFontSize = 16
 
                         cacheMode = WebSettings.LOAD_DEFAULT
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -81,19 +87,36 @@ fun TikTokScreen() {
                             super.onPageFinished(view, url)
                             isLoading = false
 
-                            // Auto-click file input hanya saat di Studio dan ada video
-                            if (url?.contains("tiktokstudio") == true &&
-                                SharedUploadState.processedVideoUri != null) {
-                                view?.evaluateJavascript("""
-                                    (function() {
+                            // ✅ Paksa scroll berfungsi & hilangkan pembatasan TikTok
+                            view?.evaluateJavascript("""
+                                (function(){
+                                    // Izinkan scroll di semua arah
+                                    document.body.style.overflow = 'auto';
+                                    document.documentElement.style.overflow = 'auto';
+                                    document.body.style.width = 'max-content';
+                                    document.body.style.minWidth = '1200px'; // Lebar desktop
+                                    
+                                    // Paksa scrollbar muncul
+                                    document.body.style.overflowY = 'scroll';
+                                    document.body.style.overflowX = 'scroll';
+                                    
+                                    // Hapus pembatasan tinggi
+                                    document.documentElement.style.height = 'auto';
+                                    document.body.style.height = 'auto';
+                                    
+                                    // Nonaktifkan blokir sentuhan
+                                    document.body.style.touchAction = 'pan-x pan-y';
+                                    
+                                    // Auto pilih file kalau sudah siap
+                                    if (window.location.href.indexOf('tiktokstudio') !== -1) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
                                             if (fi) { clearInterval(t); fi.click(); }
                                         }, 800);
                                         setTimeout(function(){ clearInterval(t); }, 15000);
-                                    })();
-                                """.trimIndent(), null)
-                            }
+                                    }
+                                })();
+                            """.trimIndent(), null)
                         }
                     }
 
@@ -119,7 +142,6 @@ fun TikTokScreen() {
                         }
                     }
 
-                    // Langsung ke Studio. Jika belum login, TikTok redirect ke Login otomatis.
                     loadUrl("https://www.tiktok.com/tiktokstudio/upload")
                 }
             }
