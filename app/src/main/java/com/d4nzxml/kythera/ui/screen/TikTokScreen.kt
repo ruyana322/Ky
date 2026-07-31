@@ -523,7 +523,8 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 // 🔥 Critical JS: Anti-Zoom (Lebih Aman), Desktop Fix & Sembunyikan Elemen Luar TikTok
 private val JS_CRITICAL = """
     (function() {
-        var vpContent = 'width=1280, user-scalable=no';
+        // 🔥 Ubah viewport supaya tidak sekecil 1280px, sehingga form bisa terlihat lebih jelas di mobile
+        var vpContent = 'width=1024, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes';
         var meta = document.querySelector('meta[name="viewport"]');
         
         if (meta) { 
@@ -536,45 +537,54 @@ private val JS_CRITICAL = """
         }
         
         // 🔥 INJEKSI CSS:
-        // 1. Anti-zoom untuk input.
-        // 2. Sembunyikan header, sidebar, footer, dan promo TikTok (SELECTOR MENGAMANKAN FORM UPLOAD).
         var style = document.createElement('style');
         style.innerHTML = `
-            /* Anti-Zoom Fix */
+            /* Anti-Zoom Fix & Background Adjust */
             input, textarea, [contenteditable] { font-size: 16px !important; }
-            
-            /* --- CATATAN SELECTOR YANG DISEMBUNYIKAN --- */
-            /* Header TikTok: sering pakai tag <header> atau class yg ada kata Header/header */
-            header, [class*="Header"], [class*="header"], [data-e2e="upload-header"], #header { 
-                display: none !important; 
-            }
-            
-            /* Sidebar / Navigasi Situs: sering pakai tag <nav>, <aside> atau class Sidebar/SideNav */
-            nav, aside, [class*="SideNav"], [class*="sidebar"], [class*="side-nav"] { 
-                display: none !important; 
-            }
-            
-            /* Footer TikTok */
-            footer, [class*="Footer"], [class*="footer"] { 
-                display: none !important; 
-            }
-            
-            /* Banner Promosi / Download App */
-            [class*="Promo"], [class*="Banner"], [class*="download-app"] { 
-                display: none !important; 
-            }
-
-            /* Memaksa kontainer form upload memenuhi layar WebView (kartu putih) */
-            main, [class*="LayoutContainer"], [class*="MainLayout"], #root, body {
-                width: 100% !important;
-                max-width: 100% !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                min-width: 100% !important;
-                background-color: #FFFFFF !important;
-            }
+            body, html, #root, #app { background-color: #F8FAFC !important; overflow-x: hidden !important; }
         `;
         document.head.appendChild(style);
+
+        // 🔥 INJEKSI JS AGRESIF: Sembunyikan elemen berulang kali karena TikTok pakai React yang sering re-render
+        setInterval(function() {
+            try {
+                // Sembunyikan Header, Sider, Footer, Promo berdasarkan class name yang umum di TikTok Studio
+                var allDivs = document.querySelectorAll('div, header, nav, aside, footer');
+                for (var i = 0; i < allDivs.length; i++) {
+                    var el = allDivs[i];
+                    var cn = (el.className || '').toString().toLowerCase();
+                    
+                    // Filter elemen pengganggu
+                    if (
+                        el.tagName.toLowerCase() === 'header' || 
+                        el.tagName.toLowerCase() === 'nav' || 
+                        el.tagName.toLowerCase() === 'aside' || 
+                        el.tagName.toLowerCase() === 'footer' ||
+                        cn.includes('layout-header') || 
+                        cn.includes('layout-sider') || 
+                        cn.includes('tiktok-sider') || 
+                        cn.includes('tiktok-header') ||
+                        cn.includes('side-nav') ||
+                        cn.includes('promo-banner') ||
+                        cn.includes('capcut') ||
+                        cn.includes('header-container')
+                    ) {
+                        // Jangan sembunyikan jika elemen ini adalah container konten / form utama
+                        if (!cn.includes('content') && !cn.includes('upload') && !cn.includes('main')) {
+                            el.style.setProperty('display', 'none', 'important');
+                        }
+                    }
+
+                    // Lebarkan kontainer utama agar pas di layar (menghilangkan sisa margin dari sidebar)
+                    if (cn.includes('layout-content') || cn.includes('main-layout') || cn.includes('page-container')) {
+                        el.style.setProperty('margin', '0', 'important');
+                        el.style.setProperty('padding', '0', 'important');
+                        el.style.setProperty('min-width', '100%', 'important');
+                        el.style.setProperty('width', '100%', 'important');
+                    }
+                }
+            } catch(e) {}
+        }, 500);
     })();
 
     (function() {
