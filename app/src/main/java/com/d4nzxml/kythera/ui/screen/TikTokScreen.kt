@@ -34,7 +34,7 @@ fun TikTokScreen() {
             factory = { ctx ->
                 WebView(ctx).apply {
 
-                    // ✅ PENTING: Matikan pembatasan scroll
+                    // ✅ Scroll penuh segala arah
                     isVerticalScrollBarEnabled = true
                     isHorizontalScrollBarEnabled = true
                     scrollBarStyle = WebView.SCROLLBARS_INSIDE_OVERLAY
@@ -42,11 +42,10 @@ fun TikTokScreen() {
                     setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
                     setBackgroundColor(android.graphics.Color.parseColor("#121212"))
 
-                    // Cookie
-                    CookieManager.getInstance().apply {
-                        setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(this@apply, true)
-                    }
+                    // ✅ Cookie — DIPERBAIKI: tidak salah parameter lagi
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.setAcceptCookie(true)
+                    cookieManager.setAcceptThirdPartyCookies(this, true)
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -56,18 +55,13 @@ fun TikTokScreen() {
                         allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-                        // ✅ KUNCI UTAMA: UA desktop + lebar viewport dipaksa 1280px
+                        // ✅ Versi desktop + lebar tetap 1280px
                         userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                        
-                        // ✅ JANGAN AUTO SKALA — biarkan penuh ukuran desktop
                         loadWithOverviewMode = false
                         useWideViewPort = true
-                        
-                        // ✅ Lebar viewport dipaksa 1280px agar muat seluruh halaman
                         setSupportZoom(true)
                         builtInZoomControls = true
                         displayZoomControls = false
-                        defaultZoom = WebSettings.ZoomDensity.FAR // = 100% ukuran asli
 
                         cacheMode = WebSettings.LOAD_DEFAULT
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -81,8 +75,9 @@ fun TikTokScreen() {
                             request: WebResourceRequest?
                         ): Boolean = false
 
-                        override fun onPageStarted(view: WebView?, url: String?) {
-                            super.onPageStarted(view, url)
+                        // ✅ onPageStarted — tanda fungsi DIPERBAIKI
+                        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
                             isLoading = true
                         }
 
@@ -90,10 +85,9 @@ fun TikTokScreen() {
                             super.onPageFinished(view, url)
                             isLoading = false
 
-                            // ✅ Paksa lebar & scroll — ini yang paling penting
+                            // ✅ Paksa lebar 1280px & scroll berfungsi
                             view?.evaluateJavascript("""
                                 (function(){
-                                    // 1. Hapus pembatasan lebar & scroll TikTok
                                     document.documentElement.style.width = '1280px';
                                     document.documentElement.style.minWidth = '1280px';
                                     document.body.style.width = '1280px';
@@ -102,12 +96,9 @@ fun TikTokScreen() {
                                     document.body.style.overflowY = 'auto';
                                     document.documentElement.style.overflowX = 'scroll';
                                     document.documentElement.style.overflowY = 'auto';
-                                    
-                                    // 2. Aktifkan sentuhan geser segala arah
                                     document.body.style.touchAction = 'pan-x pan-y';
                                     document.body.style.position = 'static';
                                     
-                                    // 3. Hapus elemen yang blokir scroll
                                     var style = document.createElement('style');
                                     style.innerHTML = `
                                         html, body {
@@ -121,7 +112,6 @@ fun TikTokScreen() {
                                     `;
                                     document.head.appendChild(style);
                                     
-                                    // 4. Auto klik pilih file kalau sudah siap
                                     if (url.indexOf('tiktokstudio') !== -1) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
