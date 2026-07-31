@@ -32,22 +32,10 @@ private const val URL_STUDIO = "https://www.tiktok.com/tiktokstudio/upload"
 private const val URL_LOGIN  = "https://www.tiktok.com/login"
 private const val URL_HOME   = "https://www.tiktok.com"
 
-// JS: spoof navigator agar TikTok tidak detect WebView
+// JS: Fix viewport agar bisa dizoom
 private val JS_SPOOF = """
 (function() {
-    try {
-        var def = function(prop, val) {
-            Object.defineProperty(navigator, prop, { get: function() { return val; }, configurable: true });
-        };
-        def('userAgent',     '$UA_DESKTOP');
-        def('vendor',        'Google Inc.');
-        def('platform',      'Win32');
-        def('maxTouchPoints', 0);
-        def('webdriver',     false);
-        def('appVersion',    '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
-    } catch(e) {}
-
-    // Hapus tanda Android/WebView
+    // Hapus tanda WebView
     try { if (window.Android) delete window.Android; } catch(e) {}
 
     // Fix viewport TikTok
@@ -58,13 +46,6 @@ private val JS_SPOOF = """
         nm.name    = 'viewport';
         nm.content = 'width=1024, initial-scale=0.3, maximum-scale=5.0, user-scalable=yes';
         document.head.appendChild(nm);
-    } catch(e) {}
-
-    // Min-height & background fix (Paksa putih agar tidak pernah blank hitam)
-    try {
-        var s = document.createElement('style');
-        s.textContent = 'html,body,#root,#app{min-height:100vh!important; background-color: #FFFFFF !important;}';
-        document.head.appendChild(s);
     } catch(e) {}
 })();
 """.trimIndent()
