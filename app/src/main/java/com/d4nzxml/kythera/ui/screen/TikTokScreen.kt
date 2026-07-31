@@ -70,7 +70,12 @@ private val JS_SPOOF = """
     // Dark mode hint
     try { document.documentElement.setAttribute('data-theme','dark'); } catch(e) {}
 
-    // Sembunyikan header & sidebar TikTok Studio
+})();
+""".trimIndent()
+
+// JS: Sembunyikan header & sidebar khusus di TikTok Studio
+private val JS_HIDE_ELEMENTS = """
+(function() {
     try {
         ['header','[class*="sidebar"]','.side-nav'].forEach(function(sel) {
             var el = document.querySelector(sel);
@@ -171,8 +176,9 @@ fun TikTokScreen() {
                             view?.evaluateJavascript(JS_SPOOF, null)
 
                             when {
-                                // Sudah di Studio — inject auto-click kalau ada video
+                                // Sudah di Studio — sembunyikan elemen mengganggu & inject auto-click kalau ada video
                                 url?.contains("tiktokstudio") == true -> {
+                                    view?.evaluateJavascript(JS_HIDE_ELEMENTS, null)
                                     if (SharedUploadState.processedVideoUri != null) {
                                         view?.evaluateJavascript(JS_AUTO_CLICK, null)
                                     }
