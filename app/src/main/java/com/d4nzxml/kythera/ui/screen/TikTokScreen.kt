@@ -576,32 +576,50 @@ private fun copyToClipboard(context: Context, text: String) {
 }
 
 private fun shareVideoToTikTok(context: Context, videoUri: Uri, caption: String) {
-    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-        type = "video/mp4"
-        putExtra(Intent.EXTRA_STREAM, videoUri)
-        putExtra(Intent.EXTRA_TEXT, caption)
-        putExtra(Intent.EXTRA_TITLE, caption)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        setPackage("com.zhiliaoapp.musically") // TikTok package Global
+    val packageManager = context.packageManager
+    var targetPackage: String? = null
+
+    // 1. Cari aplikasi TikTok / TikTok Studio yang terinstall
+    val baseIntent = Intent(Intent.ACTION_SEND).apply { type = "video/mp4" }
+    val resolveInfoList = packageManager.queryIntentActivities(baseIntent, 0)
+    for (resolveInfo in resolveInfoList) {
+        val pkgName = resolveInfo.activityInfo.packageName.lowercase()
+        if (pkgName.contains("zhiliaoapp.musically") || 
+            pkgName.contains("ugc.trill") || 
+            pkgName.contains("tiktok.studio")) {
+            targetPackage = resolveInfo.activityInfo.packageName
+            break
+        }
     }
 
-    try {
-        context.startActivity(shareIntent)
-    } catch (e: Exception) {
-        // TikTok tidak terinstall atau beda package (misal: TikTok Asia com.ss.android.ugc.trill)
-        // Fallback ke chooser TANPA batasan package
-        val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
+    // 2. Jika ketemu, arahkan langsung!
+    if (targetPackage != null) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, videoUri)
             putExtra(Intent.EXTRA_TEXT, caption)
             putExtra(Intent.EXTRA_TITLE, caption)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            setPackage(targetPackage)
         }
-        val chooser = Intent.createChooser(fallbackIntent, "Bagikan ke TikTok")
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        
         try {
-            context.startActivity(chooser)
+            context.startActivity(shareIntent)
+            return
         } catch (_: Exception) {}
     }
+
+    // 3. Fallback ke chooser jika tidak satupun TikTok ditemukan
+    val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "video/mp4"
+        putExtra(Intent.EXTRA_STREAM, videoUri)
+        putExtra(Intent.EXTRA_TEXT, caption)
+        putExtra(Intent.EXTRA_TITLE, caption)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(fallbackIntent, "Bagikan ke TikTok")
+    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    
+    try {
+        context.startActivity(chooser)
+    } catch (_: Exception) {}
 }

@@ -11,12 +11,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- Dibutuhkan di Android 11+ agar Intent.ACTION_SEND ke package spesifik berfungsi -->
-    <queries>
-        <package android:name="com.zhiliaoapp.musically" />
-        <package android:name="com.ss.android.ugc.trill" /> <!-- TikTok Asia -->
-        <package android:name="com.zhiliaoapp.musically.go" /> <!-- TikTok Lite -->
-    </queries>
+    <!-- Mengizinkan aplikasi mendeteksi seluruh package terinstall untuk auto-direct ke TikTok / TikTok Studio -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
         android:allowBackup="false"
