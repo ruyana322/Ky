@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,18 +33,18 @@ fun TikTokScreen() {
             factory = { ctx ->
                 WebView(ctx).apply {
 
-                    // ✅ Scroll penuh segala arah
+                    // ✅ Pengaturan dasar — biarkan halaman muncul duluan
                     isVerticalScrollBarEnabled = true
                     isHorizontalScrollBarEnabled = true
                     scrollBarStyle = WebView.SCROLLBARS_INSIDE_OVERLAY
                     overScrollMode = WebView.OVER_SCROLL_ALWAYS
                     setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
-                    setBackgroundColor(android.graphics.Color.parseColor("#121212"))
+                    setBackgroundColor(android.graphics.Color.parseColor("#FFFFFF")) // Putih sementara sampai halaman muncul
 
-                    // ✅ Cookie — DIPERBAIKI: tidak salah parameter lagi
-                    val cookieManager = CookieManager.getInstance()
-                    cookieManager.setAcceptCookie(true)
-                    cookieManager.setAcceptThirdPartyCookies(this, true)
+                    // ✅ Cookie — benar & aman
+                    val cm = CookieManager.getInstance()
+                    cm.setAcceptCookie(true)
+                    cm.setAcceptThirdPartyCookies(this, true)
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -55,9 +54,11 @@ fun TikTokScreen() {
                         allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-                        // ✅ Versi desktop + lebar tetap 1280px
+                        // ✅ User-Agent desktop — biar TikTok kasih versi Studio
                         userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                        loadWithOverviewMode = false
+                        
+                        // ✅ JANGAN paksa lebar — biarkan halaman render dulu
+                        loadWithOverviewMode = true
                         useWideViewPort = true
                         setSupportZoom(true)
                         builtInZoomControls = true
@@ -70,49 +71,29 @@ fun TikTokScreen() {
                     }
 
                     webViewClient = object : WebViewClient() {
+                        // ✅ Hilangkan favicon — ini penyebab halaman kosong!
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?
                         ): Boolean = false
 
-                        // ✅ onPageStarted — tanda fungsi DIPERBAIKI
-                        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                            super.onPageStarted(view, url, favicon)
-                            isLoading = true
-                        }
-
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isLoading = false
 
-                            // ✅ Paksa lebar 1280px & scroll berfungsi
+                            // ✅ TUNGGU halaman muncul dulu, baru atur scroll & lebar
                             view?.evaluateJavascript("""
                                 (function(){
-                                    document.documentElement.style.width = '1280px';
-                                    document.documentElement.style.minWidth = '1280px';
-                                    document.body.style.width = '1280px';
-                                    document.body.style.minWidth = '1280px';
-                                    document.body.style.overflowX = 'scroll';
-                                    document.body.style.overflowY = 'auto';
-                                    document.documentElement.style.overflowX = 'scroll';
-                                    document.documentElement.style.overflowY = 'auto';
+                                    // Scroll bebas segala arah
+                                    document.body.style.overflow = 'auto';
+                                    document.documentElement.style.overflow = 'auto';
                                     document.body.style.touchAction = 'pan-x pan-y';
-                                    document.body.style.position = 'static';
                                     
-                                    var style = document.createElement('style');
-                                    style.innerHTML = `
-                                        html, body {
-                                            overflow: auto !important;
-                                            width: 1280px !important;
-                                            max-width: none !important;
-                                        }
-                                        [style*="overflow: hidden"], [style*="overflow: hidden"] * {
-                                            overflow: auto !important;
-                                        }
-                                    `;
-                                    document.head.appendChild(style);
+                                    // Lebar cukup untuk sidebar + konten
+                                    document.body.style.minWidth = '100%';
                                     
-                                    if (url.indexOf('tiktokstudio') !== -1) {
+                                    // Auto klik file
+                                    if (window.location.href.indexOf('tiktokstudio') !== -1) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
                                             if (fi) { clearInterval(t); fi.click(); }
@@ -126,7 +107,7 @@ fun TikTokScreen() {
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            if (newProgress >= 90) isLoading = false
+                            isLoading = newProgress < 90
                         }
 
                         override fun onShowFileChooser(
@@ -146,6 +127,7 @@ fun TikTokScreen() {
                         }
                     }
 
+                    // ✅ Muat halaman
                     loadUrl("https://www.tiktok.com/tiktokstudio/upload")
                 }
             }
