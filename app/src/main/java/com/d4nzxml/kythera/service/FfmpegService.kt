@@ -258,6 +258,30 @@ class FfmpegService(private val context: Context) {
         }
     }
 
+    // ─── 5. OPTIMASI & FAKE SAMPLE ──────────────────────────────────────────
+    suspend fun optimizeAndFakeSample(inputPath: String, onProgress: (Int) -> Unit): FfmpegResult = withContext(Dispatchers.IO) {
+        val ts = System.currentTimeMillis()
+        val intermediatePath = tempPath("Kythera_Encoded_$ts.mp4")
+        
+        // Tahap 1: FFmpeg Encode (CRF 18, preset faster, original resolution)
+        val cmd = "-y -i \"$inputPath\" -c:v libx264 -preset faster -crf 18 -c:a aac -b:a 128k -movflags +faststart \"$intermediatePath\""
+        
+        val encodeResult = executeWithPercentage(cmd, intermediatePath, inputPath, onProgress)
+        if (!encodeResult.success) {
+            return@withContext encodeResult // Gagal di tahap encoding
+        }
+        
+        onProgress(100) // Encoding selesai
+        
+        // Tahap 2: Fake Sample
+        val finalResult = applyFakeSample(intermediatePath)
+        
+        // Hapus file intermediate
+        try { File(intermediatePath).delete() } catch (_: Exception) {}
+        
+        return@withContext finalResult
+    }
+
     // ─── Utils ───────────────────────────────────────────────────────────────
     companion object {
         fun formatSize(bytes: Long): String = when {

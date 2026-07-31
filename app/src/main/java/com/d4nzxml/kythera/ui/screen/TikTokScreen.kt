@@ -1,626 +1,90 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
+import android.annotation.SuppressLint
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
-import java.io.File
-import kotlinx.coroutines.launch
-import com.d4nzxml.kythera.service.FfmpegService
-import com.arthenica.ffmpegkit.FFmpegKitConfig
+import androidx.compose.ui.viewinterop.AndroidView
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COLORS — Dark futuristic glassmorphism (consistent dengan Kythera)
-// ═══════════════════════════════════════════════════════════════════════════
-private val BgDark = Color(0xFF0D0D1A)
-private val CardBg = Color(0xFF13132A)
-private val GlassBorder = Color(0xFF2A2A55)
-private val AccentPurple = Color(0xFF7B61FF)
-private val AccentMint = Color(0xFF00E5A0)
-private val TextPrimary = Color(0xFFE8E8FF)
-private val TextSecondary = Color(0xFF8888BB)
-private val ToggleOff = Color(0xFF2A2A55)
-
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TikTokScreen() {
-    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
-    
-    val videoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        selectedVideoUri = uri
-    }
-
-    if (selectedVideoUri != null) {
-        UploadPrepareScreen(
-            videoUri = selectedVideoUri!!,
-            onBack = { selectedVideoUri = null }
-        )
-    } else {
-        // Layar awal untuk memilih video
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(BgDark, Color(0xFF0A0A1F), BgDark)
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = AccentPurple,
-                    modifier = Modifier.size(64.dp).padding(bottom = 16.dp)
-                )
-                Button(
-                    onClick = { videoPickerLauncher.launch("video/*") },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.height(52.dp).padding(horizontal = 32.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
-                ) {
-                    Text("Pilih Video untuk Diunggah", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// UPLOAD PREPARE SCREEN
-// ═══════════════════════════════════════════════════════════════════════════
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun UploadPrepareScreen(
-    videoUri: Uri, // URI video hasil proses Kythera
-    videoName: String = "Video_Hasil_Kythera.mp4",
-    videoSizeMb: String = "",
-    videoResolution: String = "1080p",
-    videoRatio: String = "9:16",
-    onBack: () -> Unit
-) {
     val context = LocalContext.current
-
-    // ── State Form ──────────────────────────────────────────────────────
-    var judulVideo by remember { mutableStateOf("") }
-    var deskripsi by remember { mutableStateOf("") }
-    var hashtag by remember { mutableStateOf("#Kythera #TipsVideo #KontenKreatif") }
-    var siapPublik by remember { mutableStateOf(true) }
-    var izinKomentar by remember { mutableStateOf(true) }
-    var izinDuet by remember { mutableStateOf(false) }
-    var tambahLokasi by remember { mutableStateOf(false) }
-    var gunakanFakesample by remember { mutableStateOf(true) }
-
-    var showSuccessSnackbar by remember { mutableStateOf(false) }
-    var snackbarMessage by remember { mutableStateOf("") }
-    var isProcessing by remember { mutableStateOf(false) }
-
-    val scrollState = rememberScrollState()
-    val scope = rememberCoroutineScope()
-    val ffmpegService = remember { FfmpegService(context) }
-
-    // ── Background gradient ─────────────────────────────────────────────
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(BgDark, Color(0xFF0A0A1F), BgDark)
-                )
-            )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(bottom = 120.dp)
-        ) {
-
-            // ── Top Bar ─────────────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Kembali",
-                        tint = TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = "Siapkan Unggahan",
-                        color = TextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = AccentMint,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "File sudah siap lewat Kythera",
-                            color = AccentMint,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            // ── Video Info Card ─────────────────────────────────────────
-            GlassCard(modifier = Modifier.padding(horizontal = 16.dp)) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Thumbnail placeholder
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(AccentPurple.copy(alpha = 0.3f), AccentMint.copy(alpha = 0.15f))
-                                )
-                            )
-                            .border(1.dp, AccentPurple.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = AccentPurple,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column {
-                        Text(
-                            text = videoName,
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            InfoChip(text = videoResolution)
-                            InfoChip(text = "Rasio $videoRatio")
-                            if (videoSizeMb.isNotEmpty()) InfoChip(text = "~$videoSizeMb MB")
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Form Section ────────────────────────────────────────────
-            GlassCard(modifier = Modifier.padding(horizontal = 16.dp)) {
-                Column(modifier = Modifier.padding(16.dp)) {
-
-                    // Judul
-                    KyFormLabel("Judul Video")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    KyTextField(
-                        value = judulVideo,
-                        onValueChange = { judulVideo = it },
-                        placeholder = "Contoh: Trik Edit Cepat Kythera!",
-                        singleLine = true
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Deskripsi
-                    KyFormLabel("Deskripsi & Caption")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    KyTextField(
-                        value = deskripsi,
-                        onValueChange = { deskripsi = it },
-                        placeholder = "Ceritakan isi konten kamu...",
-                        singleLine = false,
-                        minLines = 4
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Hashtag
-                    KyFormLabel("Tagar Populer")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    KyTextField(
-                        value = hashtag,
-                        onValueChange = { hashtag = it },
-                        placeholder = "#Kythera #TipsVideo #KontenKreatif",
-                        singleLine = false,
-                        minLines = 2
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Upload Settings ─────────────────────────────────────────
-            GlassCard(modifier = Modifier.padding(horizontal = 16.dp)) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "PENGATURAN UNGGAHAN",
-                        color = TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    KyToggleRow("Siap tayang publik", siapPublik) { siapPublik = it }
-                    KyDivider()
-                    KyToggleRow("Izinkan komentar", izinKomentar) { izinKomentar = it }
-                    KyDivider()
-                    KyToggleRow("Izinkan duet & jahit", izinDuet) { izinDuet = it }
-                    KyDivider()
-                    KyToggleRow("Tambah lokasi", tambahLokasi) { tambahLokasi = it }
-                    KyDivider()
-                    KyToggleRow("Gunakan Fakesample (Anti-Duplikat)", gunakanFakesample) { gunakanFakesample = it }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // ── Info hint ───────────────────────────────────────────────
-            Text(
-                text = "💡 Caption & hashtag otomatis disalin ke clipboard saat unggah",
-                color = TextSecondary,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-            )
-        }
-
-        // ── Bottom Action Buttons ───────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, BgDark, BgDark)
-                    )
-                )
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Tombol utama: Unggah ke TikTok
-            Button(
-                onClick = {
-                    if (isProcessing) return@Button
-                    val caption = buildCaption(judulVideo, deskripsi, hashtag)
-                    copyToClipboard(context, caption)
-                    
-                    if (gunakanFakesample) {
-                        isProcessing = true
-                        snackbarMessage = "Menerapkan fakesample (Anti-Duplikat)..."
-                        showSuccessSnackbar = true
-                        
-                        scope.launch {
-                            val inputPath = FFmpegKitConfig.getSafParameterForRead(context, videoUri)
-                            val result = ffmpegService.applyFakeSample(inputPath)
-                            isProcessing = false
-                            
-                            if (result.success) {
-                                val newVideoUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(result.outputPath))
-                                shareVideoToTikTok(context, newVideoUri, caption)
-                                snackbarMessage = "Fakesample berhasil! Buka TikTok..."
-                            } else {
-                                shareVideoToTikTok(context, videoUri, caption)
-                                snackbarMessage = "Fakesample gagal, mengirim video asli..."
-                            }
-                            showSuccessSnackbar = true
-                        }
-                    } else {
-                        shareVideoToTikTok(context, videoUri, caption)
-                        snackbarMessage = "Caption disalin! Buka TikTok..."
-                        showSuccessSnackbar = true
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isProcessing) AccentPurple.copy(alpha = 0.5f) else AccentPurple
-                )
-            ) {
-                if (isProcessing) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Memproses...", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Text(
-                        text = "🚀 Unggah ke TikTok",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Tombol sekunder: Salin Caption saja
-            OutlinedButton(
-                onClick = {
-                    val caption = buildCaption(judulVideo, deskripsi, hashtag)
-                    copyToClipboard(context, caption)
-                    snackbarMessage = "Caption & hashtag disalin ke clipboard"
-                    showSuccessSnackbar = true
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp),
-                shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AccentMint.copy(alpha = 0.5f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = AccentMint
-                )
-            ) {
-                Text(
-                    text = "📋 Salin Caption & Hashtag",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        // ── Snackbar ────────────────────────────────────────────────────
-        if (showSuccessSnackbar) {
-            LaunchedEffect(showSuccessSnackbar) {
-                kotlinx.coroutines.delay(3000)
-                showSuccessSnackbar = false
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 80.dp, start = 16.dp, end = 16.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AccentMint.copy(alpha = 0.15f))
-                        .border(1.dp, AccentMint.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Text(
-                        text = snackbarMessage,
-                        color = AccentMint,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// REUSABLE COMPOSABLES
-// ═══════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun GlassCard(
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(CardBg)
-            .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
-    ) {
-        content()
-    }
-}
-
-@Composable
-private fun KyFormLabel(text: String) {
-    Text(
-        text = text,
-        color = TextPrimary,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.SemiBold
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun KyTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    singleLine: Boolean = true,
-    minLines: Int = 1
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        placeholder = {
-            Text(
-                text = placeholder,
-                color = TextSecondary,
-                fontSize = 13.sp
-            )
-        },
-        singleLine = singleLine,
-        minLines = if (singleLine) 1 else minLines,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = AccentPurple,
-            unfocusedBorderColor = GlassBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            cursorColor = AccentPurple,
-            focusedContainerColor = BgDark.copy(alpha = 0.5f),
-            unfocusedContainerColor = BgDark.copy(alpha = 0.3f)
-        ),
-        textStyle = LocalTextStyle.current.copy(fontSize = 13.sp)
-    )
-}
-
-@Composable
-private fun KyToggleRow(
-    label: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            color = TextPrimary,
-            fontSize = 14.sp
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = AccentPurple,
-                uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = ToggleOff
-            )
-        )
-    }
-}
-
-@Composable
-private fun KyDivider() {
-    HorizontalDivider(
-        color = GlassBorder,
-        thickness = 0.5.dp
-    )
-}
-
-@Composable
-private fun InfoChip(text: String) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(AccentPurple.copy(alpha = 0.15f))
-            .border(0.5.dp, AccentPurple.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 7.dp, vertical = 3.dp)
-    ) {
-        Text(
-            text = text,
-            color = AccentPurple,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-
-private fun buildCaption(judul: String, deskripsi: String, hashtag: String): String {
-    val parts = mutableListOf<String>()
-    if (judul.isNotBlank()) parts.add(judul.trim())
-    if (deskripsi.isNotBlank()) parts.add(deskripsi.trim())
-    if (hashtag.isNotBlank()) parts.add(hashtag.trim())
-    return parts.joinToString("\n\n")
-}
-
-private fun copyToClipboard(context: Context, text: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("Kythera Caption", text))
-}
-
-private fun shareVideoToTikTok(context: Context, videoUri: Uri, caption: String) {
-    val packageManager = context.packageManager
-    var targetPackage: String? = null
-
-    // 1. Cari aplikasi TikTok / TikTok Studio yang terinstall
-    val baseIntent = Intent(Intent.ACTION_SEND).apply { type = "video/mp4" }
-    val resolveInfoList = packageManager.queryIntentActivities(baseIntent, 0)
-    for (resolveInfo in resolveInfoList) {
-        val pkgName = resolveInfo.activityInfo.packageName.lowercase()
-        if (pkgName.contains("zhiliaoapp.musically") || 
-            pkgName.contains("ugc.trill") || 
-            pkgName.contains("tiktok.studio") ||
-            pkgName.contains("tt.creator")) {
-            targetPackage = resolveInfo.activityInfo.packageName
-            break
-        }
-    }
-
-    // 2. Jika ketemu, arahkan langsung!
-    if (targetPackage != null) {
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "video/mp4"
-            putExtra(Intent.EXTRA_STREAM, videoUri)
-            putExtra(Intent.EXTRA_TEXT, caption)
-            putExtra(Intent.EXTRA_TITLE, caption)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            setPackage(targetPackage)
-        }
-        try {
-            context.startActivity(shareIntent)
-            return
-        } catch (_: Exception) {}
-    }
-
-    // 3. Fallback ke chooser jika tidak satupun TikTok ditemukan
-    val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
-        type = "video/mp4"
-        putExtra(Intent.EXTRA_STREAM, videoUri)
-        putExtra(Intent.EXTRA_TEXT, caption)
-        putExtra(Intent.EXTRA_TITLE, caption)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    val chooser = Intent.createChooser(fallbackIntent, "Bagikan ke TikTok")
-    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     
-    try {
-        context.startActivity(chooser)
-    } catch (_: Exception) {}
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    // Menyamarkan diri sebagai Desktop Chrome agar TikTok Studio Web terbuka maksimal
+                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                }
+
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        return false // Tetap di dalam WebView
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        
+                        // Injeksi Javascript: Sembunyikan elemen header, sidebar, atau footer TikTok Studio yang mengganggu
+                        val js = """
+                            javascript:(function() {
+                                try {
+                                    var header = document.querySelector('header');
+                                    if (header) header.style.display = 'none';
+                                    
+                                    var sideNav = document.querySelector('.side-nav, [class*="sidebar"]');
+                                    if (sideNav) sideNav.style.display = 'none';
+                                    
+                                    var footer = document.querySelector('footer');
+                                    if (footer) footer.style.display = 'none';
+                                } catch(e) {}
+                            })()
+                        """.trimIndent()
+                        view?.evaluateJavascript(js, null)
+                    }
+                }
+
+                webChromeClient = object : WebChromeClient() {
+                    override fun onShowFileChooser(
+                        webView: WebView?,
+                        filePathCallback: ValueCallback<Array<Uri>>?,
+                        fileChooserParams: FileChooserParams?
+                    ): Boolean {
+                        val uri = SharedUploadState.processedVideoUri
+                        if (uri != null) {
+                            // 🔥 KEUNGGULAN UTAMA: Langsung injeksi video yang sudah dipatch (Fakesample)
+                            // ke dalam form upload TikTok Web tanpa membuka pemilih file Android!
+                            filePathCallback?.onReceiveValue(arrayOf(uri))
+                            
+                            // Kosongkan agar tidak terkirim dua kali di sesi berikutnya
+                            SharedUploadState.processedVideoUri = null 
+                            return true
+                        }
+                        
+                        // Jika tidak ada video (contoh: user buka menu ini manual), batalkan request
+                        filePathCallback?.onReceiveValue(null)
+                        return true 
+                    }
+                }
+
+                loadUrl("https://www.tiktok.com/tiktokstudio/upload")
+            }
+        }
+    )
 }
