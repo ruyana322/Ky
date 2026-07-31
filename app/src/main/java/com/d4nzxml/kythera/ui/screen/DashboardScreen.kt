@@ -22,13 +22,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-// --- Palette Warna Khusus Dashboard ---
-private val DashBg = Color(0xFF18152B) 
-private val CardSolidBg = Color(0xFF26233E)
-private val TextTitle = Color(0xFFF1F1F1)
-private val TextDesc = Color(0xFFAAA8C2)
-
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +33,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.core.content.FileProvider
+
+// --- Palette Warna Khusus Dashboard ---
+private val DashBg = Color(0xFF18152B) 
+private val CardSolidBg = Color(0xFF26233E)
+private val TextTitle = Color(0xFFF1F1F1)
+private val TextDesc = Color(0xFFAAA8C2)
 
 @Composable
 fun DashboardScreen(onNavigate: (Int) -> Unit) {
