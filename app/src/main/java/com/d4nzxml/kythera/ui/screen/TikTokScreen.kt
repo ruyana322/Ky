@@ -60,16 +60,12 @@ private val JS_SPOOF = """
         document.head.appendChild(nm);
     } catch(e) {}
 
-    // Min-height fix
+    // Min-height & background fix (Paksa putih agar tidak pernah blank hitam)
     try {
         var s = document.createElement('style');
-        s.textContent = 'html,body,#root,#app{min-height:100vh!important}';
+        s.textContent = 'html,body,#root,#app{min-height:100vh!important; background-color: #FFFFFF !important;}';
         document.head.appendChild(s);
     } catch(e) {}
-
-    // Dark mode hint
-    try { document.documentElement.setAttribute('data-theme','dark'); } catch(e) {}
-
 })();
 """.trimIndent()
 
@@ -239,12 +235,10 @@ fun TikTokScreen() {
                         }
                     }
 
-                    // ── Load: mulai dari home TikTok bukan langsung studio ──
-                    // Kenapa? Agar cookie ter-set dulu oleh tiktok.com domain
-                    // sebelum redirect ke tiktokstudio/upload.
-                    // onPageFinished akan handle redirect otomatis kalau sudah login.
-                    // Kalau belum login → user akan lihat halaman TikTok dan bisa login manual.
-                    loadUrl(URL_HOME)
+                    // ── Load: Langsung ke TikTok Studio ──
+                    // Jika belum login, TikTok otomatis melempar ke halaman Login.
+                    // Setelah sukses login, jika nyasar ke Home, JS_CHECK_LOGIN akan melempar kembali ke Studio.
+                    loadUrl(URL_STUDIO)
                 }
             }
         )
