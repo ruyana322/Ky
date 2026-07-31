@@ -318,7 +318,7 @@ fun UploadPrepareScreen(
                 onClick = {
                     val caption = buildCaption(judulVideo, deskripsi, hashtag)
                     copyToClipboard(context, caption)
-                    shareVideoToTikTok(context, videoUri)
+                    shareVideoToTikTok(context, videoUri, caption)
                     snackbarMessage = "Caption disalin! Paste di TikTok Studio ✓"
                     showSuccessSnackbar = true
                 },
@@ -534,10 +534,12 @@ private fun copyToClipboard(context: Context, text: String) {
     clipboard.setPrimaryClip(ClipData.newPlainText("Kythera Caption", text))
 }
 
-private fun shareVideoToTikTok(context: Context, videoUri: Uri) {
+private fun shareVideoToTikTok(context: Context, videoUri: Uri, caption: String) {
     val shareIntent = Intent(Intent.ACTION_SEND).apply {
         type = "video/mp4"
         putExtra(Intent.EXTRA_STREAM, videoUri)
+        putExtra(Intent.EXTRA_TEXT, caption)
+        putExtra(Intent.EXTRA_TITLE, caption)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         setPackage("com.zhiliaoapp.musically") // TikTok package Global
     }
@@ -550,6 +552,8 @@ private fun shareVideoToTikTok(context: Context, videoUri: Uri) {
         val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, videoUri)
+            putExtra(Intent.EXTRA_TEXT, caption)
+            putExtra(Intent.EXTRA_TITLE, caption)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = Intent.createChooser(fallbackIntent, "Bagikan ke TikTok")
