@@ -116,7 +116,6 @@ fun TikTokScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF121212))
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -125,7 +124,7 @@ fun TikTokScreen() {
 
                     // ── Rendering ──────────────────────────────────────────
                     setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    setBackgroundColor(android.graphics.Color.WHITE)
 
                     // ── Cookie: WAJIB aktif sebelum loadUrl ────────────────
                     val cookieManager = CookieManager.getInstance()
