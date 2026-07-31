@@ -48,19 +48,20 @@ fun TikTokScreen() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         
-                        // Injeksi Javascript: Sembunyikan elemen header, sidebar, atau footer TikTok Studio yang mengganggu
+                        // Injeksi Javascript: Auto-click upload & Sembunyikan elemen mengganggu
                         val js = """
                             javascript:(function() {
                                 try {
                                     var header = document.querySelector('header');
                                     if (header) header.style.display = 'none';
-                                    
                                     var sideNav = document.querySelector('.side-nav, [class*="sidebar"]');
                                     if (sideNav) sideNav.style.display = 'none';
-                                    
-                                    var footer = document.querySelector('footer');
-                                    if (footer) footer.style.display = 'none';
                                 } catch(e) {}
+                                
+                                // Auto Click File Input jika ada file dari Dashboard
+                                ${if (SharedUploadState.processedVideoUri != null) {
+                                    "var checkExist = setInterval(function() { var fileInput = document.querySelector('input[type=\"file\"]'); if (fileInput) { fileInput.click(); clearInterval(checkExist); } }, 1000);"
+                                } else ""}
                             })()
                         """.trimIndent()
                         view?.evaluateJavascript(js, null)
