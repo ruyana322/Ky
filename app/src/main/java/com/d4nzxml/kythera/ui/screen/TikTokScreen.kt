@@ -520,7 +520,7 @@ private fun AiScanAnimation(statusMsg: String, progress: Int) {
 // JS SNIPPETS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// 🔥 Critical JS: Anti-Zoom (Lebih Aman), Desktop Fix
+// 🔥 Critical JS: Anti-Zoom (Lebih Aman), Desktop Fix & Sembunyikan Elemen Luar TikTok
 private val JS_CRITICAL = """
     (function() {
         var vpContent = 'width=1280, user-scalable=no';
@@ -535,11 +535,45 @@ private val JS_CRITICAL = """
             document.head.appendChild(m); 
         }
         
-        // 🔥 INJEKSI CSS DI-NERF: 
-        // Cuma ngatur font-size jadi 16px biar Android ga auto-zoom pas klik inputan.
-        // touch-action dihapus biar slider 'Edit Sampul' TikTok gak nge-hang.
+        // 🔥 INJEKSI CSS:
+        // 1. Anti-zoom untuk input.
+        // 2. Sembunyikan header, sidebar, footer, dan promo TikTok (SELECTOR MENGAMANKAN FORM UPLOAD).
         var style = document.createElement('style');
-        style.innerHTML = 'input, textarea, [contenteditable] { font-size: 16px !important; }';
+        style.innerHTML = `
+            /* Anti-Zoom Fix */
+            input, textarea, [contenteditable] { font-size: 16px !important; }
+            
+            /* --- CATATAN SELECTOR YANG DISEMBUNYIKAN --- */
+            /* Header TikTok: sering pakai tag <header> atau class yg ada kata Header/header */
+            header, [class*="Header"], [class*="header"], [data-e2e="upload-header"], #header { 
+                display: none !important; 
+            }
+            
+            /* Sidebar / Navigasi Situs: sering pakai tag <nav>, <aside> atau class Sidebar/SideNav */
+            nav, aside, [class*="SideNav"], [class*="sidebar"], [class*="side-nav"] { 
+                display: none !important; 
+            }
+            
+            /* Footer TikTok */
+            footer, [class*="Footer"], [class*="footer"] { 
+                display: none !important; 
+            }
+            
+            /* Banner Promosi / Download App */
+            [class*="Promo"], [class*="Banner"], [class*="download-app"] { 
+                display: none !important; 
+            }
+
+            /* Memaksa kontainer form upload memenuhi layar WebView (kartu putih) */
+            main, [class*="LayoutContainer"], [class*="MainLayout"], #root, body {
+                width: 100% !important;
+                max-width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                min-width: 100% !important;
+                background-color: #FFFFFF !important;
+            }
+        `;
         document.head.appendChild(style);
     })();
 
@@ -600,11 +634,11 @@ private val JS_TOAST = """
         window.__d4nzToastDone = true;
         function showToast() {
             const style = document.createElement('style');
-            style.textContent = '#__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #7c4dff; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(124,77,255,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; } .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #7c4dff; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; } @keyframes __d4nzFadeIn { from { opacity:0; transform: translateX(-50%) translateY(12px); } to { opacity:1; transform: translateX(-50%) translateY(0); } } @keyframes __d4nzPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.3; transform:scale(0.65); } }';
+            style.textContent = '#__d4nz_toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647; background: #0a0a0a; border: 1.5px solid #8B5CF6; color: #fff; border-radius: 50px; padding: 9px 20px; font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 20px rgba(139,92,246,0.4); letter-spacing: 0.06em; pointer-events: none; animation: __d4nzFadeIn 0.4s ease; } .__d4nz_dot { width: 7px; height: 7px; border-radius: 50%; background: #8B5CF6; animation: __d4nzPulse 1.4s infinite; flex-shrink: 0; } @keyframes __d4nzFadeIn { from { opacity:0; transform: translateX(-50%) translateY(12px); } to { opacity:1; transform: translateX(-50%) translateY(0); } } @keyframes __d4nzPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.3; transform:scale(0.65); } }';
             document.head.appendChild(style);
             const toast = document.createElement('div');
             toast.id = '__d4nz_toast';
-            toast.innerHTML = '<span class="__d4nz_dot"></span>D4NZXML GODMODE ACTIVE';
+            toast.innerHTML = '<span class="__d4nz_dot"></span>KYTHERA WINK ACTIVE';
             document.body.appendChild(toast);
         }
         if (document.body) { showToast(); } else { document.addEventListener('DOMContentLoaded', showToast); }
@@ -793,26 +827,78 @@ fun TikTokScreen() {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory  = { webView }
-        )
-
-        // ── Processing Overlay ──
-        if (isProcessing) {
+    // 🎨 Tampilan Luar: Kythera-Wink Style
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC)) // Latar utama #F8FAFC
+    ) {
+        // 🔥 Bar Atas Kythera-Wink
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(vertical = 12.dp, horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Tombol Kembali
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xCC000000))
-                    .clickable(enabled = false) {},
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF3F4F6))
+                    .clickable {
+                        // TODO: Implement back navigation if needed, or webView.goBack()
+                        if (webView.canGoBack()) {
+                            webView.goBack()
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                // Gunakan text < (Atau icon custom) karena Icons.Rounded.ChevronLeft tidak bisa dijamin selalu terimport
+                Text("<", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
+            }
+            
+            // Judul
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Siapkan Unggahan", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+                Text("File sudah siap lewat Kythera ✅", fontSize = 10.sp, color = Color(0xFF94A3B8))
+            }
+            
+            // Spacer buat nyeimbangin flex SpaceBetween (ukuran sama dengan back button)
+            Spacer(modifier = Modifier.size(32.dp))
+        }
+
+        // 🔥 WebView Area: Kartu putih, sudut bulat
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp) // Margin sedikit di kiri-kanan seperti mockup
+                .clip(RoundedCornerShape(20.dp)) // Sudut bulat 20px
+                .background(Color.White)
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory  = { webView }
+            )
+
+            // ── Processing Overlay ──
+            if (isProcessing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xCC000000))
+                        .clickable(enabled = false) {},
+                    contentAlignment = Alignment.Center
                 ) {
-                    AiScanAnimation(statusMsg = statusMsg, progress = progressVal)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        AiScanAnimation(statusMsg = statusMsg, progress = progressVal)
+                    }
                 }
             }
         }
