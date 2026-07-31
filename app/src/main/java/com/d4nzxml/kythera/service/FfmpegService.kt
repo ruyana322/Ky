@@ -241,19 +241,20 @@ class FfmpegService(private val context: Context) {
         val ts = System.currentTimeMillis()
         val outputPath = tempPath("Kythera_Fakesample_$ts.mp4")
         
-        // Buat UUID acak supaya MD5 hash video selalu berubah 100% unik
-        val randomHash = java.util.UUID.randomUUID().toString().substring(0, 8)
-        
-        // Menggunakan -c copy agar prosesnya instan (tidak re-encode video/audio)
-        // Menambahkan metadata acak + faststart agar ramah web
-        val cmd = "-y -i \"$inputPath\" -c copy -metadata comment=\"KyFk_$randomHash\" -metadata description=\"Bypass_$ts\" -movflags +faststart \"$outputPath\""
-        
-        val session = FFmpegKit.execute(cmd)
-        if (ReturnCode.isSuccess(session.returnCode)) {
+        try {
+            // Membaca seluruh file ke dalam memory (aman karena largeHeap=true)
+            val fileBytes = File(inputPath).readBytes()
+            
+            // Eksekusi NXT_SHARK537 Method secara Native Kotlin!
+            val patchedBytes = com.d4nzxml.kythera.utils.Mp4Patcher.patchSharkSampleTableMethod(fileBytes)
+            
+            // Tulis hasilnya
+            File(outputPath).writeBytes(patchedBytes)
+            
             FfmpegResult(success = true, outputPath = outputPath)
-        } else {
-            val tail = session.logs.takeLast(10).joinToString("\n") { it.message }
-            FfmpegResult(success = false, errorMessage = tail)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            FfmpegResult(success = false, errorMessage = e.message ?: "Unknown Error in Mp4Patcher")
         }
     }
 
