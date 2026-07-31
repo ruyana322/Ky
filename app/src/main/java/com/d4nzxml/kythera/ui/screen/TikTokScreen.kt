@@ -36,10 +36,7 @@ fun TikTokScreen() {
 
                     // Hardware rendering
                     setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    setBackgroundColor(android.graphics.Color.WHITE)
-
-                    // Initial zoom 30% agar seluruh halaman desktop muat di layar HP
-                    setInitialScale(30)
+                    setBackgroundColor(android.graphics.Color.parseColor("#121212")) // Warna gelap agar ruang kosong tidak putih
 
                     // Cookie
                     val cm = CookieManager.getInstance()
