@@ -31,6 +31,13 @@ fun TikTokScreen() {
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     // Menyamarkan diri sebagai Desktop Chrome agar TikTok Studio Web terbuka maksimal
                     userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                    
+                    // 🔥 Perbaikan Layar / Scroll
+                    loadWithOverviewMode = true
+                    useWideViewPort = true
+                    setSupportZoom(true)
+                    builtInZoomControls = true
+                    displayZoomControls = false
                 }
 
                 webViewClient = object : WebViewClient() {
