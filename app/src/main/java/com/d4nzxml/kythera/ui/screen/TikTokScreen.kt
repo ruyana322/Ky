@@ -39,6 +39,11 @@ fun TikTokScreen() {
                     setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
                     setBackgroundColor(android.graphics.Color.parseColor("#FFFFFF"))
 
+                    // ✅ Focus & touch
+                    isClickable = true
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+
                     val cm = CookieManager.getInstance()
                     cm.setAcceptCookie(true)
                     cm.setAcceptThirdPartyCookies(this, true)
@@ -60,6 +65,11 @@ fun TikTokScreen() {
                         displayZoomControls = false
 
                         cacheMode = WebSettings.LOAD_DEFAULT
+
+                        // ✅ WebGL & media untuk frame picker sampul
+                        setRenderPriority(WebSettings.RenderPriority.HIGH)
+                        mediaPlaybackRequiresUserGesture = false
+
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                             safeBrowsingEnabled = false
                         }
@@ -77,7 +87,8 @@ fun TikTokScreen() {
 
                             view?.evaluateJavascript("""
                                 (function(){
-                                    // ── 1. Viewport awal: desktop 1200px, zoom out 35% ──
+
+                                    // ── 1. Fungsi viewport ──
                                     function setViewportNormal() {
                                         var meta = document.querySelector('meta[name="viewport"]');
                                         if (meta) {
@@ -90,52 +101,75 @@ fun TikTokScreen() {
                                         }
                                     }
 
-                                    // ── 2. Viewport saat modal buka: reset ke device-width ──
-                                    function setViewportModal() {
+                                    function setViewportFull() {
                                         var meta = document.querySelector('meta[name="viewport"]');
                                         if (meta) {
                                             meta.setAttribute('content', 'width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=3.0, user-scalable=yes');
                                         }
                                     }
 
-                                    setViewportNormal();
+                                    // ── 2. Detect halaman ──
+                                    var currentUrl = window.location.href;
+                                    var isCoverPage = currentUrl.indexOf('cover') !== -1 
+                                        || currentUrl.indexOf('sampul') !== -1
+                                        || document.title.toLowerCase().indexOf('cover') !== -1;
+
+                                    if (isCoverPage) {
+                                        setViewportFull();
+                                    } else {
+                                        setViewportNormal();
+                                    }
 
                                     document.body.style.width = '';
-                                    document.body.style.minWidth = '1200px';
+                                    document.body.style.minWidth = isCoverPage ? '' : '1200px';
                                     document.body.style.overflow = 'auto';
                                     document.documentElement.style.overflow = 'auto';
                                     document.documentElement.style.height = 'auto';
                                     document.body.style.height = 'auto';
                                     document.body.style.touchAction = 'pan-x pan-y pinch-zoom';
 
-                                    // ── 3. Observer: pantau modal/dialog yang muncul ──
+                                    // ── 3. Pantau URL change (modal = navigasi baru) ──
+                                    var lastUrl = window.location.href;
+                                    setInterval(function() {
+                                        if (window.location.href !== lastUrl) {
+                                            lastUrl = window.location.href;
+                                            var isNowCover = lastUrl.indexOf('cover') !== -1;
+                                            if (isNowCover) {
+                                                setViewportFull();
+                                                document.body.style.minWidth = '';
+                                            } else {
+                                                setViewportNormal();
+                                                document.body.style.minWidth = '1200px';
+                                            }
+                                            window.dispatchEvent(new Event('resize'));
+                                        }
+                                    }, 300);
+
+                                    // ── 4. MutationObserver untuk modal DOM ──
                                     var modalOpen = false;
                                     var observer = new MutationObserver(function(mutations) {
                                         mutations.forEach(function(m) {
                                             m.addedNodes.forEach(function(node) {
                                                 if (node.nodeType !== 1) return;
-
                                                 var role = node.getAttribute('role');
-                                                var cls = node.className || '';
-                                                var isModal = role === 'dialog' 
+                                                var cls = (node.className || '').toString();
+                                                var isModal = role === 'dialog'
                                                     || cls.indexOf('modal') !== -1
                                                     || cls.indexOf('drawer') !== -1
                                                     || cls.indexOf('sheet') !== -1
                                                     || cls.indexOf('overlay') !== -1;
 
-                                                // Cek juga child elements
-                                                if (!isModal) {
-                                                    var dialogs = node.querySelectorAll && node.querySelectorAll('[role="dialog"], [class*="modal"], [class*="drawer"], [class*="sheet"]');
-                                                    if (dialogs && dialogs.length > 0) isModal = true;
+                                                if (!isModal && node.querySelectorAll) {
+                                                    var found = node.querySelectorAll('[role="dialog"],[class*="modal"],[class*="drawer"],[class*="sheet"]');
+                                                    if (found.length > 0) isModal = true;
                                                 }
 
                                                 if (isModal && !modalOpen) {
                                                     modalOpen = true;
-                                                    setViewportModal();
-                                                    // Force trigger layout ulang
+                                                    setViewportFull();
+                                                    document.body.style.minWidth = '';
                                                     setTimeout(function() {
                                                         window.dispatchEvent(new Event('resize'));
-                                                        // Scroll modal ke top biar konten ke-render
                                                         if (node.scrollTop !== undefined) node.scrollTop = 0;
                                                     }, 100);
                                                 }
@@ -144,7 +178,7 @@ fun TikTokScreen() {
                                             m.removedNodes.forEach(function(node) {
                                                 if (node.nodeType !== 1) return;
                                                 var role = node.getAttribute('role');
-                                                var cls = node.className || '';
+                                                var cls = (node.className || '').toString();
                                                 var wasModal = role === 'dialog'
                                                     || cls.indexOf('modal') !== -1
                                                     || cls.indexOf('drawer') !== -1
@@ -153,9 +187,9 @@ fun TikTokScreen() {
 
                                                 if (wasModal && modalOpen) {
                                                     modalOpen = false;
-                                                    // Kembalikan viewport ke mode desktop
                                                     setTimeout(function() {
                                                         setViewportNormal();
+                                                        document.body.style.minWidth = '1200px';
                                                         window.dispatchEvent(new Event('resize'));
                                                     }, 50);
                                                 }
@@ -163,19 +197,20 @@ fun TikTokScreen() {
                                         });
                                     });
 
-                                    observer.observe(document.body, { 
-                                        childList: true, 
-                                        subtree: true 
+                                    observer.observe(document.body, {
+                                        childList: true,
+                                        subtree: true
                                     });
 
-                                    // ── 4. Auto-click file input di halaman upload ──
-                                    if (window.location.href.indexOf('tiktokstudio') !== -1) {
+                                    // ── 5. Auto-click file input ──
+                                    if (window.location.href.indexOf('tiktokstudio') !== -1 && !isCoverPage) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
                                             if (fi) { clearInterval(t); fi.click(); }
                                         }, 800);
                                         setTimeout(function(){ clearInterval(t); }, 15000);
                                     }
+
                                 })();
                             """.trimIndent(), null)
                         }
