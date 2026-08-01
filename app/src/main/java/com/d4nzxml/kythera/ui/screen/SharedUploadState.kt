@@ -4,4 +4,5 @@ import android.net.Uri
 
 object SharedUploadState {
     var processedVideoUri: Uri? = null
+    var thumbnailUri: Uri? = null
 }
