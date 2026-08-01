@@ -55,7 +55,7 @@ class VideoUpscaleProcessor(
         val t0 = System.nanoTime()
 
         val result = mutex.withLock {
-            if (!com.d4nzxml.kythera.service.MnnVideoBridge.ready) {
+            if (!com.d4nzxml.kythera.superresolution.RealEsrganBridge.isReady()) {
                 Log.e(TAG, "processFrame[$frameIndex]: engine not ready!")
                 return@withLock null
             }
