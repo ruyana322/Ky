@@ -23,7 +23,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TikTokScreen() {
-    // ✅ Menggunakan .value langsung, TANPA "by" delegasi
     val isLoading = remember { mutableStateOf(true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -33,15 +32,13 @@ fun TikTokScreen() {
             factory = { ctx ->
                 WebView(ctx).apply {
 
-                    // Scroll penuh segala arah
                     isVerticalScrollBarEnabled = true
                     isHorizontalScrollBarEnabled = true
                     scrollBarStyle = WebView.SCROLLBARS_INSIDE_OVERLAY
-                    overScrollMode = WebView.OVER_SCROLL_ALWAYS
+                    overScrollMode = WebView.OVER_SCROLL_IF_CONTENT_SCROLLS
                     setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
                     setBackgroundColor(android.graphics.Color.parseColor("#FFFFFF"))
 
-                    // Cookie — benar & aman
                     val cm = CookieManager.getInstance()
                     cm.setAcceptCookie(true)
                     cm.setAcceptThirdPartyCookies(this, true)
@@ -54,11 +51,10 @@ fun TikTokScreen() {
                         allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-                        // User-Agent desktop → TikTok kasih versi Studio
                         userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                        
-                        // Biarkan halaman muncul dulu & setelan untuk desktop view
-                        loadWithOverviewMode = true
+
+                        // ✅ FIX: jangan auto zoom-out, biar WebView tidak collapse konten
+                        loadWithOverviewMode = false
                         useWideViewPort = true
                         setSupportZoom(true)
                         builtInZoomControls = true
@@ -78,30 +74,35 @@ fun TikTokScreen() {
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            isLoading.value = false // ✅ pakai .value
+                            isLoading.value = false
 
-                            // ✅ Injeksi JS untuk memaksa ukuran kanvas jadi 1200px (Desktop)
-                            // Supaya tidak acak-acakan di layar sempit
                             view?.evaluateJavascript("""
                                 (function(){
-                                    // 1. Modifikasi atau tambahkan meta viewport
+                                    // ✅ FIX: viewport dengan initial-scale kecil supaya
+                                    // desktop layout (1200px) muat di layar HP tanpa area kosong
                                     var meta = document.querySelector('meta[name="viewport"]');
                                     if (meta) {
-                                        meta.setAttribute('content', 'width=1200');
+                                        meta.setAttribute('content', 'width=1200, initial-scale=0.35, minimum-scale=0.2, maximum-scale=3.0, user-scalable=yes');
                                     } else {
                                         meta = document.createElement('meta');
                                         meta.name = 'viewport';
-                                        meta.content = 'width=1200';
+                                        meta.content = 'width=1200, initial-scale=0.35, minimum-scale=0.2, maximum-scale=3.0, user-scalable=yes';
                                         document.head.appendChild(meta);
                                     }
 
-                                    // 2. Paksa ukuran body dan overflow
-                                    document.body.style.width = '1200px';
+                                    // ✅ FIX: hapus force width di body, biar layout TikTok
+                                    // render natural sesuai 1200px container-nya sendiri
+                                    document.body.style.width = '';
+                                    document.body.style.minWidth = '1200px';
                                     document.body.style.overflow = 'auto';
                                     document.documentElement.style.overflow = 'auto';
-                                    document.body.style.touchAction = 'pan-x pan-y';
-                                    
-                                    // 3. Auto-click file upload
+                                    document.body.style.touchAction = 'pan-x pan-y pinch-zoom';
+
+                                    // ✅ FIX: pastikan tidak ada elemen yang bikin blank space
+                                    document.documentElement.style.height = 'auto';
+                                    document.body.style.height = 'auto';
+
+                                    // Auto-click file input kalau di halaman upload
                                     if (window.location.href.indexOf('tiktokstudio') !== -1) {
                                         var t = setInterval(function() {
                                             var fi = document.querySelector('input[type="file"]');
@@ -116,7 +117,7 @@ fun TikTokScreen() {
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            isLoading.value = newProgress < 90 // ✅ pakai .value
+                            isLoading.value = newProgress < 90
                         }
 
                         override fun onShowFileChooser(
@@ -141,7 +142,7 @@ fun TikTokScreen() {
             }
         )
 
-        if (isLoading.value) { // ✅ pakai .value
+        if (isLoading.value) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
                 color = Color(0xFF00E5A0)
