@@ -14,6 +14,9 @@ data class FfmpegResult(
     val success: Boolean,
     val outputPath: String = "",
     val errorMessage: String? = null,
+    // Buat debugging: command/filter yang beneran dieksekusi. Null di fungsi lain
+    // yang belum diisi, nggak break apa pun karena ada default.
+    val debugInfo: String? = null,
 )
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -384,7 +387,11 @@ class FfmpegService(private val context: Context) {
                 "-c:a copy -movflags +faststart \"$outputPath\""
         }
 
-        executeWithPercentage(cmd, outputPath, inputPath, onProgress)
+        val result = executeWithPercentage(cmd, outputPath, inputPath, onProgress)
+        result.copy(
+            debugInfo = "target=$target boostStops=$effectiveBoost whiteNits(npl)=$whiteNits\n" +
+                "preset=$preset crf=$crf pixFmt=$outPixFmt\nvf=$filter",
+        )
     }
 
     // ─── Utils ───────────────────────────────────────────────────────────────
