@@ -328,6 +328,12 @@ class FfmpegService(private val context: Context) {
         crf: Int = 20,
         preset: String = "veryfast",
         whiteNits: Int = 203,
+        // Dorong highlight di ranah linear (sebelum di-encode ke kurva HLG/PQ) biar
+        // beneran manfaatin headroom di atas level SDR, bukan cuma ganti tag. 0.5
+        // stop = *1.41x, 1.0 stop = *2x. Cuma dipakai buat HLG (lihat buildArgs):
+        // HDR10 bawa metadata max-cll statis, kalau boost di sini metadata itu jadi
+        // nggak sinkron sama piksel aslinya.
+        boostStops: Float = 0.5f,
         onProgress: ((Int) -> Unit)? = null,
     ): FfmpegResult = withContext(Dispatchers.IO) {
         val ts = System.currentTimeMillis()
@@ -343,15 +349,21 @@ class FfmpegService(private val context: Context) {
         // pakai H.264 biasa), jadi dia pakai x264 biar jauh lebih cepat dan nggak
         // kena masalah hdr10-opt (parameter itu nggak ada di x264).
         val outPixFmt = if (target == "hdr10") "yuv420p10le" else "yuv420p"
+        // Lihat catatan boostStops di signature fungsi: cuma dipakai di HLG.
+        val effectiveBoost = if (target == "hlg") boostStops else 0f
 
-        val filter = listOf(
+        val filterSteps = mutableListOf(
             "zscale=tin=709:min=$matrixIn:pin=$primariesIn:t=linear:npl=$whiteNits",
             "format=gbrpf32le",
             "zscale=p=2020",
+        )
+        if (effectiveBoost != 0f) filterSteps += "exposure=exposure=$effectiveBoost"
+        filterSteps += listOf(
             "zscale=t=$outTransfer",
             "zscale=m=2020_ncl:r=limited",
             "format=$outPixFmt",
-        ).joinToString(",")
+        )
+        val filter = filterSteps.joinToString(",")
 
         val cmd = if (target == "hdr10") {
             val x265Params = "repeat-headers=1:hdr10=1:colorprim=bt2020:transfer=smpte2084:" +
