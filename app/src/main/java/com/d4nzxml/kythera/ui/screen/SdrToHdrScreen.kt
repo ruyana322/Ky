@@ -85,6 +85,10 @@ fun SdrToHdrScreen() {
         if (whiteNits !in nitsOptions) whiteNits = nitsOptions[1]
     }
 
+    // Dorong highlight di ranah linear sebelum encode HLG. Cuma relevan buat HLG;
+    // HDR10 bawa metadata statis (max-cll) yang bisa jadi nggak sinkron kalau dipaksa boost.
+    var boostStops by remember { mutableStateOf(0.5f) }
+
     var isProcessing by rememberSaveable { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
     var progressPct by remember { mutableStateOf(0f) }
@@ -160,11 +164,12 @@ fun SdrToHdrScreen() {
                     errorLog = "Tidak bisa akses file sumber"; isProcessing = false; return@launch
                 }
 
-                statusMsg = "Konversi warna BT.709 \u2192 BT.2020 + encode 10-bit..."
+                statusMsg = "Konversi warna BT.709 \u2192 BT.2020 + encode..."
                 val result = ffmpegService.convertSdrToHdr(
                     inputPath = path,
                     target = target,
                     whiteNits = whiteNits,
+                    boostStops = boostStops,
                     onProgress = { pct -> progressPct = pct / 100f },
                 )
 
@@ -401,6 +406,34 @@ fun SdrToHdrScreen() {
                                 "Kalau hasil kelihatan terlalu redup atau terbakar di player HDR, ganti angka ini.",
                             color = KColor.Text2, fontSize = 11.sp,
                         )
+
+                        if (target == "hlg") {
+                            Divider(color = Color.White.copy(0.07f))
+                            Text("Dorongan highlight (stop)", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(0f, 0.5f, 1.0f).forEach { stops ->
+                                    val selected = boostStops == stops
+                                    Box(
+                                        modifier = Modifier.weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
+                                            .clickable { boostStops = stops }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            if (stops == 0f) "Off" else "+${stops}",
+                                            color = if (selected) Color.Black else Color.White.copy(0.7f),
+                                            fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                "Ini beneran dorong nilai highlight-nya (bukan cuma ganti tag), biar HP lebih gampang nganggep video ini butuh brightness boost. Mulai dari +0.5.",
+                                color = KColor.Text2, fontSize = 11.sp,
+                            )
+                        }
                     }
                 }
             }
