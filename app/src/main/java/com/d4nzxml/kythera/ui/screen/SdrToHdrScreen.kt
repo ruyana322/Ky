@@ -89,8 +89,9 @@ fun SdrToHdrScreen() {
     val inputUri = inputUriStr?.let { Uri.parse(it) }
     val animatedProgress by animateFloatAsState(targetValue = progressPct, label = "progress")
 
-    LaunchedEffect(Unit) {
-        val (ok, missing) = ffmpegService.checkHdrCapability()
+    // Dicek ulang tiap target berubah, soalnya HLG pakai x264 dan HDR10 pakai x265 (beda encoder).
+    LaunchedEffect(target) {
+        val (ok, missing) = ffmpegService.checkHdrCapability(target)
         capabilityOk = ok
         missingParts = missing
         capabilityChecked = true
