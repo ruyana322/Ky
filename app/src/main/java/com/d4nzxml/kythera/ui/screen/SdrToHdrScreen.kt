@@ -98,6 +98,7 @@ fun SdrToHdrScreen() {
     var isSuccess by rememberSaveable { mutableStateOf(false) }
     var outputPath by remember { mutableStateOf<String?>(null) }
     var errorLog by remember { mutableStateOf<String?>(null) }
+    var debugInfo by remember { mutableStateOf<String?>(null) } // command FFmpeg beneran yang jalan
 
     val inputUri = inputUriStr?.let { Uri.parse(it) }
     val animatedProgress by animateFloatAsState(targetValue = progressPct, label = "progress")
@@ -155,7 +156,7 @@ fun SdrToHdrScreen() {
     fun process() {
         val uri = inputUri ?: return
         scope.launch {
-            isProcessing = true; isSuccess = false; outputPath = null; errorLog = null
+            isProcessing = true; isSuccess = false; outputPath = null; errorLog = null; debugInfo = null
             progressPct = 0f; statusMsg = "Menyiapkan..."
 
             try {
@@ -172,6 +173,8 @@ fun SdrToHdrScreen() {
                     boostStops = boostStops,
                     onProgress = { pct -> progressPct = pct / 100f },
                 )
+
+                debugInfo = result.debugInfo
 
                 if (!result.success) {
                     errorLog = result.errorMessage ?: "Gagal konversi"
@@ -194,7 +197,7 @@ fun SdrToHdrScreen() {
 
     fun reset() {
         inputUriStr = null; thumbnail = null; fileName = ""
-        isSuccess = false; outputPath = null; errorLog = null
+        isSuccess = false; outputPath = null; errorLog = null; debugInfo = null
         progressPct = 0f; statusMsg = ""; alreadyHdr = false
     }
 
@@ -483,6 +486,26 @@ fun SdrToHdrScreen() {
                             )
                         }
                     }
+                }
+            }
+
+            AnimatedVisibility(visible = debugInfo != null && !isProcessing) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, KColor.Border2, RoundedCornerShape(10.dp))
+                        .background(Color(0x15FFFFFF)).padding(12.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        "Debug \u00b7 screenshot ini kalau hasilnya aneh",
+                        color = KColor.Text, fontWeight = FontWeight.Bold, fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        debugInfo ?: "", color = KColor.Text2,
+                        fontSize = 10.sp, fontFamily = FontFamily.Monospace, lineHeight = 14.sp,
+                    )
                 }
             }
 
