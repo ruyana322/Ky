@@ -285,16 +285,19 @@ class FfmpegService(private val context: Context) {
 
     // ─── 6. SDR to HDR (zscale + libx265 10-bit, konversi warna beneran) ────
     // Ini BUKAN tempel metadata doang: primaries BT.709 dikonversi ke BT.2020,
-    // transfer function diubah ke HLG/PQ, lalu di-encode ulang 10-bit.
-    // Butuh filter zscale (libzimg) dan encoder libx265 di build FFmpegKit ini.
-    suspend fun checkHdrCapability(): Pair<Boolean, List<String>> = withContext(Dispatchers.IO) {
-        val missing = mutableListOf<String>()
-        val filters = FFmpegKit.execute("-hide_banner -filters").output.orEmpty()
-        if (!Regex("""\bzscale\b""").containsMatchIn(filters)) missing += "filter zscale (libzimg)"
-        val encoders = FFmpegKit.execute("-hide_banner -encoders").output.orEmpty()
-        if (!encoders.contains("libx265")) missing += "encoder libx265"
-        (missing.isEmpty()) to missing
-    }
+    // transfer function diubah ke HLG/PQ. HLG di-encode 8-bit libx264 (cepat, dan
+    // HLG memang didesain aman di 8-bit). HDR10/PQ di-encode 10-bit libx265
+    // (wajib, biar nggak banding). Keduanya butuh filter zscale (libzimg).
+    suspend fun checkHdrCapability(target: String = "hlg"): Pair<Boolean, List<String>> =
+        withContext(Dispatchers.IO) {
+            val missing = mutableListOf<String>()
+            val filters = FFmpegKit.execute("-hide_banner -filters").output.orEmpty()
+            if (!Regex("""\bzscale\b""").containsMatchIn(filters)) missing += "filter zscale (libzimg)"
+            val encoders = FFmpegKit.execute("-hide_banner -encoders").output.orEmpty()
+            val neededEncoder = if (target == "hdr10") "libx265" else "libx264"
+            if (!encoders.contains(neededEncoder)) missing += "encoder $neededEncoder"
+            (missing.isEmpty()) to missing
+        }
 
     data class SourceColorInfo(
         val colorSpace: String?,
@@ -335,30 +338,39 @@ class FfmpegService(private val context: Context) {
         val primariesIn = if (color?.colorPrimaries == "smpte170m") "170m" else "709"
         val outTransfer = if (target == "hdr10") "smpte2084" else "arib-std-b67"
 
+        // HDR10/PQ butuh 10-bit biar nggak banding parah di gradasi gelap -> x265.
+        // HLG dirancang tetep "aman" di 8-bit (makanya banyak kamera HP rekam HLG
+        // pakai H.264 biasa), jadi dia pakai x264 biar jauh lebih cepat dan nggak
+        // kena masalah hdr10-opt (parameter itu nggak ada di x264).
+        val outPixFmt = if (target == "hdr10") "yuv420p10le" else "yuv420p"
+
         val filter = listOf(
             "zscale=tin=709:min=$matrixIn:pin=$primariesIn:t=linear:npl=$whiteNits",
             "format=gbrpf32le",
             "zscale=p=2020",
             "zscale=t=$outTransfer",
             "zscale=m=2020_ncl:r=limited",
-            "format=yuv420p10le",
+            "format=$outPixFmt",
         ).joinToString(",")
 
-        val x265Params = if (target == "hdr10") {
-            "repeat-headers=1:hdr10=1:hdr10-opt=1:colorprim=bt2020:transfer=smpte2084:" +
+        val cmd = if (target == "hdr10") {
+            val x265Params = "repeat-headers=1:hdr10=1:colorprim=bt2020:transfer=smpte2084:" +
                 "colormatrix=bt2020nc:range=limited:" +
                 "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):" +
                 "max-cll=$whiteNits,${whiteNits / 2}"
+            "-y -ignore_unknown -i \"$inputPath\" " +
+                "-vf \"$filter\" " +
+                "-c:v libx265 -preset $preset -crf $crf -pix_fmt $outPixFmt -tag:v hvc1 " +
+                "-x265-params \"$x265Params\" " +
+                "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
+                "-c:a copy -movflags +faststart \"$outputPath\""
         } else {
-            "repeat-headers=1:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited"
+            "-y -ignore_unknown -i \"$inputPath\" " +
+                "-vf \"$filter\" " +
+                "-c:v libx264 -preset $preset -crf $crf -pix_fmt $outPixFmt " +
+                "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
+                "-c:a copy -movflags +faststart \"$outputPath\""
         }
-
-        val cmd = "-y -ignore_unknown -i \"$inputPath\" " +
-            "-vf \"$filter\" " +
-            "-c:v libx265 -preset $preset -crf $crf -pix_fmt yuv420p10le -tag:v hvc1 " +
-            "-x265-params \"$x265Params\" " +
-            "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
-            "-c:a copy -movflags +faststart \"$outputPath\""
 
         executeWithPercentage(cmd, outputPath, inputPath, onProgress)
     }
