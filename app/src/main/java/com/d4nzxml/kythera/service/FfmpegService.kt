@@ -282,6 +282,87 @@ class FfmpegService(private val context: Context) {
         return@withContext finalResult
     }
 
+
+    // ─── 6. SDR to HDR (zscale + libx265 10-bit, konversi warna beneran) ────
+    // Ini BUKAN tempel metadata doang: primaries BT.709 dikonversi ke BT.2020,
+    // transfer function diubah ke HLG/PQ, lalu di-encode ulang 10-bit.
+    // Butuh filter zscale (libzimg) dan encoder libx265 di build FFmpegKit ini.
+    suspend fun checkHdrCapability(): Pair<Boolean, List<String>> = withContext(Dispatchers.IO) {
+        val missing = mutableListOf<String>()
+        val filters = FFmpegKit.execute("-hide_banner -filters").output.orEmpty()
+        if (!Regex("""\bzscale\b""").containsMatchIn(filters)) missing += "filter zscale (libzimg)"
+        val encoders = FFmpegKit.execute("-hide_banner -encoders").output.orEmpty()
+        if (!encoders.contains("libx265")) missing += "encoder libx265"
+        (missing.isEmpty()) to missing
+    }
+
+    data class SourceColorInfo(
+        val colorSpace: String?,
+        val colorPrimaries: String?,
+        val colorTransfer: String?,
+        val alreadyHdr: Boolean,
+    )
+
+    suspend fun probeColorInfo(inputPath: String): SourceColorInfo? = withContext(Dispatchers.IO) {
+        try {
+            val stream = FFprobeKit.getMediaInformation(inputPath)
+                .mediaInformation?.streams?.firstOrNull { it.type == "video" } ?: return@withContext null
+            val transfer = stream.getStringProperty("color_transfer")
+            SourceColorInfo(
+                colorSpace = stream.getStringProperty("color_space"),
+                colorPrimaries = stream.getStringProperty("color_primaries"),
+                colorTransfer = transfer,
+                alreadyHdr = transfer == "smpte2084" || transfer == "arib-std-b67",
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun convertSdrToHdr(
+        inputPath: String,
+        target: String, // "hlg" atau "hdr10"
+        crf: Int = 20,
+        preset: String = "veryfast",
+        whiteNits: Int = 203,
+        onProgress: ((Int) -> Unit)? = null,
+    ): FfmpegResult = withContext(Dispatchers.IO) {
+        val ts = System.currentTimeMillis()
+        val outputPath = tempPath("Kythera_HDR_$ts.mp4")
+
+        val color = probeColorInfo(inputPath)
+        val matrixIn = when (color?.colorSpace) { "smpte170m" -> "170m"; "bt470bg" -> "470bg"; else -> "709" }
+        val primariesIn = if (color?.colorPrimaries == "smpte170m") "170m" else "709"
+        val outTransfer = if (target == "hdr10") "smpte2084" else "arib-std-b67"
+
+        val filter = listOf(
+            "zscale=tin=709:min=$matrixIn:pin=$primariesIn:t=linear:npl=$whiteNits",
+            "format=gbrpf32le",
+            "zscale=p=2020",
+            "zscale=t=$outTransfer",
+            "zscale=m=2020_ncl:r=limited",
+            "format=yuv420p10le",
+        ).joinToString(",")
+
+        val x265Params = if (target == "hdr10") {
+            "repeat-headers=1:hdr10=1:hdr10-opt=1:colorprim=bt2020:transfer=smpte2084:" +
+                "colormatrix=bt2020nc:range=limited:" +
+                "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):" +
+                "max-cll=$whiteNits,${whiteNits / 2}"
+        } else {
+            "repeat-headers=1:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited"
+        }
+
+        val cmd = "-y -ignore_unknown -i \"$inputPath\" " +
+            "-vf \"$filter\" " +
+            "-c:v libx265 -preset $preset -crf $crf -pix_fmt yuv420p10le -tag:v hvc1 " +
+            "-x265-params \"$x265Params\" " +
+            "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
+            "-c:a copy -movflags +faststart \"$outputPath\""
+
+        executeWithPercentage(cmd, outputPath, inputPath, onProgress)
+    }
+
     // ─── Utils ───────────────────────────────────────────────────────────────
     companion object {
         fun formatSize(bytes: Long): String = when {
