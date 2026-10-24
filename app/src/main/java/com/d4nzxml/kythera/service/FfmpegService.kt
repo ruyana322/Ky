@@ -355,14 +355,19 @@ class FfmpegService(private val context: Context) {
         // Lihat catatan boostStops di signature fungsi: cuma dipakai di HLG.
         val effectiveBoost = if (target == "hlg") boostStops else 0f
 
+        // npl (nominal peak luminance) cuma berlaku kalau salah satu sisi konversinya
+        // HLG/PQ. Langkah pertama ini 709->linear biasa, jadi npl di sini nggak ngaruh
+        // (bug lama: taronya di sini, makanya ganti nits nggak ngefek sama sekali).
+        // npl yang beneran kepake itu yang di zscale terakhir, zscale=t=$outTransfer,
+        // soalnya itu baru langkah linear -> HLG/PQ.
         val filterSteps = mutableListOf(
-            "zscale=tin=709:min=$matrixIn:pin=$primariesIn:t=linear:npl=$whiteNits",
+            "zscale=tin=709:min=$matrixIn:pin=$primariesIn:t=linear",
             "format=gbrpf32le",
             "zscale=p=2020",
         )
         if (effectiveBoost != 0f) filterSteps += "exposure=exposure=$effectiveBoost"
         filterSteps += listOf(
-            "zscale=t=$outTransfer",
+            "zscale=t=$outTransfer:npl=$whiteNits",
             "zscale=m=2020_ncl:r=limited",
             "format=$outPixFmt",
         )
