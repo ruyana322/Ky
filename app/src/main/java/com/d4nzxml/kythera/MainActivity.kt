@@ -186,7 +186,7 @@ val drawerItems = listOf(
     Triple(Icons.Rounded.Compress,      "Compress",      2),
     Triple(Icons.Rounded.Person,        "Profile",       3), 
     Triple(Icons.Rounded.Image,         "Photo Enhance", 4),
-    Triple(Icons.Rounded.Movie,         "Video Enhance", 5),
+    Triple(Icons.Rounded.HdrOn,         "SDR to HDR",    5),
     Triple(Icons.Rounded.CloudUpload,   "Upload TikTok", 6),
     Triple(Icons.Rounded.Settings,      "Pengaturan",    7),
 )
@@ -242,7 +242,7 @@ fun KytheraShell() {
                         2    -> CompressScreen()
                         3    -> HistoryScreen() 
                         4    -> EnhanceScreen()
-                        5    -> VideoEnhanceScreen()
+                        5    -> SdrToHdrScreen()
                         6    -> TikTokScreen()
                         7    -> SettingsScreen()
                         else -> DashboardScreen(onNavigate = { currentIndex = it })
@@ -256,7 +256,7 @@ fun KytheraShell() {
 // ─── App Bar ──────────────────────────────────────────────────────────────────
 @Composable
 fun KytheraAppBar(currentIndex: Int, onMenuTap: () -> Unit) {
-    val titles = listOf("Dashboard", "Converter", "Compress", "Profile", "Photo Enhance", "Video Enhance", "TikTok Upload", "Pengaturan")
+    val titles = listOf("Dashboard", "Converter", "Compress", "Profile", "Photo Enhance", "SDR to HDR", "TikTok Upload", "Pengaturan")
     Row(
         modifier = Modifier
             .fillMaxWidth()
