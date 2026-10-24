@@ -74,7 +74,16 @@ fun SdrToHdrScreen() {
     var checkingSource by remember { mutableStateOf(false) }
 
     var target by remember { mutableStateOf("hlg") } // "hlg" atau "hdr10"
-    var whiteNits by remember { mutableStateOf(203) }
+    // HLG itu relatif terhadap "nominal peak luminance" layar target (standar ~1000 nits),
+    // beda konsep sama "reference white" PQ/HDR10 (~203 nits per BT.2408). Pakai 203 buat
+    // HLG bikin hasil kurang "nyolok" (pucat, HP nggak nganggep cukup terang buat boost).
+    var whiteNits by remember { mutableStateOf(1000) }
+
+    // Opsi nits beda per target karena konsepnya beda (lihat catatan di atas).
+    val nitsOptions = if (target == "hdr10") listOf(100, 203, 300) else listOf(600, 1000, 1200)
+    LaunchedEffect(target) {
+        if (whiteNits !in nitsOptions) whiteNits = nitsOptions[1]
+    }
 
     var isProcessing by rememberSaveable { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
@@ -363,9 +372,12 @@ fun SdrToHdrScreen() {
 
                         Divider(color = Color.White.copy(0.07f))
 
-                        Text("Reference white (nits)", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (target == "hlg") "Target display peak (nits)" else "Reference white (nits)",
+                            color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        )
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(100, 203, 300).forEach { nits ->
+                            nitsOptions.forEach { nits ->
                                 val selected = whiteNits == nits
                                 Box(
                                     modifier = Modifier.weight(1f)
@@ -383,7 +395,10 @@ fun SdrToHdrScreen() {
                             }
                         }
                         Text(
-                            "Kalau hasil kelihatan terlalu redup atau terbakar di player HDR, ganti angka ini.",
+                            if (target == "hlg")
+                                "Makin tinggi, makin \"dipaksa mekar\" warnanya dan makin gampang mantul boost brightness di HP. Kalau masih pucat, coba naikin ke 1200."
+                            else
+                                "Kalau hasil kelihatan terlalu redup atau terbakar di player HDR, ganti angka ini.",
                             color = KColor.Text2, fontSize = 11.sp,
                         )
                     }
