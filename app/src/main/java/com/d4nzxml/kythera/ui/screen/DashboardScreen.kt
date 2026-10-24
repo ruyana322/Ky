@@ -22,17 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
-import com.d4nzxml.kythera.service.FfmpegService
-import com.d4nzxml.kythera.utils.PathUtils
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.io.File
-import androidx.core.content.FileProvider
 
 // --- Palette Warna Khusus Dashboard ---
 private val DashBg = Color(0xFF18152B) 
@@ -43,24 +33,9 @@ private val TextDesc = Color(0xFFAAA8C2)
 @Composable
 fun DashboardScreen(onNavigate: (Int) -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val ffmpegService = remember { FfmpegService(context) }
-    
+
     // 🔥 Saklar buat munculin Popup Panduan
     var showGuideDialog by remember { mutableStateOf(false) }
-
-    // State untuk Upload TikTok
-    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
-    var showUploadDialog by remember { mutableStateOf(false) }
-    var isProcessing by remember { mutableStateOf(false) }
-    var processProgress by remember { mutableStateOf(0) }
-
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            selectedVideoUri = uri
-            showUploadDialog = true
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -151,13 +126,13 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
         // 4. QUICK TOOLS GRID
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Video Enhance (Index Nav 5)
+                // SDR to HDR (Index Nav 5) — gantiin AI Video Enhance, udah nggak dipakai
                 ToolCard(
                     modifier = Modifier.weight(1f),
-                    title = "AI Video Enhance",
-                    desc = "Upscale video hingga 4K dengan AI. Tingkatkan kualitas menjadi baru.",
-                    icon = Icons.Rounded.MovieFilter, iconBg = Color(0xFFE84393),
-                    badge = "AI POWER", badgeColor = Color(0xFFE84393),
+                    title = "SDR to HDR",
+                    desc = "Konversi warna video SDR ke HDR (HLG/HDR10) beneran, bukan tempel metadata.",
+                    icon = Icons.Rounded.HdrOn, iconBg = Color(0xFFE84393),
+                    badge = "BARU", badgeColor = Color(0xFFE84393),
                     onClick = { onNavigate(5) }
                 )
                 // Photo Enhance (Index Nav 4)
@@ -187,17 +162,6 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
                     icon = Icons.Rounded.FolderZip, iconBg = Color(0xFF1ABC9C),
                     badge = "PRO", badgeColor = Color(0xFFF39C12),
                     onClick = { onNavigate(2) }
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Upload TikTok Studio
-                ToolCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    title = "Upload TikTok Studio",
-                    desc = "Unggah video ke TikTok Studio dengan fitur bypass anti-duplikat (Cepat & Optimasi).",
-                    icon = Icons.Rounded.CloudUpload, iconBg = Color(0xFFF00044), // TikTok Redish
-                    badge = "NEW", badgeColor = Color(0xFFF00044),
-                    onClick = { videoPicker.launch("video/*") }
                 )
             }
         }
@@ -270,94 +234,6 @@ fun DashboardScreen(onNavigate: (Int) -> Unit) {
                 confirmButton = {
                     TextButton(onClick = { showGuideDialog = false }) {
                         Text("Tutup", color = Color(0xFFB4A5F4), fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-        }
-
-        // 🔥 6. POPUP PILIHAN UPLOAD
-        if (showUploadDialog) {
-            AlertDialog(
-                onDismissRequest = { if (!isProcessing) showUploadDialog = false },
-                containerColor = CardSolidBg,
-                shape = RoundedCornerShape(20.dp),
-                title = { Text("Pilih Mode Upload", color = TextTitle, fontWeight = FontWeight.Bold) },
-                text = {
-                    if (isProcessing) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                            CircularProgressIndicator(color = Color(0xFF1DD1A1))
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Memproses Video... $processProgress%", color = TextDesc)
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // Cepat
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF382B73)).clickable {
-                                    isProcessing = true
-                                    processProgress = 0
-                                    scope.launch {
-                                        val realPath = PathUtils.getPath(context, selectedVideoUri!!) ?: return@launch
-                                        val res = ffmpegService.applyFakeSample(realPath)
-                                        if (res.success) {
-                                            val outUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(res.outputPath))
-                                            SharedUploadState.processedVideoUri = outUri
-                                            showUploadDialog = false
-                                            isProcessing = false
-                                            onNavigate(6) // Pergi ke TikTokScreen (WebView)
-                                        } else {
-                                            isProcessing = false
-                                        }
-                                    }
-                                }.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Rounded.Bolt, contentDescription = null, tint = Color.Yellow)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text("Mode Cepat", color = Color.White, fontWeight = FontWeight.Bold)
-                                    Text("Injeksi bypass FakeSample instan (1 dtk).", color = Color(0xFFAAA8C2), fontSize = 11.sp)
-                                }
-                            }
-                            
-                            // Optimasi
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF1ABC9C).copy(alpha=0.3f)).clickable {
-                                    isProcessing = true
-                                    processProgress = 0
-                                    scope.launch {
-                                        val realPath = PathUtils.getPath(context, selectedVideoUri!!) ?: return@launch
-                                        val res = ffmpegService.optimizeAndFakeSample(realPath) { prog ->
-                                            processProgress = prog
-                                        }
-                                        if (res.success) {
-                                            val outUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(res.outputPath))
-                                            SharedUploadState.processedVideoUri = outUri
-                                            showUploadDialog = false
-                                            isProcessing = false
-                                            onNavigate(6) // Pergi ke TikTokScreen (WebView)
-                                        } else {
-                                            isProcessing = false
-                                        }
-                                    }
-                                }.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Rounded.SlowMotionVideo, contentDescription = null, tint = Color(0xFF1ABC9C))
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text("Mode Optimasi", color = Color.White, fontWeight = FontWeight.Bold)
-                                    Text("Convert (CRF 18) lalu injeksi FakeSample.", color = Color(0xFFAAA8C2), fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    if (!isProcessing) {
-                        TextButton(onClick = { showUploadDialog = false }) {
-                            Text("Batal", color = Color.Gray)
-                        }
                     }
                 }
             )
