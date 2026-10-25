@@ -307,6 +307,7 @@ class FfmpegService(private val context: Context) {
         val colorPrimaries: String?,
         val colorTransfer: String?,
         val colorRange: String?, // "tv"(limited) / "pc"(full) / null kalau nggak ketauan
+        val codecName: String?, // "h264" / "hevc" / dll
         val alreadyHdr: Boolean,
     )
 
@@ -320,11 +321,88 @@ class FfmpegService(private val context: Context) {
                 colorPrimaries = stream.getStringProperty("color_primaries"),
                 colorTransfer = transfer,
                 colorRange = stream.getStringProperty("color_range"),
+                codecName = stream.getStringProperty("codec_name"),
                 alreadyHdr = transfer == "smpte2084" || transfer == "arib-std-b67",
             )
         } catch (e: Exception) {
             null
         }
+    }
+
+    // ─── 6b. Tag-only HDR (TANPA ubah piksel sama sekali) ──────────────────
+    // Ini BENERAN cuma nempel tag warna di bitstream (lewat bitstream filter,
+    // bukan re-encode), video di-copy apa adanya. Piksel 100% asli, nggak ada
+    // transformasi warna. Makanya jauh lebih cepat (nggak nunggu encode) dan
+    // size/kualitas sama persis kayak sumbernya.
+    //
+    // Ini TEPAT kebalikannya dari convertSdrToHdr: itu beneran ubah warna,
+    // ini cuma ganti label. Dipakai kalau tujuannya cuma biar HP ngedetect
+    // "HDR" (efek dim di bingkai dll) tapi warnanya mau tetep asli.
+    //
+    // Cuma support HLG, bukan HDR10: PQ di 8-bit gampang banding dan metadata
+    // statisnya (max-cll) seharusnya nyambung sama piksel asli -> nggak masuk
+    // akal buat tag-only. HLG aman di 8-bit, cocok buat pendekatan ini.
+    suspend fun tagOnlyHdr(
+        inputPath: String,
+        // true: primaries ikut ditag BT.2020 juga. false: primaries dibiarin BT.709.
+        // CATATAN (terbukti dari eksperimen user): ini TERNYATA nggak ngaruh ke
+        // saturasi. Yang bikin HP render lebih vivid itu transfer_characteristics=HLG
+        // itu sendiri, bukan primaries-nya. Opsi ini dibiarin ada buat validitas
+        // metadata aja, bukan buat ngontrol saturasi.
+        wideGamutPrimaries: Boolean = true,
+        // 1.0 = nggak diapa-apain, stream-copy murni, INSTAN. Di bawah 1.0 = saturasi
+        // diturunin dulu (eq filter) sebelum ditag, buat nglawan boost vivid yang
+        // dipaksain HP pas render HLG. Begitu != 1.0, otomatis re-encode (nggak
+        // instan lagi), soalnya eq filter butuh decode-encode ulang.
+        saturation: Float = 1.0f,
+        crf: Int = 16,
+        preset: String = "veryfast",
+        onProgress: ((Int) -> Unit)? = null,
+    ): FfmpegResult = withContext(Dispatchers.IO) {
+        val ts = System.currentTimeMillis()
+        val outputPath = tempPath("Kythera_HDR_tag_$ts.mp4")
+
+        val color = probeColorInfo(inputPath)
+        if (color?.alreadyHdr == true) {
+            return@withContext FfmpegResult(success = false, errorMessage = "Video ini sudah HDR.")
+        }
+        val codec = color?.codecName
+        val outPrimaries = if (wideGamutPrimaries) "bt2020" else "bt709"
+        val outColorspace = if (wideGamutPrimaries) "bt2020nc" else "bt709"
+
+        val cmd: String
+        val debugMode: String
+
+        if (saturation == 1.0f) {
+            // Jalur cepat: stream-copy + bitstream filter, piksel beneran nggak disentuh.
+            val primCode = if (wideGamutPrimaries) 9 else 1
+            val matrixCode = if (wideGamutPrimaries) 9 else 1
+            val bsfName = when (codec) { "h264" -> "h264_metadata"; "hevc" -> "hevc_metadata"; else -> null }
+            if (bsfName == null) {
+                return@withContext FfmpegResult(
+                    success = false,
+                    errorMessage = "Codec video ini ($codec) belum didukung buat mode tag-only.",
+                )
+            }
+            val metaBsf = "$bsfName=colour_primaries=$primCode:transfer_characteristics=18:matrix_coefficients=$matrixCode"
+            cmd = "-y -i \"$inputPath\" -map 0 -c copy " +
+                "-bsf:v $metaBsf " +
+                "-color_primaries $outPrimaries -color_trc arib-std-b67 -colorspace $outColorspace " +
+                "-movflags +faststart \"$outputPath\""
+            debugMode = "tagOnly(copy) codec=$codec wideGamutPrimaries=$wideGamutPrimaries"
+        } else {
+            // Jalur re-encode ringan: cuma eq=saturation, nggak ada zscale/linearize.
+            // Codec dipaksa libx264 (support luas), berapapun codec sumbernya.
+            cmd = "-y -i \"$inputPath\" " +
+                "-vf \"eq=saturation=$saturation\" " +
+                "-c:v libx264 -preset $preset -crf $crf -pix_fmt yuv420p " +
+                "-color_primaries $outPrimaries -color_trc arib-std-b67 -colorspace $outColorspace -color_range tv " +
+                "-c:a copy -movflags +faststart \"$outputPath\""
+            debugMode = "tagOnly(reencode) saturation=$saturation crf=$crf preset=$preset wideGamutPrimaries=$wideGamutPrimaries"
+        }
+
+        val result = executeWithPercentage(cmd, outputPath, inputPath, onProgress)
+        result.copy(debugInfo = "mode=$debugMode\ncmd=$cmd")
     }
 
     suspend fun convertSdrToHdr(
