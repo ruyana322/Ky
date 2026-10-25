@@ -73,6 +73,16 @@ fun SdrToHdrScreen() {
     var alreadyHdr by remember { mutableStateOf(false) }
     var checkingSource by remember { mutableStateOf(false) }
 
+    // "tag" = cuma re-tag, warna asli nggak disentuh, instan. "transform" = beneran
+    // ubah warna lewat zscale (lebih "akurat" tapi warnanya ikut berubah & lebih lambat).
+    var mode by remember { mutableStateOf("tag") }
+    // Khusus mode "tag": kalau true primaries ikut ditag BT.2020 (lebih jreng di
+    // player gamut-aware). Kalau false, primaries dibiarin BT.709, cuma transfer-nya HLG.
+    var wideGamutPrimaries by remember { mutableStateOf(false) }
+    // < 1.0 = redam saturasi sebelum ditag, buat nglawan boost vivid yang HP paksain
+    // pas render HLG. 1.0 = nggak diapa-apain (instan, stream-copy murni).
+    var tagSaturation by remember { mutableStateOf(1.0f) }
+
     var target by remember { mutableStateOf("hlg") } // "hlg" atau "hdr10"
     // HLG itu relatif terhadap "nominal peak luminance" layar target (standar ~1000 nits),
     // beda konsep sama "reference white" PQ/HDR10 (~203 nits per BT.2408). Pakai 203 buat
@@ -106,12 +116,20 @@ fun SdrToHdrScreen() {
     val inputUri = inputUriStr?.let { Uri.parse(it) }
     val animatedProgress by animateFloatAsState(targetValue = progressPct, label = "progress")
 
-    // Dicek ulang tiap target berubah, soalnya HLG pakai x264 dan HDR10 pakai x265 (beda encoder).
-    LaunchedEffect(target) {
-        val (ok, missing) = ffmpegService.checkHdrCapability(target)
-        capabilityOk = ok
-        missingParts = missing
-        capabilityChecked = true
+    // Mode "tag" nggak butuh zscale/encoder HDR sama sekali (cuma bitstream filter +
+    // stream copy), jadi nggak perlu dicek. Dicek ulang tiap target berubah buat mode
+    // "transform", soalnya HLG pakai x264 dan HDR10 pakai x265 (beda encoder).
+    LaunchedEffect(target, mode) {
+        if (mode == "tag") {
+            capabilityOk = true
+            missingParts = emptyList()
+            capabilityChecked = true
+        } else {
+            val (ok, missing) = ffmpegService.checkHdrCapability(target)
+            capabilityOk = ok
+            missingParts = missing
+            capabilityChecked = true
+        }
     }
 
     LaunchedEffect(isProcessing) {
@@ -168,15 +186,25 @@ fun SdrToHdrScreen() {
                     errorLog = "Tidak bisa akses file sumber"; isProcessing = false; return@launch
                 }
 
-                statusMsg = "Konversi warna BT.709 \u2192 BT.2020 + encode..."
-                val result = ffmpegService.convertSdrToHdr(
-                    inputPath = path,
-                    target = target,
-                    whiteNits = whiteNits,
-                    boostStops = boostStops,
-                    crf = qualityCrf,
-                    onProgress = { pct -> progressPct = pct / 100f },
-                )
+                val result = if (mode == "tag") {
+                    statusMsg = "Nempel tag HDR, warna asli nggak disentuh..."
+                    ffmpegService.tagOnlyHdr(
+                        inputPath = path,
+                        wideGamutPrimaries = wideGamutPrimaries,
+                        saturation = tagSaturation,
+                        onProgress = { pct -> progressPct = pct / 100f },
+                    )
+                } else {
+                    statusMsg = "Konversi warna BT.709 \u2192 BT.2020 + encode..."
+                    ffmpegService.convertSdrToHdr(
+                        inputPath = path,
+                        target = target,
+                        whiteNits = whiteNits,
+                        boostStops = boostStops,
+                        crf = qualityCrf,
+                        onProgress = { pct -> progressPct = pct / 100f },
+                    )
+                }
 
                 debugInfo = result.debugInfo
 
@@ -355,6 +383,94 @@ fun SdrToHdrScreen() {
             }
 
             AnimatedVisibility(visible = !isProcessing, enter = fadeIn(), exit = fadeOut()) {
+                GlassCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Mode", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("tag" to "Tag Doang (cepat)", "transform" to "Ubah Warna (akurat)").forEach { (m, label) ->
+                                val selected = mode == m
+                                Box(
+                                    modifier = Modifier.weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
+                                        .clickable { mode = m }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        label, color = if (selected) Color.Black else Color.White.copy(0.7f),
+                                        fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            if (mode == "tag")
+                                "Video di-copy apa adanya, cuma label warnanya diganti jadi HLG. Warna 100% asli, instan, size sama persis. Ini yang bikin HP ngedetect HDR tanpa ngubah tampilan videonya."
+                            else
+                                "Piksel videonya beneran diproses ulang (BT.709\u2192BT.2020 + kurva HLG/PQ). Warna bisa berubah dari aslinya, lebih lambat, tapi \"HDR\"-nya lebih nyata secara teknis.",
+                            color = KColor.Text2, fontSize = 11.sp,
+                        )
+
+                        if (mode == "tag") {
+                            Divider(color = Color.White.copy(0.07f))
+                            Text("Gamut warna", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(false to "Kalem (BT.709)", true to "Resmi (BT.2020)").forEach { (wide, label) ->
+                                    val selected = wideGamutPrimaries == wide
+                                    Box(
+                                        modifier = Modifier.weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (selected) KColor.Accent2 else Color.White.copy(0.05f))
+                                            .clickable { wideGamutPrimaries = wide }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            label, color = if (selected) Color.White else Color.White.copy(0.7f),
+                                            fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                "Terbukti dari eksperimen: pilihan ini TERNYATA nggak ngaruh ke saturasi. Yang bikin jreng itu tag HLG-nya sendiri, bukan primaries. Tinggal biarin \"Kalem\" aja.",
+                                color = KColor.Text2, fontSize = 11.sp,
+                            )
+
+                            Divider(color = Color.White.copy(0.07f))
+                            Text("Redam saturasi (lawan boost HP)", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(1.0f to "Off (instan)", 0.85f to "Dikit", 0.7f to "Lumayan", 0.55f to "Banyak").forEach { (sat, label) ->
+                                    val selected = tagSaturation == sat
+                                    Box(
+                                        modifier = Modifier.weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (selected) KColor.Accent2 else Color.White.copy(0.05f))
+                                            .clickable { tagSaturation = sat }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            label, color = if (selected) Color.White else Color.White.copy(0.7f),
+                                            fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                if (tagSaturation == 1.0f)
+                                    "Off = stream-copy murni, instan, piksel nggak disentuh sama sekali."
+                                else
+                                    "Selain Off, ini re-encode ringan (nggak instan lagi, tapi masih jauh lebih cepat dari mode Ubah Warna). Saturasi diturunin dulu di file-nya, biar abis di-boost HP hasilnya pas, nggak kelewatan.",
+                                color = KColor.Text2, fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = !isProcessing && mode == "transform", enter = fadeIn(), exit = fadeOut()) {
                 GlassCard {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Output HDR", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
