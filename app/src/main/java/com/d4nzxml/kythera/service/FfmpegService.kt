@@ -306,6 +306,7 @@ class FfmpegService(private val context: Context) {
         val colorSpace: String?,
         val colorPrimaries: String?,
         val colorTransfer: String?,
+        val colorRange: String?, // "tv"(limited) / "pc"(full) / null kalau nggak ketauan
         val alreadyHdr: Boolean,
     )
 
@@ -318,6 +319,7 @@ class FfmpegService(private val context: Context) {
                 colorSpace = stream.getStringProperty("color_space"),
                 colorPrimaries = stream.getStringProperty("color_primaries"),
                 colorTransfer = transfer,
+                colorRange = stream.getStringProperty("color_range"),
                 alreadyHdr = transfer == "smpte2084" || transfer == "arib-std-b67",
             )
         } catch (e: Exception) {
@@ -346,6 +348,11 @@ class FfmpegService(private val context: Context) {
         val matrixIn = when (color?.colorSpace) { "smpte170m" -> "170m"; "bt470bg" -> "470bg"; else -> "709" }
         val primariesIn = if (color?.colorPrimaries == "smpte170m") "170m" else "709"
         val outTransfer = if (target == "hdr10") "smpte2084" else "arib-std-b67"
+        // Dulu nggak dikasih tau ke zscale, jadi dia nebak (defaultnya limited). Kalau
+        // sumbernya sebenernya full range (umum buat video hasil export medsos/editor),
+        // salah tebak ini bikin warna "diregangin" kelewat jauh -> oversaturated, item
+        // jadi makin item. Sekarang dibaca dari sumbernya beneran, nggak nebak lagi.
+        val rangeIn = when (color?.colorRange) { "pc" -> "full"; "tv" -> "limited"; else -> "limited" }
 
         // HDR10/PQ butuh 10-bit biar nggak banding parah di gradasi gelap -> x265.
         // HLG dirancang tetep "aman" di 8-bit (makanya banyak kamera HP rekam HLG
@@ -361,7 +368,7 @@ class FfmpegService(private val context: Context) {
         // npl yang beneran kepake itu yang di zscale terakhir, zscale=t=$outTransfer,
         // soalnya itu baru langkah linear -> HLG/PQ.
         val filterSteps = mutableListOf(
-            "zscale=tin=709:min=$matrixIn:pin=$primariesIn:t=linear",
+            "zscale=tin=709:min=$matrixIn:pin=$primariesIn:rin=$rangeIn:t=linear",
             "format=gbrpf32le",
             "zscale=p=2020",
         )
@@ -395,6 +402,7 @@ class FfmpegService(private val context: Context) {
         val result = executeWithPercentage(cmd, outputPath, inputPath, onProgress)
         result.copy(
             debugInfo = "target=$target boostStops=$effectiveBoost whiteNits(npl)=$whiteNits\n" +
+                "sourceRange=${color?.colorRange ?: "unknown"} -> rin=$rangeIn\n" +
                 "preset=$preset crf=$crf pixFmt=$outPixFmt\nvf=$filter",
         )
     }
