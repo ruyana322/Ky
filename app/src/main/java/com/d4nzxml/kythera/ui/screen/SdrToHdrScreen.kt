@@ -102,6 +102,10 @@ fun SdrToHdrScreen() {
     // CRF x264/x265: makin kecil makin mendekati lossless (size gede, lambat).
     var qualityCrf by remember { mutableStateOf(18) }
 
+    // Preset x265: makin lambat makin efisien kompresinya (detail lebih kejaga di
+    // size yang sama). veryfast+crf18 udah tervalidasi manual hasilnya bagus/nggak buram.
+    var qualityPreset by remember { mutableStateOf("veryfast") }
+
     var isProcessing by rememberSaveable { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
     var progressPct by remember { mutableStateOf(0f) }
@@ -202,6 +206,7 @@ fun SdrToHdrScreen() {
                         whiteNits = whiteNits,
                         boostStops = boostStops,
                         crf = qualityCrf,
+                        preset = qualityPreset,
                         onProgress = { pct -> progressPct = pct / 100f },
                     )
                 }
@@ -579,7 +584,38 @@ fun SdrToHdrScreen() {
                             }
                         }
                         Text(
-                            "\"Mendekati Asli\" file-nya gede dan prosesnya lebih lambat, tapi paling dikit ngerusak detail/gradasi. Default sebelumnya (CRF 20) sengaja dikompres cukup agresif, itu kenapa size-nya anjlok jauh dari sumber.",
+                            "\"Mendekati Asli\" file-nya gede dan prosesnya lebih lambat, tapi paling dikit ngerusak detail/gradasi.",
+                            color = KColor.Text2, fontSize = 11.sp,
+                        )
+
+                        Divider(color = Color.White.copy(0.07f))
+                        Text("Preset encoder", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                "ultrafast" to "Tercepat",
+                                "veryfast" to "Cepat",
+                                "fast" to "Normal",
+                                "medium" to "Rapi",
+                                "slow" to "Terbaik",
+                            ).forEach { (p, label) ->
+                                val selected = qualityPreset == p
+                                Box(
+                                    modifier = Modifier.weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
+                                        .clickable { qualityPreset = p }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        label, color = if (selected) Color.Black else Color.White.copy(0.7f),
+                                        fontSize = 9.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            "Makin ke kanan makin lambat tapi detail makin kejaga di ukuran file yang sama. \"Cepat\" + CRF Seimbang itu kombinasi yang udah divalidasi manual hasilnya bagus, nggak buram \u2014 default yang aman.",
                             color = KColor.Text2, fontSize = 11.sp,
                         )
                     }
