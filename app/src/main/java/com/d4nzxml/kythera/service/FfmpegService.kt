@@ -297,8 +297,8 @@ class FfmpegService(private val context: Context) {
             val filters = FFmpegKit.execute("-hide_banner -filters").output.orEmpty()
             if (!Regex("""\bzscale\b""").containsMatchIn(filters)) missing += "filter zscale (libzimg)"
             val encoders = FFmpegKit.execute("-hide_banner -encoders").output.orEmpty()
-            val neededEncoder = if (target == "hdr10") "libx265" else "libx264"
-            if (!encoders.contains(neededEncoder)) missing += "encoder $neededEncoder"
+            // HLG dan HDR10 dua-duanya sekarang HEVC 10-bit (lihat convertSdrToHdr).
+            if (!encoders.contains("libx265")) missing += "encoder libx265"
             (missing.isEmpty()) to missing
         }
 
@@ -408,7 +408,7 @@ class FfmpegService(private val context: Context) {
     suspend fun convertSdrToHdr(
         inputPath: String,
         target: String, // "hlg" atau "hdr10"
-        crf: Int = 20,
+        crf: Int = 18, // Tervalidasi manual: crf=18 + preset=veryfast (HEVC 10-bit) hasilnya bagus, nggak buram.
         preset: String = "veryfast",
         whiteNits: Int = 203,
         // Dorong highlight di ranah linear (sebelum di-encode ke kurva HLG/PQ) biar
@@ -432,11 +432,11 @@ class FfmpegService(private val context: Context) {
         // jadi makin item. Sekarang dibaca dari sumbernya beneran, nggak nebak lagi.
         val rangeIn = when (color?.colorRange) { "pc" -> "full"; "tv" -> "limited"; else -> "limited" }
 
-        // HDR10/PQ butuh 10-bit biar nggak banding parah di gradasi gelap -> x265.
-        // HLG dirancang tetep "aman" di 8-bit (makanya banyak kamera HP rekam HLG
-        // pakai H.264 biasa), jadi dia pakai x264 biar jauh lebih cepat dan nggak
-        // kena masalah hdr10-opt (parameter itu nggak ada di x264).
-        val outPixFmt = if (target == "hdr10") "yuv420p10le" else "yuv420p"
+        // Dulu HLG sempet dipindah ke x264 8-bit demi kecepatan, tapi hasilnya kalah
+        // kualitas dibanding tool berbayar yang dipakai user buat pembanding (itu HEVC
+        // Main10, 10-bit). Sekarang disamain: HLG dan HDR10 dua-duanya HEVC 10-bit,
+        // cuma beda x265-params (HDR10 pakai metadata statis, HLG nggak).
+        val outPixFmt = "yuv420p10le"
         // Lihat catatan boostStops di signature fungsi: cuma dipakai di HLG.
         val effectiveBoost = if (target == "hlg") boostStops else 0f
 
@@ -458,24 +458,20 @@ class FfmpegService(private val context: Context) {
         )
         val filter = filterSteps.joinToString(",")
 
-        val cmd = if (target == "hdr10") {
-            val x265Params = "repeat-headers=1:hdr10=1:colorprim=bt2020:transfer=smpte2084:" +
+        val x265Params = if (target == "hdr10") {
+            "repeat-headers=1:hdr10=1:colorprim=bt2020:transfer=smpte2084:" +
                 "colormatrix=bt2020nc:range=limited:" +
                 "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):" +
                 "max-cll=$whiteNits,${whiteNits / 2}"
-            "-y -ignore_unknown -i \"$inputPath\" " +
-                "-vf \"$filter\" " +
-                "-c:v libx265 -preset $preset -crf $crf -pix_fmt $outPixFmt -tag:v hvc1 " +
-                "-x265-params \"$x265Params\" " +
-                "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
-                "-c:a copy -movflags +faststart \"$outputPath\""
         } else {
-            "-y -ignore_unknown -i \"$inputPath\" " +
-                "-vf \"$filter\" " +
-                "-c:v libx264 -preset $preset -crf $crf -pix_fmt $outPixFmt " +
-                "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
-                "-c:a copy -movflags +faststart \"$outputPath\""
+            "repeat-headers=1:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited"
         }
+        val cmd = "-y -ignore_unknown -i \"$inputPath\" " +
+            "-vf \"$filter\" " +
+            "-c:v libx265 -preset $preset -crf $crf -pix_fmt $outPixFmt -tag:v hvc1 " +
+            "-x265-params \"$x265Params\" " +
+            "-color_primaries bt2020 -color_trc $outTransfer -colorspace bt2020nc -color_range tv " +
+            "-c:a copy -movflags +faststart \"$outputPath\""
 
         val result = executeWithPercentage(cmd, outputPath, inputPath, onProgress)
         result.copy(
