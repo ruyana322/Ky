@@ -6,20 +6,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 // ─── Kythera Color Tokens ─────────────────────────────────────────────────────
+// Arah "Scope": meja warna colorist/broadcast monitor. Hijau sinyal dipakai buat
+// status aktif/beneran-jalan, bukan dekorasi; amber buat Pro/perhatian. Border
+// ditintin hijau-gelap biar nyambung sama garis graticule di background.
 object KColor {
-    val Bg        = Color(0xFF0A0B0E) // Latar belakang utama paling gelap
-    val Surface   = Color(0xFF0F1115) // Warna dasar
-    val Surface2  = Color(0xFF1E2025) // Warna kartu (lebih terang biar elevation kelihatan)
-    val Surface3  = Color(0xFF26282E)
-    val Border    = Color(0xFF2A2D35)
-    val Border2   = Color(0xFF353943)
-    val Accent    = Color(0xFF00D4FF)
-    val Accent2   = Color(0xFF7C3AED)
-    val Accent3   = Color(0xFF10B981)
-    val Orange    = Color(0xFFF59E0B)
-    val Text      = Color(0xFFE5E5E5)
-    val Text2     = Color(0xFFA1A1AA)
-    val Text3     = Color(0xFF71717A)
+    val Bg        = Color(0xFF0A0C0E) // Latar belakang utama paling gelap
+    val Surface   = Color(0xFF0D1210) // Warna dasar, tintin ijo gelap
+    val Surface2  = Color(0xFF131815) // Warna kartu (lebih terang biar elevation kelihatan)
+    val Surface3  = Color(0xFF1A211C)
+    val Border    = Color(0xFF1B2320)
+    val Border2   = Color(0xFF2A332D)
+    val Accent    = Color(0xFF39FF8A) // signal green — status aktif, CTA utama
+    val Accent2   = Color(0xFFFFB454) // monitor amber — Pro, perhatian
+    val Accent3   = Color(0xFF35D6E6) // cyan — info/beta, aksen sekunder
+    val Orange    = Color(0xFFFFA726)
+    val Text      = Color(0xFFE7EDE9)
+    val Text2     = Color(0xFF8FA69C)
+    val Text3     = Color(0xFF5C6D66)
 }
 
 
