@@ -83,28 +83,17 @@ fun SdrToHdrScreen() {
     // pas render HLG. 1.0 = nggak diapa-apain (instan, stream-copy murni).
     var tagSaturation by remember { mutableStateOf(1.0f) }
 
-    var target by remember { mutableStateOf("hlg") } // "hlg" atau "hdr10"
-    // HLG itu relatif terhadap "nominal peak luminance" layar target (standar ~1000 nits),
-    // beda konsep sama "reference white" PQ/HDR10 (~203 nits per BT.2408). Pakai 203 buat
-    // HLG bikin hasil kurang "nyolok" (pucat, HP nggak nganggep cukup terang buat boost).
-    var whiteNits by remember { mutableStateOf(1000) }
+    var target by remember { mutableStateOf("hlg") } // "hlg" atau "hdr10" — cuma ini pilihan user.
 
-    // Opsi nits beda per target karena konsepnya beda (lihat catatan di atas).
-    val nitsOptions = if (target == "hdr10") listOf(100, 203, 300) else listOf(600, 1000, 1200)
-    LaunchedEffect(target) {
-        if (whiteNits !in nitsOptions) whiteNits = nitsOptions[1]
-    }
-
-    // Dorong highlight di ranah linear sebelum encode HLG. Cuma relevan buat HLG;
-    // HDR10 bawa metadata statis (max-cll) yang bisa jadi nggak sinkron kalau dipaksa boost.
-    var boostStops by remember { mutableStateOf(0f) }
-
-    // CRF x264/x265: makin kecil makin mendekati lossless (size gede, lambat).
-    var qualityCrf by remember { mutableStateOf(18) }
-
-    // Preset x265: makin lambat makin efisien kompresinya (detail lebih kejaga di
-    // size yang sama). veryfast+crf18 udah tervalidasi manual hasilnya bagus/nggak buram.
-    var qualityPreset by remember { mutableStateOf("veryfast") }
+    // Semua setting di bawah ini DIKUNCI, nggak ada kontrolnya lagi di UI. Nilainya
+    // hasil validasi manual langsung: HLG persis sama command yang udah dites dan
+    // terbukti bagus/nggak buram. HDR10 nurut konvensi sama (npl=203 reference
+    // white per BT.2408, karena HDR10/PQ beda konsep sama HLG — lihat riwayat
+    // diskusi SDR-to-HDR kalau mau tau alasannya).
+    val whiteNits = if (target == "hdr10") 203 else 1000
+    val boostStops = 0f
+    val qualityCrf = 18
+    val qualityPreset = "veryfast"
 
     var isProcessing by rememberSaveable { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
@@ -498,124 +487,8 @@ fun SdrToHdrScreen() {
                             }
                         }
                         Text(
-                            if (target == "hlg") "HLG: kompatibel TV lama, nggak butuh metadata brightness."
-                            else "HDR10: butuh metadata mastering display, kontras lebih tinggi di layar yang support.",
-                            color = KColor.Text2, fontSize = 11.sp,
-                        )
-
-                        Divider(color = Color.White.copy(0.07f))
-
-                        Text(
-                            if (target == "hlg") "Target display peak (nits)" else "Reference white (nits)",
-                            color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            nitsOptions.forEach { nits ->
-                                val selected = whiteNits == nits
-                                Box(
-                                    modifier = Modifier.weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) KColor.Accent2 else Color.White.copy(0.05f))
-                                        .clickable { whiteNits = nits }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        "$nits", color = if (selected) Color.White else Color.White.copy(0.7f),
-                                        fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                }
-                            }
-                        }
-                        Text(
-                            if (target == "hlg")
-                                "Makin tinggi, makin \"dipaksa mekar\" warnanya dan makin gampang mantul boost brightness di HP. Kalau masih pucat, coba naikin ke 1200."
-                            else
-                                "Kalau hasil kelihatan terlalu redup atau terbakar di player HDR, ganti angka ini.",
-                            color = KColor.Text2, fontSize = 11.sp,
-                        )
-
-                        if (target == "hlg") {
-                            Divider(color = Color.White.copy(0.07f))
-                            Text("Dorongan highlight (stop)", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(0f, 0.5f, 1.0f).forEach { stops ->
-                                    val selected = boostStops == stops
-                                    Box(
-                                        modifier = Modifier.weight(1f)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
-                                            .clickable { boostStops = stops }
-                                            .padding(vertical = 10.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            if (stops == 0f) "Off" else "+${stops}",
-                                            color = if (selected) Color.Black else Color.White.copy(0.7f),
-                                            fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                "Ini beneran dorong nilai highlight-nya (bukan cuma ganti tag), biar HP lebih gampang nganggep video ini butuh brightness boost. Mulai dari +0.5.",
-                                color = KColor.Text2, fontSize = 11.sp,
-                            )
-                        }
-
-                        Divider(color = Color.White.copy(0.07f))
-                        Text("Kualitas / ukuran", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(23 to "Kecil", 18 to "Seimbang", 14 to "Mendekati Asli").forEach { (crfVal, label) ->
-                                val selected = qualityCrf == crfVal
-                                Box(
-                                    modifier = Modifier.weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) KColor.Accent2 else Color.White.copy(0.05f))
-                                        .clickable { qualityCrf = crfVal }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        label, color = if (selected) Color.White else Color.White.copy(0.7f),
-                                        fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                }
-                            }
-                        }
-                        Text(
-                            "\"Mendekati Asli\" file-nya gede dan prosesnya lebih lambat, tapi paling dikit ngerusak detail/gradasi.",
-                            color = KColor.Text2, fontSize = 11.sp,
-                        )
-
-                        Divider(color = Color.White.copy(0.07f))
-                        Text("Preset encoder", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(
-                                "ultrafast" to "Tercepat",
-                                "veryfast" to "Cepat",
-                                "fast" to "Normal",
-                                "medium" to "Rapi",
-                                "slow" to "Terbaik",
-                            ).forEach { (p, label) ->
-                                val selected = qualityPreset == p
-                                Box(
-                                    modifier = Modifier.weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
-                                        .clickable { qualityPreset = p }
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        label, color = if (selected) Color.Black else Color.White.copy(0.7f),
-                                        fontSize = 9.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                }
-                            }
-                        }
-                        Text(
-                            "Makin ke kanan makin lambat tapi detail makin kejaga di ukuran file yang sama. \"Cepat\" + CRF Seimbang itu kombinasi yang udah divalidasi manual hasilnya bagus, nggak buram \u2014 default yang aman.",
+                            if (target == "hlg") "HLG: kompatibel TV lama, nggak butuh metadata brightness. Settingan (npl 1000, CRF 18, preset cepat) udah dikunci ke kombinasi yang tervalidasi bagus."
+                            else "HDR10: butuh metadata mastering display, kontras lebih tinggi di layar yang support. Settingan dikunci ke konvensi standar (reference white 203 nits).",
                             color = KColor.Text2, fontSize = 11.sp,
                         )
                     }
