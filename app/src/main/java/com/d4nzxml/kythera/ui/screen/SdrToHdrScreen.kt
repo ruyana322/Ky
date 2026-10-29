@@ -1,9 +1,9 @@
 package com.d4nzxml.kythera.ui.screen
 
-import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.d4nzxml.kythera.service.FfmpegService
 import com.d4nzxml.kythera.service.GalleryService
 import com.d4nzxml.kythera.ui.components.*
@@ -51,10 +52,10 @@ import kotlinx.coroutines.withContext
  * SDR ke HDR (HLG atau HDR10), konversi warna beneran lewat zscale + encode ulang
  * HEVC 10-bit. Bukan sekadar nempel tag metadata.
  *
- * Catatan jujur buat yang baca kode ini nanti: ini inverse tone mapping, hasilnya
- * selalu perkiraan — detail highlight yang nggak ada di video asli nggak bisa
- * dimunculkan balik. whiteNits default 203 (reference white BT.2408), geser kalau
- * hasil kelihatan terlalu redup/terang di player HDR.
+ * Settingan (npl, CRF, preset) dikunci ke kombinasi yang udah divalidasi manual
+ * hasilnya bagus/nggak buram — nggak ada kontrolnya lagi di UI, cuma pilih HLG
+ * atau HDR10. Ini inverse tone mapping, hasilnya selalu perkiraan — detail
+ * highlight yang nggak ada di video asli nggak bisa dimunculkan balik.
  */
 @Composable
 fun SdrToHdrScreen() {
@@ -64,7 +65,6 @@ fun SdrToHdrScreen() {
 
     var inputUriStr by rememberSaveable { mutableStateOf<String?>(null) }
     var thumbnail by remember { mutableStateOf<Bitmap?>(null) }
-    var fileName by remember { mutableStateOf("") }
 
     var capabilityChecked by remember { mutableStateOf(false) }
     var capabilityOk by remember { mutableStateOf(true) }
@@ -73,25 +73,12 @@ fun SdrToHdrScreen() {
     var alreadyHdr by remember { mutableStateOf(false) }
     var checkingSource by remember { mutableStateOf(false) }
 
-    // "tag" = cuma re-tag, warna asli nggak disentuh, instan. "transform" = beneran
-    // ubah warna lewat zscale (lebih "akurat" tapi warnanya ikut berubah & lebih lambat).
-    var mode by remember { mutableStateOf("tag") }
-    // Khusus mode "tag": kalau true primaries ikut ditag BT.2020 (lebih jreng di
-    // player gamut-aware). Kalau false, primaries dibiarin BT.709, cuma transfer-nya HLG.
-    var wideGamutPrimaries by remember { mutableStateOf(false) }
-    // < 1.0 = redam saturasi sebelum ditag, buat nglawan boost vivid yang HP paksain
-    // pas render HLG. 1.0 = nggak diapa-apain (instan, stream-copy murni).
-    var tagSaturation by remember { mutableStateOf(1.0f) }
-
     var target by remember { mutableStateOf("hlg") } // "hlg" atau "hdr10" — cuma ini pilihan user.
 
-    // Semua setting di bawah ini DIKUNCI, nggak ada kontrolnya lagi di UI. Nilainya
-    // hasil validasi manual langsung: HLG persis sama command yang udah dites dan
-    // terbukti bagus/nggak buram. HDR10 nurut konvensi sama (npl=203 reference
-    // white per BT.2408, karena HDR10/PQ beda konsep sama HLG — lihat riwayat
-    // diskusi SDR-to-HDR kalau mau tau alasannya).
+    // Settingan dikunci, hasil validasi manual: HLG persis command yang udah dites
+    // dan terbukti bagus/nggak buram. HDR10 nurut konvensi standar (npl=203
+    // reference white per BT.2408).
     val whiteNits = if (target == "hdr10") 203 else 1000
-    val boostStops = 0f
     val qualityCrf = 18
     val qualityPreset = "veryfast"
 
@@ -109,20 +96,11 @@ fun SdrToHdrScreen() {
     val inputUri = inputUriStr?.let { Uri.parse(it) }
     val animatedProgress by animateFloatAsState(targetValue = progressPct, label = "progress")
 
-    // Mode "tag" nggak butuh zscale/encoder HDR sama sekali (cuma bitstream filter +
-    // stream copy), jadi nggak perlu dicek. Dicek ulang tiap target berubah buat mode
-    // "transform", soalnya HLG pakai x264 dan HDR10 pakai x265 (beda encoder).
-    LaunchedEffect(target, mode) {
-        if (mode == "tag") {
-            capabilityOk = true
-            missingParts = emptyList()
-            capabilityChecked = true
-        } else {
-            val (ok, missing) = ffmpegService.checkHdrCapability(target)
-            capabilityOk = ok
-            missingParts = missing
-            capabilityChecked = true
-        }
+    LaunchedEffect(target) {
+        val (ok, missing) = ffmpegService.checkHdrCapability(target)
+        capabilityOk = ok
+        missingParts = missing
+        capabilityChecked = true
     }
 
     LaunchedEffect(isProcessing) {
@@ -139,9 +117,8 @@ fun SdrToHdrScreen() {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             inputUriStr = it.toString()
-            isSuccess = false; outputPath = null; errorLog = null
+            isSuccess = false; outputPath = null; errorLog = null; debugInfo = null
             thumbnail = null; alreadyHdr = false; statusMsg = ""
-            fileName = "video_${System.currentTimeMillis()}.mp4"
 
             scope.launch(Dispatchers.IO) {
                 try {
@@ -179,26 +156,15 @@ fun SdrToHdrScreen() {
                     errorLog = "Tidak bisa akses file sumber"; isProcessing = false; return@launch
                 }
 
-                val result = if (mode == "tag") {
-                    statusMsg = "Nempel tag HDR, warna asli nggak disentuh..."
-                    ffmpegService.tagOnlyHdr(
-                        inputPath = path,
-                        wideGamutPrimaries = wideGamutPrimaries,
-                        saturation = tagSaturation,
-                        onProgress = { pct -> progressPct = pct / 100f },
-                    )
-                } else {
-                    statusMsg = "Konversi warna BT.709 \u2192 BT.2020 + encode..."
-                    ffmpegService.convertSdrToHdr(
-                        inputPath = path,
-                        target = target,
-                        whiteNits = whiteNits,
-                        boostStops = boostStops,
-                        crf = qualityCrf,
-                        preset = qualityPreset,
-                        onProgress = { pct -> progressPct = pct / 100f },
-                    )
-                }
+                statusMsg = "Konversi warna BT.709 \u2192 BT.2020 + encode..."
+                val result = ffmpegService.convertSdrToHdr(
+                    inputPath = path,
+                    target = target,
+                    whiteNits = whiteNits,
+                    crf = qualityCrf,
+                    preset = qualityPreset,
+                    onProgress = { pct -> progressPct = pct / 100f },
+                )
 
                 debugInfo = result.debugInfo
 
@@ -222,7 +188,7 @@ fun SdrToHdrScreen() {
     }
 
     fun reset() {
-        inputUriStr = null; thumbnail = null; fileName = ""
+        inputUriStr = null; thumbnail = null
         isSuccess = false; outputPath = null; errorLog = null; debugInfo = null
         progressPct = 0f; statusMsg = ""; alreadyHdr = false
     }
@@ -233,15 +199,57 @@ fun SdrToHdrScreen() {
             .verticalScroll(rememberScrollState())
             .padding(bottom = 24.dp),
     ) {
-        // ── Preview ──────────────────────────────────────────────────────
+        // ── Preview sumber / progress ───────────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .background(Color(0xFF0A0A0F))
-                .clickable { if (!isProcessing) picker.launch("video/*") },
+                .clickable(enabled = !isProcessing && !isSuccess) { picker.launch("video/*") },
         ) {
-            if (thumbnail != null) {
+            if (isSuccess && outputPath != null) {
+                // ── Preview HASIL, langsung bisa diputer ──────────────────
+                var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+                var isPlaying by remember { mutableStateOf(true) }
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        VideoView(ctx).apply {
+                            setVideoPath(outputPath)
+                            setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                start()
+                            }
+                            videoViewRef = this
+                        }
+                    },
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable {
+                            val v = videoViewRef ?: return@clickable
+                            if (isPlaying) v.pause() else v.start()
+                            isPlaying = !isPlaying
+                        },
+                )
+                if (!isPlaying) {
+                    Box(
+                        modifier = Modifier.align(Alignment.Center).size(56.dp)
+                            .clip(CircleShape).background(Color(0x99000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Box(
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                        .clip(RoundedCornerShape(6.dp)).background(KColor.Accent)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(target.uppercase(), color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+            } else if (thumbnail != null) {
                 androidx.compose.foundation.Image(
                     bitmap = thumbnail!!.asImageBitmap(),
                     contentDescription = null,
@@ -348,10 +356,6 @@ fun SdrToHdrScreen() {
                                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        Text(
-                            "\u26a0\ufe0f Encode HEVC 10-bit itu lambat, jangan kunci layar",
-                            color = Color(0xFFFF9800), fontSize = 11.sp, textAlign = TextAlign.Center,
-                        )
                     }
                 }
             }
@@ -366,131 +370,31 @@ fun SdrToHdrScreen() {
             if (capabilityChecked && !capabilityOk) {
                 GlassCard(borderColor = Color(0xFFEF5350).copy(0.4f)) {
                     Text(
-                        "Build FFmpeg ini belum punya: ${missingParts.joinToString(", ")}",
+                        "Build FFmpeg belum punya: ${missingParts.joinToString(", ")}",
                         color = Color(0xFFEF5350), fontSize = 12.sp, fontWeight = FontWeight.Bold,
                     )
-                    Text(
-                        "SDR to HDR butuh keduanya buat konversi warna beneran, bukan tempel metadata.",
-                        color = KColor.Text2, fontSize = 11.sp,
-                    )
                 }
             }
 
-            AnimatedVisibility(visible = !isProcessing, enter = fadeIn(), exit = fadeOut()) {
+            AnimatedVisibility(visible = !isProcessing && !isSuccess, enter = fadeIn(), exit = fadeOut()) {
                 GlassCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Mode", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("tag" to "Tag Doang (cepat)", "transform" to "Ubah Warna (akurat)").forEach { (m, label) ->
-                                val selected = mode == m
-                                Box(
-                                    modifier = Modifier.weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
-                                        .clickable { mode = m }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        label, color = if (selected) Color.Black else Color.White.copy(0.7f),
-                                        fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("hlg" to "HLG", "hdr10" to "HDR10 (PQ)").forEach { (t, label) ->
+                            val selected = target == t
+                            Box(
+                                modifier = Modifier.weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
+                                    .clickable { target = t }
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    label, color = if (selected) Color.Black else Color.White.copy(0.7f),
+                                    fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                )
                             }
                         }
-                        Text(
-                            if (mode == "tag")
-                                "Video di-copy apa adanya, cuma label warnanya diganti jadi HLG. Warna 100% asli, instan, size sama persis. Ini yang bikin HP ngedetect HDR tanpa ngubah tampilan videonya."
-                            else
-                                "Piksel videonya beneran diproses ulang (BT.709\u2192BT.2020 + kurva HLG/PQ). Warna bisa berubah dari aslinya, lebih lambat, tapi \"HDR\"-nya lebih nyata secara teknis.",
-                            color = KColor.Text2, fontSize = 11.sp,
-                        )
-
-                        if (mode == "tag") {
-                            Divider(color = Color.White.copy(0.07f))
-                            Text("Gamut warna", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(false to "Kalem (BT.709)", true to "Resmi (BT.2020)").forEach { (wide, label) ->
-                                    val selected = wideGamutPrimaries == wide
-                                    Box(
-                                        modifier = Modifier.weight(1f)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(if (selected) KColor.Accent2 else Color.White.copy(0.05f))
-                                            .clickable { wideGamutPrimaries = wide }
-                                            .padding(vertical = 10.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            label, color = if (selected) Color.White else Color.White.copy(0.7f),
-                                            fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                "Terbukti dari eksperimen: pilihan ini TERNYATA nggak ngaruh ke saturasi. Yang bikin jreng itu tag HLG-nya sendiri, bukan primaries. Tinggal biarin \"Kalem\" aja.",
-                                color = KColor.Text2, fontSize = 11.sp,
-                            )
-
-                            Divider(color = Color.White.copy(0.07f))
-                            Text("Redam saturasi (lawan boost HP)", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(1.0f to "Off (instan)", 0.85f to "Dikit", 0.7f to "Lumayan", 0.55f to "Banyak").forEach { (sat, label) ->
-                                    val selected = tagSaturation == sat
-                                    Box(
-                                        modifier = Modifier.weight(1f)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(if (selected) KColor.Accent2 else Color.White.copy(0.05f))
-                                            .clickable { tagSaturation = sat }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            label, color = if (selected) Color.White else Color.White.copy(0.7f),
-                                            fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                if (tagSaturation == 1.0f)
-                                    "Off = stream-copy murni, instan, piksel nggak disentuh sama sekali."
-                                else
-                                    "Selain Off, ini re-encode ringan (nggak instan lagi, tapi masih jauh lebih cepat dari mode Ubah Warna). Saturasi diturunin dulu di file-nya, biar abis di-boost HP hasilnya pas, nggak kelewatan.",
-                                color = KColor.Text2, fontSize = 11.sp,
-                            )
-                        }
-                    }
-                }
-            }
-
-            AnimatedVisibility(visible = !isProcessing && mode == "transform", enter = fadeIn(), exit = fadeOut()) {
-                GlassCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Output HDR", color = KColor.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("hlg" to "HLG", "hdr10" to "HDR10 (PQ)").forEach { (mode, label) ->
-                                val selected = target == mode
-                                Box(
-                                    modifier = Modifier.weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (selected) KColor.Accent else Color.White.copy(0.05f))
-                                        .clickable { target = mode }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        label, color = if (selected) Color.Black else Color.White.copy(0.7f),
-                                        fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                }
-                            }
-                        }
-                        Text(
-                            if (target == "hlg") "HLG: kompatibel TV lama, nggak butuh metadata brightness. Settingan (npl 1000, CRF 18, preset cepat) udah dikunci ke kombinasi yang tervalidasi bagus."
-                            else "HDR10: butuh metadata mastering display, kontras lebih tinggi di layar yang support. Settingan dikunci ke konvensi standar (reference white 203 nits).",
-                            color = KColor.Text2, fontSize = 11.sp,
-                        )
                     }
                 }
             }
@@ -513,33 +417,24 @@ fun SdrToHdrScreen() {
             }
 
             AnimatedVisibility(visible = isSuccess && outputPath != null) {
-                GlassCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "\u2705 $statusMsg", color = Color(0xFF69F0AE), fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            KPrimaryButton(
-                                label = "Simpan ke Galeri", icon = Icons.Rounded.Save,
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    val p = outputPath ?: return@KPrimaryButton
-                                    scope.launch {
-                                        val saved = GalleryService.saveVideo(context, p)
-                                        statusMsg = if (saved) "Tersimpan di Movies/Kythera \u2705" else "Gagal simpan ke galeri"
-                                    }
-                                },
-                            )
-                            KPrimaryButton(
-                                label = "Reset", icon = Icons.Rounded.Refresh,
-                                modifier = Modifier.weight(1f),
-                                startColor = KColor.Border2, endColor = KColor.Border2,
-                                onClick = { reset() },
-                            )
-                        }
-                    }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    KPrimaryButton(
+                        label = "Simpan ke Galeri", icon = Icons.Rounded.Save,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            val p = outputPath ?: return@KPrimaryButton
+                            scope.launch {
+                                val saved = GalleryService.saveVideo(context, p)
+                                statusMsg = if (saved) "Tersimpan di Movies/Kythera \u2705" else "Gagal simpan ke galeri"
+                            }
+                        },
+                    )
+                    KPrimaryButton(
+                        label = "Reset", icon = Icons.Rounded.Refresh,
+                        modifier = Modifier.weight(1f),
+                        startColor = KColor.Border2, endColor = KColor.Border2,
+                        onClick = { reset() },
+                    )
                 }
             }
 
