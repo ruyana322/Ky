@@ -114,4 +114,6 @@ dependencies {
     implementation("com.arthenica:smart-exception-java:0.2.1")
     implementation(libs.coil.compose)
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation("junit:junit:4.13.2")
 }
