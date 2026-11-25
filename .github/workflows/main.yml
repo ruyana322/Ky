@@ -69,6 +69,10 @@ jobs:
           fi
           echo "FFmpeg AAR size: $(du -sh app/libs/ffmpeg-kit-full-gpl-6.0-2.LTS.aar)"
 
+      - name: Unit test mesin animasi (tidak memblokir build)
+        continue-on-error: true
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
       - name: Decode Keystore
         env:
           ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
