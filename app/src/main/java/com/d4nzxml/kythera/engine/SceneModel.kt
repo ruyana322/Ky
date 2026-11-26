@@ -64,12 +64,33 @@ data class Camera(val keyframes: Map<Prop, List<Keyframe>> = emptyMap()) {
     }
 }
 
+/** Jenis audio. Hanya label; semua diperlakukan sama saat mixing. */
+enum class AudioKind { NARRATION, MUSIC, SFX }
+
+/**
+ * Klip audio pada timeline scene.
+ * [src] path relatif di dalam folder project (harus di assets/audio/).
+ * [endMs] null berarti sampai akhir scene. [volume] 0..2. [loop] mengulang audio sampai [endMs].
+ */
+data class AudioClip(
+    val id: String,
+    val src: String,
+    val startMs: Long = 0L,
+    val endMs: Long? = null,
+    val volume: Float = 1f,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L,
+    val loop: Boolean = false,
+    val kind: AudioKind = AudioKind.MUSIC
+)
+
 data class SceneSpec(
     val id: String,
     val durationMs: Long,
     val backgroundColor: Int,
     val objects: List<SceneObject>,
-    val camera: Camera = Camera()
+    val camera: Camera = Camera(),
+    val audio: List<AudioClip> = emptyList()
 )
 
 object Keyframes {

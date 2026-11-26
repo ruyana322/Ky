@@ -18,6 +18,9 @@ object SceneJson {
     const val MAX_DURATION_MS = 3_600_000L
     const val MAX_OBJECTS = 500
     const val MAX_KEYFRAMES = 5_000
+    const val MAX_AUDIO = 50
+    const val MAX_PRESETS_PER_OBJECT = 100
+    private const val MAX_FADE_MS = 600_000L
     private const val MAX_TEXT = 200
 
     private val OBJECT_PROPS = setOf(Prop.X, Prop.Y, Prop.SCALE, Prop.ROTATION, Prop.OPACITY)
@@ -51,6 +54,7 @@ object SceneJson {
             .put("background", colorToString(scene.backgroundColor))
             .put("objects", objects)
             .put("camera", keyframesToJson(scene.camera.keyframes))
+            .put("audio", audioToJson(scene.audio))
         return JSONObject()
             .put("format", FORMAT)
             .put("version", VERSION)
@@ -89,7 +93,12 @@ object SceneJson {
         require(objects.map { it.id }.toSet().size == objects.size) { "ID objek harus unik" }
 
         val camera = Camera(parseKeyframes(s.optJSONArray("camera"), CAMERA_PROPS))
-        return SceneSpec(id, duration, background, objects, camera)
+        val keyframeTotal = objects.sumOf { o -> o.keyframes.values.sumOf { it.size } } +
+            camera.keyframes.values.sumOf { it.size }
+        require(keyframeTotal <= MAX_KEYFRAMES) { "Keyframe terlalu banyak setelah preset diterapkan (maks $MAX_KEYFRAMES)" }
+
+        val audio = parseAudio(s.optJSONArray("audio"))
+        return SceneSpec(id, duration, background, objects, camera, audio)
     }
 
     private fun parseObject(o: JSONObject): SceneObject {
@@ -107,7 +116,7 @@ object SceneJson {
         require(src.isEmpty() || AssetPaths.isSafeRelative(src)) { "Path aset tidak aman pada objek '$id'" }
         require(type != ObjectType.IMAGE || src.isNotEmpty()) { "Objek gambar '$id' belum punya 'src'" }
 
-        return SceneObject(
+        val base = SceneObject(
             id = id,
             type = type,
             x = num("x", 0.5f),
@@ -124,6 +133,81 @@ object SceneJson {
             src = src,
             keyframes = parseKeyframes(o.optJSONArray("keyframes"), OBJECT_PROPS)
         )
+        return applyPresets(base, o.optJSONArray("presets"))
+    }
+
+    /** Preset di JSON, mis. {"name":"FADE_IN","start":0,"duration":500}, diubah jadi keyframe. */
+    private fun applyPresets(base: SceneObject, arr: JSONArray?): SceneObject {
+        if (arr == null) return base
+        require(arr.length() <= MAX_PRESETS_PER_OBJECT) { "Preset terlalu banyak pada objek '${base.id}'" }
+        var result = base
+        for (i in 0 until arr.length()) {
+            val p = arr.optJSONObject(i)
+                ?: throw IllegalArgumentException("Preset #$i pada '${base.id}' tidak valid")
+            val preset = enumOf<Preset>(p.optString("name"), "preset")
+            val start = p.optLong("start", -1L)
+            require(start >= 0) { "Waktu mulai preset ${preset.name} pada '${base.id}' tidak valid" }
+            val duration = p.optLong("duration", -1L)
+            require(duration in 1..600_000L) { "Durasi preset ${preset.name} pada '${base.id}' tidak valid" }
+            val direction = if (p.has("direction")) enumOf<Direction>(p.optString("direction"), "direction") else Direction.LEFT
+            result = result.withPreset(preset, start, duration, direction)
+        }
+        return result
+    }
+
+    private fun parseAudio(arr: JSONArray?): List<AudioClip> {
+        if (arr == null) return emptyList()
+        require(arr.length() <= MAX_AUDIO) { "Audio terlalu banyak (maks $MAX_AUDIO)" }
+        val list = ArrayList<AudioClip>(arr.length())
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONObject(i) ?: throw IllegalArgumentException("Audio #$i tidak valid")
+            val src = a.optString("src").trim()
+            require(AssetPaths.isSafeRelative(src) && src.startsWith("assets/audio/")) {
+                "Path audio harus di assets/audio/ dan aman: '$src'"
+            }
+            val start = a.optLong("startMs", 0L)
+            require(start >= 0) { "startMs audio '$src' tidak valid" }
+            val end: Long? = if (a.has("endMs") && !a.isNull("endMs")) a.optLong("endMs", -1L) else null
+            require(end == null || end > start) { "endMs audio '$src' harus lebih besar dari startMs" }
+            val volume = a.optDouble("volume", 1.0)
+            require(volume.isFinite() && volume in 0.0..2.0) { "volume audio '$src' harus 0..2" }
+            val fadeIn = a.optLong("fadeInMs", 0L)
+            val fadeOut = a.optLong("fadeOutMs", 0L)
+            require(fadeIn in 0..MAX_FADE_MS && fadeOut in 0..MAX_FADE_MS) { "Fade audio '$src' tidak valid" }
+            val kind = if (a.has("kind")) enumOf<AudioKind>(a.optString("kind"), "kind") else AudioKind.MUSIC
+            list.add(
+                AudioClip(
+                    id = a.optString("id", "a${i + 1}").ifBlank { "a${i + 1}" },
+                    src = src,
+                    startMs = start,
+                    endMs = end,
+                    volume = volume.toFloat(),
+                    fadeInMs = fadeIn,
+                    fadeOutMs = fadeOut,
+                    loop = a.optBoolean("loop", false),
+                    kind = kind
+                )
+            )
+        }
+        return list
+    }
+
+    private fun audioToJson(clips: List<AudioClip>): JSONArray {
+        val arr = JSONArray()
+        clips.forEach { c ->
+            val o = JSONObject()
+                .put("id", c.id)
+                .put("src", c.src)
+                .put("startMs", c.startMs)
+                .put("volume", c.volume.toDouble())
+                .put("fadeInMs", c.fadeInMs)
+                .put("fadeOutMs", c.fadeOutMs)
+                .put("loop", c.loop)
+                .put("kind", c.kind.name)
+            if (c.endMs != null) o.put("endMs", c.endMs)
+            arr.put(o)
+        }
+        return arr
     }
 
     private fun parseKeyframes(arr: JSONArray?, allowed: Set<Prop>): Map<Prop, List<Keyframe>> {
