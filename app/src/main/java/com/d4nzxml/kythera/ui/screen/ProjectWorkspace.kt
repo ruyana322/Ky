@@ -14,11 +14,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,10 +40,13 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.d4nzxml.kythera.engine.Preset
+import com.d4nzxml.kythera.engine.AudioClip
 import com.d4nzxml.kythera.engine.ObjectType
+import com.d4nzxml.kythera.engine.Preset
 import com.d4nzxml.kythera.engine.SceneJson
 import com.d4nzxml.kythera.engine.SceneObject
 import com.d4nzxml.kythera.engine.SceneSpec
@@ -47,6 +54,8 @@ import com.d4nzxml.kythera.engine.withPreset
 import com.d4nzxml.kythera.project.AssetBitmapProvider
 import com.d4nzxml.kythera.project.AssetFile
 import com.d4nzxml.kythera.project.CanvasAspect
+import com.d4nzxml.kythera.project.JsSceneRunner
+import com.d4nzxml.kythera.project.JsScripts
 import com.d4nzxml.kythera.project.ProjectStore
 import com.d4nzxml.kythera.project.VideoExporter
 import com.d4nzxml.kythera.project.VideoProject
@@ -65,6 +74,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private const val MAX_SCRIPT_CHARS = 200_000
+
 @Composable
 fun ProjectWorkspace(
     project: VideoProject,
@@ -76,11 +87,13 @@ fun ProjectWorkspace(
     val clipboard = LocalClipboardManager.current
     val view = LocalView.current
 
-    BackHandler(onBack = onBack)
-
     var scene by remember(project.id) { mutableStateOf<SceneSpec?>(null) }
     var assets by remember(project.id) { mutableStateOf<List<AssetFile>>(emptyList()) }
     var status by remember(project.id) { mutableStateOf<Pair<Boolean, String>?>(null) }
+
+    var scriptText by remember(project.id) { mutableStateOf("") }
+    var ranText by remember(project.id) { mutableStateOf("") }
+    var running by remember { mutableStateOf(false) }
 
     var shortEdge by remember { mutableIntStateOf(720) }
     var fps by remember { mutableIntStateOf(30) }
@@ -98,15 +111,62 @@ fun ProjectWorkspace(
         onDispose { view.keepScreenOn = false }
     }
 
-    LaunchedEffect(project.id) {
+    /** Jalankan skrip JS, validasi hasilnya, lalu simpan skrip dan scene. */
+    suspend fun executeScript(text: String) {
+        running = true
         try {
-            val loaded = withContext(Dispatchers.IO) { store.loadScene(project) to store.assets(project) }
-            scene = loaded.first
-            assets = loaded.second
+            val json = JsSceneRunner(context).run(text)
+            val parsed = SceneJson.fromJson(json)
+            withContext(Dispatchers.IO) {
+                store.saveScript(project, text)
+                store.saveScene(project, parsed)
+            }
+            scene = parsed
+            ranText = text
+            status = true to "Skrip dijalankan: ${parsed.objects.size} objek, ${parsed.audio.size} audio"
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            status = false to "Gagal membaca scene: ${e.message}"
+            status = false to (e.message ?: "Skrip gagal dijalankan")
+        } finally {
+            running = false
         }
     }
+
+    LaunchedEffect(project.id) {
+        try {
+            val loaded = withContext(Dispatchers.IO) {
+                Triple(store.loadScript(project), store.hasScene(project), store.assets(project))
+            }
+            scriptText = loaded.first ?: ""
+            ranText = scriptText
+            assets = loaded.third
+            if (loaded.second || scriptText.isBlank()) {
+                scene = withContext(Dispatchers.IO) { store.loadScene(project) }
+            } else {
+                // Project hasil impor yang hanya berisi script.js: jalankan skrip untuk membuat scene.
+                executeScript(scriptText)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            status = false to "Gagal membuka project: ${e.message}"
+        }
+    }
+
+    fun leave() {
+        scope.launch {
+            if (exporting) exportJob?.cancel()
+            try {
+                withContext(Dispatchers.IO) { store.saveScript(project, scriptText) }
+            } catch (e: Exception) {
+                // Draf gagal disimpan: tetap keluar, jangan menahan pengguna.
+            }
+            onBack()
+        }
+    }
+
+    BackHandler { leave() }
 
     val assetPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -129,10 +189,33 @@ fun ProjectWorkspace(
         if (uri != null) {
             scope.launch {
                 status = try {
-                    withContext(Dispatchers.IO) { store.exportZip(project, context.contentResolver, uri) }
+                    withContext(Dispatchers.IO) {
+                        store.saveScript(project, scriptText)
+                        store.exportZip(project, context.contentResolver, uri)
+                    }
                     true to "Folder project diekspor sebagai zip"
                 } catch (e: Exception) {
                     false to "Ekspor folder gagal: ${e.message}"
+                }
+            }
+        }
+    }
+
+    fun addAssetToScene(asset: AssetFile, current: SceneSpec) {
+        scope.launch {
+            if (scriptText.isNotBlank()) {
+                // Skrip adalah sumber scene: tambahkan baris kode, lalu jalankan.
+                val newText = scriptText.trimEnd() + "\n\n" + snippetFor(asset) + "\n"
+                scriptText = newText
+                executeScript(newText)
+            } else {
+                val updated = addToSceneJson(current, asset)
+                status = try {
+                    withContext(Dispatchers.IO) { store.saveScene(project, updated) }
+                    scene = updated
+                    true to "${asset.fileName} ditambahkan ke scene"
+                } catch (e: Exception) {
+                    false to "Gagal menyimpan scene: ${e.message}"
                 }
             }
         }
@@ -146,7 +229,7 @@ fun ProjectWorkspace(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            KFormatTabButton("‹ Kembali", false) { if (!exporting) onBack() }
+            KFormatTabButton("‹ Kembali", false) { if (!exporting) leave() }
             Text(project.name, color = KColor.Text, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1)
             KBadge(project.aspect.label, KColor.Accent3)
         }
@@ -157,7 +240,7 @@ fun ProjectWorkspace(
 
         val current = scene
         if (current == null) {
-            GlassCard { Text("Memuat scene…", color = KColor.Text3, fontSize = 12.sp) }
+            GlassCard { Text("Memuat project…", color = KColor.Text3, fontSize = 12.sp) }
             return@Column
         }
 
@@ -171,52 +254,109 @@ fun ProjectWorkspace(
             )
         }
 
+        // ── Skrip JS ────────────────────────────────────────────
+        GlassCard {
+            KSectionHeader("Skrip JS", Icons.Rounded.Code)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Tulis atau tempel JS di sini, lalu Jalankan untuk melihat hasilnya di preview. " +
+                    "JS hanya mendeskripsikan scene (bukan menggambar), jadi preview dan hasil MP4 sama persis.",
+                color = KColor.Text3,
+                fontSize = 11.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = scriptText,
+                onValueChange = { if (it.length <= MAX_SCRIPT_CHARS) scriptText = it },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 8,
+                maxLines = 16,
+                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = KColor.Text),
+                placeholder = { Text("Taruh JS di sini…", color = KColor.Text3, fontSize = 12.sp) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = KColor.Accent,
+                    unfocusedBorderColor = KColor.Border2,
+                    focusedTextColor = KColor.Text,
+                    unfocusedTextColor = KColor.Text,
+                    cursorColor = KColor.Accent
+                )
+            )
+            if (scriptText != ranText) {
+                Spacer(Modifier.height(6.dp))
+                Text("Skrip diubah. Tekan Jalankan untuk memperbarui preview.", color = KColor.Accent2, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            KPrimaryButton(
+                label = if (running) "Menjalankan…" else "Jalankan & pratinjau",
+                icon = Icons.Rounded.PlayArrow,
+                enabled = !running && !exporting && scriptText.isNotBlank(),
+                onClick = { scope.launch { executeScript(scriptText) } },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KFormatTabButton("Salin JS", false) {
+                    clipboard.setText(AnnotatedString(scriptText))
+                    status = true to "Skrip disalin ke clipboard"
+                }
+                KFormatTabButton("Tempel JS", false) {
+                    val pasted = clipboard.getText()?.text.orEmpty()
+                    if (pasted.isBlank()) {
+                        status = false to "Clipboard kosong"
+                    } else if (pasted.length > MAX_SCRIPT_CHARS) {
+                        status = false to "Isi clipboard terlalu panjang (maks $MAX_SCRIPT_CHARS karakter)"
+                    } else {
+                        scriptText = pasted
+                        status = true to "Skrip ditempel. Tekan Jalankan."
+                    }
+                }
+                KFormatTabButton("Panduan AI", false) {
+                    clipboard.setText(AnnotatedString(JsScripts.AI_GUIDE))
+                    status = true to "Panduan disalin. Tempel ke AI, tulis ide animasimu, lalu tempel jawabannya ke sini."
+                }
+            }
+        }
+
+        // ── Info scene ──────────────────────────────────────────
         GlassCard {
             KSectionHeader("Scene", Icons.Rounded.Info, KColor.Accent3)
             Spacer(Modifier.height(8.dp))
             KInfoRow("Durasi", "${current.durationMs / 1000.0} detik")
             KInfoRow("Objek", current.objects.size.toString())
+            KInfoRow("Audio", current.audio.size.toString())
             KInfoRow("Aset", assets.size.toString())
-            Spacer(Modifier.height(10.dp))
-            KFieldLabel("JSON scene (edit di editor teks, lalu tempel kembali)")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KFormatTabButton("Salin JSON", false) {
-                    clipboard.setText(AnnotatedString(SceneJson.toJson(current)))
-                    status = true to "JSON scene disalin ke clipboard"
-                }
-                KFormatTabButton("Tempel JSON", false) {
-                    val text = clipboard.getText()?.text.orEmpty()
-                    scope.launch {
-                        status = try {
-                            val parsed = SceneJson.fromJson(text)
-                            withContext(Dispatchers.IO) { store.saveScene(project, parsed) }
-                            scene = parsed
-                            true to "Scene diperbarui dari clipboard (${parsed.objects.size} objek)"
-                        } catch (e: Exception) {
-                            false to "JSON ditolak: ${e.message}"
-                        }
-                    }
-                }
+            Spacer(Modifier.height(8.dp))
+            KFormatTabButton("Salin JSON scene", false) {
+                clipboard.setText(AnnotatedString(SceneJson.toJson(current)))
+                status = true to "JSON scene disalin ke clipboard"
             }
         }
 
         // ── Aset ────────────────────────────────────────────────
         GlassCard {
-            KSectionHeader("Aset (ikon dan gambar)", Icons.Rounded.Image)
+            KSectionHeader("Aset (ikon, gambar, audio)", Icons.Rounded.Image)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KFormatTabButton("Tambah ikon", false) {
                     pendingCategory = "icons"
                     assetPicker.launch(arrayOf("image/*"))
                 }
-                KFormatTabButton("Tambah gambar", false) {
+                KFormatTabButton("Gambar/banner", false) {
                     pendingCategory = "images"
                     assetPicker.launch(arrayOf("image/*"))
+                }
+                KFormatTabButton("Audio", false) {
+                    pendingCategory = "audio"
+                    assetPicker.launch(arrayOf("audio/*"))
                 }
             }
             Spacer(Modifier.height(8.dp))
             if (assets.isEmpty()) {
-                Text("Belum ada aset. PNG, JPG, atau WEBP.", color = KColor.Text3, fontSize = 11.sp)
+                Text(
+                    "Belum ada aset. Gambar: PNG/JPG/WEBP. Audio: MP3/M4A/WAV/OGG/AAC (narasi, musik, efek).",
+                    color = KColor.Text3,
+                    fontSize = 11.sp
+                )
             } else {
                 assets.forEach { asset ->
                     Row(
@@ -228,19 +368,16 @@ fun ProjectWorkspace(
                             Text(asset.relativePath, color = KColor.Text3, fontSize = 10.sp, maxLines = 1)
                         }
                         KFormatTabButton("Ke scene", false) {
-                            val updated = addImageToScene(current, asset)
-                            scope.launch {
-                                status = try {
-                                    withContext(Dispatchers.IO) { store.saveScene(project, updated) }
-                                    scene = updated
-                                    true to "${asset.fileName} ditambahkan ke scene"
-                                } catch (e: Exception) {
-                                    false to "Gagal menyimpan scene: ${e.message}"
-                                }
-                            }
+                            if (!running && !exporting) addAssetToScene(asset, current)
                         }
                     }
                 }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Di skrip, pakai path di atas, mis. s.image(\"assets/images/a.png\", { w: 0.3 }) atau s.audio(\"assets/audio/a.mp3\", { volume: 0.6 }).",
+                    color = KColor.Text3,
+                    fontSize = 10.sp
+                )
             }
         }
 
@@ -262,12 +399,13 @@ fun ProjectWorkspace(
             }
             Spacer(Modifier.height(12.dp))
             val (w, h) = outputSize(project.aspect, shortEdge)
-            Text("Hasil: ${w}x$h, H.264, $fps fps", color = KColor.Text3, fontSize = 11.sp)
+            val audioNote = if (current.audio.isEmpty()) "tanpa audio" else "${current.audio.size} audio dicampur"
+            Text("Hasil: ${w}x$h, H.264, $fps fps, $audioNote", color = KColor.Text3, fontSize = 11.sp)
             Spacer(Modifier.height(8.dp))
             KPrimaryButton(
                 label = if (exporting) "Sedang mengekspor…" else "Ekspor MP4",
                 icon = Icons.Rounded.Movie,
-                enabled = !exporting,
+                enabled = !exporting && !running,
                 onClick = {
                     exportJob = scope.launch {
                         exporting = true
@@ -275,8 +413,15 @@ fun ProjectWorkspace(
                         progressText = "Menyiapkan…"
                         status = null
                         try {
+                            // Pastikan scene yang diekspor = skrip terbaru.
+                            if (scriptText.isNotBlank() && scriptText != ranText) {
+                                progressText = "Menjalankan skrip…"
+                                executeScript(scriptText)
+                                if (scriptText != ranText) return@launch
+                            }
+                            val sceneNow = scene ?: return@launch
                             val result = VideoExporter(context).export(
-                                project, current, VideoExporter.Options(w, h, fps)
+                                project, sceneNow, VideoExporter.Options(w, h, fps)
                             ) { p, label ->
                                 progress = p
                                 progressText = label
@@ -319,9 +464,16 @@ fun ProjectWorkspace(
             KSectionHeader("Folder project", Icons.Rounded.Folder)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Isi folder:\n  project.json\n  scene.json\n  assets/icons/\n  assets/images/",
+                "Isi folder:\n  project.json\n  script.js\n  scene.json\n  assets/icons/\n  assets/images/\n  assets/audio/",
                 color = KColor.Text3,
                 fontSize = 11.sp
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Zip dari AI atau dari HP lain bisa diimpor lewat daftar project. " +
+                    "Cukup ada script.js (project.json boleh tidak ada) plus folder assets.",
+                color = KColor.Text3,
+                fontSize = 10.sp
             )
             Spacer(Modifier.height(10.dp))
             KFormatTabButton("Ekspor folder (.zip)", false) {
@@ -339,8 +491,23 @@ private fun outputSize(aspect: CanvasAspect, shortEdge: Int): Pair<Int, Int> = w
     CanvasAspect.SQUARE -> shortEdge to shortEdge
 }
 
-/** Tambah objek IMAGE di tengah canvas dengan animasi zoom-in singkat. ID dijamin unik. */
-private fun addImageToScene(scene: SceneSpec, asset: AssetFile): SceneSpec {
+/** Baris kode yang ditambahkan ke skrip untuk sebuah aset. Nama file sudah disanitasi (tanpa tanda kutip). */
+private fun snippetFor(asset: AssetFile): String =
+    if (asset.category == "audio") {
+        "scene.audio(\"${asset.relativePath}\", { start: 0, volume: 1, kind: \"music\" });"
+    } else {
+        "scene.image(\"${asset.relativePath}\", { x: 0.5, y: 0.5, w: 0.25 }).zoomIn(0, 0.6);"
+    }
+
+/** Untuk project tanpa skrip: tambahkan aset langsung ke scene (JSON). ID dijamin unik. */
+private fun addToSceneJson(scene: SceneSpec, asset: AssetFile): SceneSpec {
+    if (asset.category == "audio") {
+        var n = scene.audio.size + 1
+        val existing = scene.audio.map { it.id }.toSet()
+        while ("a$n" in existing) n++
+        return scene.copy(audio = scene.audio + AudioClip(id = "a$n", src = asset.relativePath))
+    }
+
     var n = scene.objects.count { it.type == ObjectType.IMAGE } + 1
     val existing = scene.objects.map { it.id }.toSet()
     while ("img_$n" in existing) n++
