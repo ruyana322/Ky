@@ -6,6 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.d4nzxml.kythera.engine.AssetPaths
+import com.d4nzxml.kythera.engine.AudioClip
 import com.d4nzxml.kythera.engine.SceneRenderer
 import com.d4nzxml.kythera.engine.SceneSpec
 import com.d4nzxml.kythera.service.FfmpegResult
@@ -43,6 +45,12 @@ class VideoExporter(private val context: Context) {
             return@withContext fail("Ukuran video harus genap dan positif")
         }
         if (options.fps !in 1..60) return@withContext fail("FPS harus 1 sampai 60")
+
+        val audio = try {
+            resolveAudio(project, scene)
+        } catch (e: IllegalArgumentException) {
+            return@withContext fail(e.message ?: "Audio tidak valid")
+        }
 
         val frames = ((scene.durationMs * options.fps + 999) / 1000).toInt().coerceAtLeast(1)
         if (frames > MAX_FRAMES) return@withContext fail("Terlalu panjang: maksimal $MAX_FRAMES frame")
@@ -88,10 +96,7 @@ class VideoExporter(private val context: Context) {
             bitmap = null
 
             // Tahap 2: encode
-            val cmd = "-y -framerate ${options.fps} " +
-                "-i \"${frameDir.absolutePath}/f_%06d.png\" " +
-                "-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -movflags +faststart " +
-                "\"${outFile.absolutePath}\""
+            val cmd = buildCommand(frameDir, outFile, options, scene, audio)
 
             val (ok, error) = runFfmpeg(cmd, scene.durationMs) { p ->
                 onProgress(
@@ -148,6 +153,70 @@ class VideoExporter(private val context: Context) {
         )
         cont.invokeOnCancellation { FFmpegKit.cancel(session.sessionId) }
     }
+
+    /** Cari file audio tiap klip di dalam folder project. Gagal jika ada yang hilang agar tidak diam-diam tanpa suara. */
+    private fun resolveAudio(project: VideoProject, scene: SceneSpec): List<Pair<AudioClip, File>> =
+        scene.audio.map { clip ->
+            val file = AssetPaths.resolveInside(project.dir, clip.src)
+                ?: throw IllegalArgumentException("Path audio tidak valid: ${clip.src}")
+            require(file.isFile) { "File audio tidak ditemukan: ${clip.src}" }
+            clip to file
+        }
+
+    /**
+     * Perintah ffmpeg: urutan PNG + (opsional) mixing semua klip audio.
+     * Tiap klip: dipotong sesuai durasi, diatur volume, fade, lalu digeser (adelay) ke waktu mulainya.
+     */
+    private fun buildCommand(
+        frameDir: File,
+        outFile: File,
+        options: Options,
+        scene: SceneSpec,
+        audio: List<Pair<AudioClip, File>>
+    ): String {
+        val sb = StringBuilder()
+        sb.append("-y -framerate ${options.fps} -i \"${frameDir.absolutePath}/f_%06d.png\" ")
+        audio.forEach { (clip, file) ->
+            if (clip.loop) sb.append("-stream_loop -1 ")
+            sb.append("-i \"${file.absolutePath}\" ")
+        }
+
+        if (audio.isNotEmpty()) {
+            val chains = ArrayList<String>()
+            audio.forEachIndexed { i, (clip, _) ->
+                val endMs = (clip.endMs ?: scene.durationMs).coerceAtMost(scene.durationMs)
+                val lenMs = (endMs - clip.startMs).coerceAtLeast(10L)
+                val parts = ArrayList<String>()
+                parts.add("aformat=sample_rates=44100:channel_layouts=stereo")
+                parts.add("atrim=duration=${seconds(lenMs)}")
+                parts.add("asetpts=PTS-STARTPTS")
+                parts.add("volume=${String.format(Locale.US, "%.3f", clip.volume.toDouble())}")
+                if (clip.fadeInMs > 0) {
+                    parts.add("afade=t=in:st=0:d=${seconds(clip.fadeInMs)}")
+                }
+                if (clip.fadeOutMs > 0) {
+                    parts.add("afade=t=out:st=${seconds((lenMs - clip.fadeOutMs).coerceAtLeast(0L))}:d=${seconds(clip.fadeOutMs)}")
+                }
+                parts.add("adelay=${clip.startMs}:all=1")
+                chains.add("[${i + 1}:a]${parts.joinToString(",")}[a$i]")
+            }
+            val labels = audio.indices.joinToString("") { "[a$it]" }
+            val mix = if (audio.size == 1) {
+                "${labels}alimiter=limit=0.95[aout]"
+            } else {
+                "${labels}amix=inputs=${audio.size}:duration=longest:normalize=0,alimiter=limit=0.95[aout]"
+            }
+            sb.append("-filter_complex \"${(chains + mix).joinToString(";")}\" -map 0:v -map \"[aout]\" ")
+        }
+
+        sb.append("-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p ")
+        if (audio.isNotEmpty()) sb.append("-c:a aac -b:a 192k ")
+        sb.append("-movflags +faststart -t ${seconds(scene.durationMs)} \"${outFile.absolutePath}\"")
+        return sb.toString()
+    }
+
+    /** Milidetik ke detik dengan titik desimal tetap (tidak terpengaruh locale). */
+    private fun seconds(ms: Long): String = String.format(Locale.US, "%.3f", ms / 1000.0)
 
     private fun fail(message: String) = FfmpegResult(success = false, errorMessage = message)
 

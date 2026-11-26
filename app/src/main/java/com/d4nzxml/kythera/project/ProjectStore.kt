@@ -77,6 +77,7 @@ class ProjectStore(context: Context) {
             ASSET_CATEGORIES.forEach { File(dir, "assets/$it").mkdirs() }
             writeMeta(dir, clean, aspect)
             File(dir, SCENE_FILE).writeText(SceneJson.toJson(DemoScene.create()), Charsets.UTF_8)
+            File(dir, SCRIPT_FILE).writeText(JsScripts.STARTER, Charsets.UTF_8)
         } catch (e: Exception) {
             dir.deleteRecursively()
             throw e
@@ -111,10 +112,30 @@ class ProjectStore(context: Context) {
 
     // ─── Aset ────────────────────────────────────────────────────────────────
 
+    fun hasScene(project: VideoProject): Boolean = File(project.dir, SCENE_FILE).isFile
+
+    fun loadScript(project: VideoProject): String? {
+        val file = File(project.dir, SCRIPT_FILE)
+        return if (file.isFile) file.readText(Charsets.UTF_8) else null
+    }
+
+    /** Simpan skrip JS. Skrip kosong tidak membuat file baru (project hanya-JSON tetap bersih). */
+    fun saveScript(project: VideoProject, text: String) {
+        require(text.length <= MAX_SCRIPT_CHARS) { "Skrip terlalu panjang (maks $MAX_SCRIPT_CHARS karakter)" }
+        val target = File(project.dir, SCRIPT_FILE)
+        if (text.isBlank() && !target.exists()) return
+        val tmp = File(project.dir, "$SCRIPT_FILE.tmp")
+        tmp.writeText(text, Charsets.UTF_8)
+        if (!tmp.renameTo(target)) {
+            target.writeText(text, Charsets.UTF_8)
+            tmp.delete()
+        }
+    }
+
     fun assets(project: VideoProject): List<AssetFile> =
         ASSET_CATEGORIES.flatMap { category ->
             (File(project.dir, "assets/$category").listFiles() ?: emptyArray())
-                .filter { it.isFile && it.extension.lowercase() in IMAGE_EXT }
+                .filter { it.isFile && it.extension.lowercase() in extensionsFor(category) }
                 .sortedBy { it.name.lowercase() }
                 .map { AssetFile(category, it.name) }
         }
@@ -124,7 +145,11 @@ class ProjectStore(context: Context) {
         require(category in ASSET_CATEGORIES) { "Kategori aset tidak valid" }
         val displayName = queryDisplayName(resolver, uri) ?: "aset"
         val ext = displayName.substringAfterLast('.', "").lowercase()
-        require(ext in IMAGE_EXT) { "Format tidak didukung. Pakai PNG, JPG, atau WEBP" }
+        val isAudio = category == "audio"
+        require(ext in extensionsFor(category)) {
+            if (isAudio) "Format audio tidak didukung. Pakai MP3, M4A, WAV, OGG, atau AAC"
+            else "Format tidak didukung. Pakai PNG, JPG, atau WEBP"
+        }
 
         val base = AssetPaths.sanitizeFileName(displayName.substringBeforeLast('.', displayName)).ifEmpty { "aset" }
         val dir = File(project.dir, "assets/$category").apply { mkdirs() }
@@ -136,7 +161,8 @@ class ProjectStore(context: Context) {
         }
 
         val input = resolver.openInputStream(uri) ?: throw IOException("Tidak bisa membuka file")
-        input.use { copyLimited(it, target, MAX_ASSET_BYTES) }
+        input.use { copyLimited(it, target, if (isAudio) MAX_AUDIO_BYTES else MAX_ASSET_BYTES) }
+        if (isAudio) return "assets/$category/${target.name}"
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(target.path, bounds)
@@ -185,7 +211,9 @@ class ProjectStore(context: Context) {
                     if (entry.isDirectory) continue
                     val name = entry.name.replace('\\', '/')
                     require(AssetPaths.isSafeRelative(name)) { "Zip berisi path tidak aman: $name" }
-                    if (name.substringAfterLast('.', "").lowercase() !in IMPORT_EXT) continue
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    if (ext !in IMPORT_EXT) continue
+                    val fileLimit = if (ext in AUDIO_EXT) MAX_AUDIO_BYTES else MAX_ASSET_BYTES
 
                     entries++
                     require(entries <= MAX_ZIP_ENTRIES) { "Terlalu banyak file di dalam zip" }
@@ -202,7 +230,7 @@ class ProjectStore(context: Context) {
                             if (n < 0) break
                             fileBytes += n
                             total += n
-                            require(fileBytes <= MAX_ASSET_BYTES) { "File '$name' terlalu besar" }
+                            require(fileBytes <= fileLimit) { "File '$name' terlalu besar" }
                             require(total <= MAX_IMPORT_TOTAL_BYTES) { "Isi zip terlalu besar" }
                             out.write(buf, 0, n)
                         }
@@ -211,17 +239,24 @@ class ProjectStore(context: Context) {
             }
 
             val base: File = when {
-                File(staging, META_FILE).isFile -> staging
-                else -> staging.listFiles()?.singleOrNull { it.isDirectory && File(it, META_FILE).isFile }
-            } ?: throw IllegalArgumentException("Bukan project JS Video: project.json tidak ditemukan")
+                isProjectRoot(staging) -> staging
+                else -> staging.listFiles()?.singleOrNull { it.isDirectory && isProjectRoot(it) }
+            } ?: throw IllegalArgumentException("Bukan project JS Video: tidak ada project.json, script.js, atau scene.json")
 
-            val (name, aspect) = parseMeta(File(base, META_FILE).readText(Charsets.UTF_8))
+            val metaFile = File(base, META_FILE)
+            val (name, aspect) = if (metaFile.isFile) {
+                parseMeta(metaFile.readText(Charsets.UTF_8))
+            } else {
+                val fromZip = (queryDisplayName(resolver, src) ?: "").substringBeforeLast('.').trim().take(MAX_NAME)
+                fromZip.ifEmpty { "Project impor" } to CanvasAspect.PORTRAIT
+            }
+            if (!metaFile.isFile) writeMeta(base, name, aspect)
+
             val sceneFile = File(base, SCENE_FILE)
             if (sceneFile.isFile) {
                 SceneJson.fromJson(sceneFile.readText(Charsets.UTF_8)) // validasi saja
-            } else {
-                sceneFile.writeText(SceneJson.toJson(DemoScene.create()), Charsets.UTF_8)
             }
+            // Jika hanya ada script.js, scene dibuat saat project dibuka (skrip dijalankan).
             ASSET_CATEGORIES.forEach { File(base, "assets/$it").mkdirs() }
 
             val finalDir = File(root, "p_${UUID.randomUUID()}")
@@ -233,6 +268,12 @@ class ProjectStore(context: Context) {
     }
 
     // ─── Internal ────────────────────────────────────────────────────────────
+
+    private fun isProjectRoot(dir: File): Boolean =
+        File(dir, META_FILE).isFile || File(dir, SCRIPT_FILE).isFile || File(dir, SCENE_FILE).isFile
+
+    private fun extensionsFor(category: String): Set<String> =
+        if (category == "audio") AUDIO_EXT else IMAGE_EXT
 
     private fun readProject(dir: File): VideoProject {
         val (name, aspect) = parseMeta(File(dir, META_FILE).readText(Charsets.UTF_8))
@@ -290,12 +331,16 @@ class ProjectStore(context: Context) {
     companion object {
         const val META_FILE = "project.json"
         const val SCENE_FILE = "scene.json"
+        const val SCRIPT_FILE = "script.js"
         const val FOLDER_FORMAT = "jsvideostudio.folder"
         const val MAX_NAME = 60
-        val ASSET_CATEGORIES = listOf("icons", "images")
+        val ASSET_CATEGORIES = listOf("icons", "images", "audio")
         private val IMAGE_EXT = setOf("png", "jpg", "jpeg", "webp")
-        private val IMPORT_EXT = IMAGE_EXT + "json"
+        private val AUDIO_EXT = setOf("mp3", "m4a", "wav", "ogg", "aac")
+        private val IMPORT_EXT = IMAGE_EXT + AUDIO_EXT + setOf("json", "js")
         private const val MAX_ASSET_BYTES = 20L * 1024 * 1024
+        private const val MAX_AUDIO_BYTES = 60L * 1024 * 1024
+        private const val MAX_SCRIPT_CHARS = 200_000
         private const val MAX_IMPORT_TOTAL_BYTES = 300L * 1024 * 1024
         private const val MAX_ZIP_ENTRIES = 1000
         private const val MAX_IMAGE_EDGE = 8192
