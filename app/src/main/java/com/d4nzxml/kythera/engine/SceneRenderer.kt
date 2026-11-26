@@ -21,9 +21,13 @@ class SceneRenderer {
         typeface = Typeface.DEFAULT_BOLD
     }
     private val rect = RectF()
+    private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     private var cachedScene: SceneSpec? = null
     private var sortedObjects: List<SceneObject> = emptyList()
+
+    /** Sumber gambar untuk objek IMAGE. Jika null atau gambar tidak ada, digambar kotak penanda merah. */
+    var images: ImageSource? = null
 
     fun draw(canvas: Canvas, width: Int, height: Int, scene: SceneSpec, timeMs: Long) {
         if (width <= 0 || height <= 0) return
@@ -93,6 +97,30 @@ class SceneRenderer {
                     textPaint.textSize = obj.textSize * w
                     val baseline = -(textPaint.ascent() + textPaint.descent()) / 2f
                     canvas.drawText(obj.text, 0f, baseline, textPaint)
+                }
+            }
+            ObjectType.IMAGE -> {
+                val bmp = images?.bitmap(obj.src)
+                val boxW = obj.width * w
+                val boxH = obj.height * w
+                if (bmp != null && !bmp.isRecycled && bmp.width > 0 && bmp.height > 0 && boxW > 0f && boxH > 0f) {
+                    // Muat di dalam kotak width x height, rasio asli gambar dipertahankan.
+                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
+                    var dw = boxW
+                    var dh = boxW / ratio
+                    if (dh > boxH) {
+                        dh = boxH
+                        dw = boxH * ratio
+                    }
+                    rect.set(-dw / 2f, -dh / 2f, dw / 2f, dh / 2f)
+                    imagePaint.alpha = alpha
+                    canvas.drawBitmap(bmp, null, rect, imagePaint)
+                } else if (boxW > 0f && boxH > 0f) {
+                    // Aset hilang/rusak: kotak merah transparan sebagai penanda.
+                    fillPaint.color = 0xFFFF5555.toInt()
+                    fillPaint.alpha = (alpha * 0.35f).roundToInt()
+                    rect.set(-boxW / 2f, -boxH / 2f, boxW / 2f, boxH / 2f)
+                    canvas.drawRect(rect, fillPaint)
                 }
             }
         }

@@ -41,6 +41,7 @@ object SceneJson {
                     .put("color", colorToString(o.color))
                     .put("text", o.text)
                     .put("textSize", o.textSize.toDouble())
+                    .put("src", o.src)
                     .put("keyframes", keyframesToJson(o.keyframes))
             )
         }
@@ -102,6 +103,10 @@ object SceneJson {
             return v.toFloat()
         }
 
+        val src = o.optString("src", "").trim()
+        require(src.isEmpty() || AssetPaths.isSafeRelative(src)) { "Path aset tidak aman pada objek '$id'" }
+        require(type != ObjectType.IMAGE || src.isNotEmpty()) { "Objek gambar '$id' belum punya 'src'" }
+
         return SceneObject(
             id = id,
             type = type,
@@ -116,6 +121,7 @@ object SceneJson {
             color = parseColor(o.optString("color", "#FFFFFFFF")),
             text = o.optString("text", "").take(MAX_TEXT),
             textSize = num("textSize", 0.08f).coerceAtLeast(0f),
+            src = src,
             keyframes = parseKeyframes(o.optJSONArray("keyframes"), OBJECT_PROPS)
         )
     }

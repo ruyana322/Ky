@@ -6,7 +6,7 @@ package com.d4nzxml.kythera.engine
  */
 enum class Prop { X, Y, SCALE, ROTATION, OPACITY, ZOOM, PAN_X, PAN_Y }
 
-enum class ObjectType { RECT, CIRCLE, TEXT }
+enum class ObjectType { RECT, CIRCLE, TEXT, IMAGE }
 
 /**
  * Satu titik keyframe. [easing] berlaku untuk segmen yang KELUAR dari keyframe ini menuju keyframe berikutnya.
@@ -38,6 +38,8 @@ data class SceneObject(
     val color: Int = 0xFFFFFFFF.toInt(),
     val text: String = "",
     val textSize: Float = 0.08f,
+    /** Path relatif aset (mis. assets/icons/bintang.png) untuk objek IMAGE. */
+    val src: String = "",
     val keyframes: Map<Prop, List<Keyframe>> = emptyMap()
 ) {
     fun valueAt(prop: Prop, timeMs: Long): Float {
